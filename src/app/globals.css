@@ -1,68 +1,108 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 /*
  * Plaidware design tokens — dark-first with a full light theme (PRD §6 Q5).
- * Brand: slate ground, purple primary, coral signal.
- * Components consume only these tokens; raw hex stays in this file.
+ * shadcn/ui token names carry the system; brand extras (coral, success,
+ * warning, heading) extend it. Components consume tokens only.
  */
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   /* light theme */
+  --radius: 0.625rem;
   --background: #f6f6fa;
-  --surface: #ffffff;
-  --surface-2: #eef0f8;
-  --border: #d8dcea;
   --foreground: #333952;
-  --muted: #667090;
-  --heading: #14182b;
+  --card: #ffffff;
+  --card-foreground: #333952;
+  --popover: #ffffff;
+  --popover-foreground: #333952;
   --primary: #5b4ee0;
-  --primary-strong: #4638c2;
   --primary-foreground: #ffffff;
+  --secondary: #eef0f8;
+  --secondary-foreground: #333952;
+  --muted: #eef0f8;
+  --muted-foreground: #667090;
+  --accent: #e9ebf6;
+  --accent-foreground: #14182b;
+  --destructive: #be2347;
+  --destructive-foreground: #ffffff;
+  --border: #d8dcea;
+  --input: #d8dcea;
+  --ring: #5b4ee0;
+  /* brand extras */
+  --heading: #14182b;
   --coral: #cc4520;
   --success: #067a52;
   --warning: #925e06;
-  --danger: #be2347;
 }
 
 .dark {
   --background: #060913;
-  --surface: #0d1326;
-  --surface-2: #121a32;
-  --border: #232b47;
   --foreground: #d7dcee;
-  --muted: #8b93b2;
-  --heading: #f2f4fb;
+  --card: #0d1326;
+  --card-foreground: #d7dcee;
+  --popover: #0d1326;
+  --popover-foreground: #d7dcee;
   --primary: #7a6cf0;
-  --primary-strong: #948aff;
   --primary-foreground: #0a0e1d;
+  --secondary: #121a32;
+  --secondary-foreground: #d7dcee;
+  --muted: #121a32;
+  --muted-foreground: #8b93b2;
+  --accent: #1a2138;
+  --accent-foreground: #f2f4fb;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --border: #232b47;
+  --input: #232b47;
+  --ring: #7a6cf0;
+  --heading: #f2f4fb;
   --coral: #f0663f;
   --success: #34d399;
   --warning: #fbbf24;
-  --danger: #fb7185;
 }
 
 @theme inline {
   --color-background: var(--background);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-border: var(--border);
   --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-heading: var(--heading);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
-  --color-primary-strong: var(--primary-strong);
   --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-heading: var(--heading);
   --color-coral: var(--coral);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --color-danger: var(--danger);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+  }
 }

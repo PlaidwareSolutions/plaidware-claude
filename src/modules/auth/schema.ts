@@ -94,6 +94,7 @@ export const organization = pgTable(
     logo: text("logo"),
     createdAt: timestamp("created_at").notNull(),
     metadata: text("metadata"),
+    status: text("status").default("active"),
   },
   (table) => [uniqueIndex("organization_slug_uidx").on(table.slug)],
 );

@@ -61,6 +61,14 @@ export const auth = betterAuth({
       ac,
       roles: orgRoles,
       creatorRole: "owner",
+      schema: {
+        organization: {
+          additionalFields: {
+            // 'active' | 'suspended' | 'inactive' — tenant lifecycle (PRD §4.2)
+            status: { type: "string", defaultValue: "active", input: false },
+          },
+        },
+      },
       // Invite emails get their real template in M2's tenancy milestone.
       sendInvitationEmail: async (data) => {
         const url = `${env.APP_BASE_URL}/invite/${data.id}`;

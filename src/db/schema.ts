@@ -3,3 +3,5 @@
  * Every module re-exports its tables here.
  */
 export * from "../modules/auth/schema";
+export * from "../modules/catalog/schema";
+export * from "../modules/contact/schema";

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Providers } from "@/components/providers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,19 +14,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Plaidware Hub",
+  metadataBase: new URL(process.env.APP_BASE_URL ?? "http://localhost:3000"),
+  title: {
+    default: "Plaidware Hub",
+    template: "%s · Plaidware",
+  },
   description:
     "One control plane for every Plaidware product — onboarding, provisioning, access, monitoring, billing, and automations.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  // Dark-first per PRD §6 Q5; next-themes takes over the class in M2.
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
