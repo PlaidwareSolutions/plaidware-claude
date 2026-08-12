@@ -1,0 +1,42 @@
+{
+  "name": "hub-scaffold",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "worker": "node --env-file=.env --import tsx src/worker/index.ts",
+    "db:generate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs migrate",
+    "auth:generate": "npx --yes @better-auth/cli@1.6.27 generate --config src/lib/auth.ts --output src/modules/auth/schema.ts --yes",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "better-auth": "^1.6.27",
+    "drizzle-orm": "^0.45.2",
+    "next": "16.3.0",
+    "pg": "^8.23.0",
+    "pg-boss": "^12.27.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "resend": "^6.19.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.21.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
+  }
+}

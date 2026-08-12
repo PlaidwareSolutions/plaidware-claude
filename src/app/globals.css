@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+/*
+ * Plaidware design tokens — dark-first with a full light theme (PRD §6 Q5).
+ * Brand: slate ground, purple primary, coral signal.
+ * Components consume only these tokens; raw hex stays in this file.
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* light theme */
+  --background: #f6f6fa;
+  --surface: #ffffff;
+  --surface-2: #eef0f8;
+  --border: #d8dcea;
+  --foreground: #333952;
+  --muted: #667090;
+  --heading: #14182b;
+  --primary: #5b4ee0;
+  --primary-strong: #4638c2;
+  --primary-foreground: #ffffff;
+  --coral: #cc4520;
+  --success: #067a52;
+  --warning: #925e06;
+  --danger: #be2347;
+}
+
+.dark {
+  --background: #060913;
+  --surface: #0d1326;
+  --surface-2: #121a32;
+  --border: #232b47;
+  --foreground: #d7dcee;
+  --muted: #8b93b2;
+  --heading: #f2f4fb;
+  --primary: #7a6cf0;
+  --primary-strong: #948aff;
+  --primary-foreground: #0a0e1d;
+  --coral: #f0663f;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-heading: var(--heading);
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-coral: var(--coral);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
