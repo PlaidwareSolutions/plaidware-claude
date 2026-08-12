@@ -9,6 +9,10 @@ import { ac, orgRoles } from "./org-roles";
 export const auth = betterAuth({
   baseURL: env.APP_BASE_URL,
   secret: env.BETTER_AUTH_SECRET,
+  trustedOrigins: [
+    env.APP_BASE_URL,
+    ...(env.TRUSTED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
+  ],
   database: drizzleAdapter(db, { provider: "pg" }),
 
   emailAndPassword: {
