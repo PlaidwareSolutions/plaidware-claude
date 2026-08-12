@@ -46,7 +46,17 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
 - Staging URL: https://hub-web-staging-3ab0.up.railway.app and
   https://hub-staging.plaidware.com (Cloudflare-proxied CNAME).
 - Cloudflare note: when adding a Railway custom domain, grey-cloud the record
-  until Railway's cert leaves VALIDATING_OWNERSHIP, then re-proxy.
+  until Railway's cert leaves VALIDATING_OWNERSHIP, then re-proxy. If issuance
+  stalls >20 min, delete + recreate the custom domain (the CNAME target
+  changes — update the Cloudflare record).
+- **Build-time DB rule:** Railway's builder cannot reach the private-network
+  Postgres. Any page/route whose module-level render queries the DB must be
+  `export const dynamic = "force-dynamic"` (no SSG/generateStaticParams over
+  DB data, including sitemap.ts). Local builds mask this because localhost
+  Postgres is reachable.
+- Staging catalog seed: run scripts/seed.ts with DATABASE_URL from the
+  Postgres TCP proxy (plus any BETTER_AUTH_SECRET/APP_BASE_URL placeholders
+  to satisfy env validation).
 - Secrets live in `.env.credentials` (git-ignored) and Railway service variables.
   Never commit live Stripe keys; staging uses test mode only.
 
