@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Check } from "lucide-react";
-import { getProductBySlug, listActiveProducts } from "@/modules/catalog/queries";
+import { getProductBySlug } from "@/modules/catalog/queries";
 import { formatCents } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export const dynamic = "force-dynamic";
 
 const KIND_LABEL: Record<string, string> = {
   one_time: "one-time",
@@ -14,11 +16,6 @@ const KIND_LABEL: Record<string, string> = {
   recurring_yearly: "per year",
   metered: "per unit",
 };
-
-export async function generateStaticParams() {
-  const products = await listActiveProducts();
-  return products.map((p) => ({ slug: p.slug }));
-}
 
 export async function generateMetadata({
   params,

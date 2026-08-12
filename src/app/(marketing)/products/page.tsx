@@ -11,6 +11,8 @@ export const metadata: Metadata = {
     "The Plaidware portfolio: websites, construction, repair shops, driving schools, property management, HOA, and digital marketing.",
 };
 
+export const dynamic = "force-dynamic";
+
 const KIND_LABEL: Record<string, string> = {
   one_time: "one-time",
   recurring_monthly: "/mo",

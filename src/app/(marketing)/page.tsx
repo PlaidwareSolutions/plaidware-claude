@@ -19,6 +19,9 @@ export const metadata: Metadata = {
     "Plaidware builds and runs software for small businesses: websites, vertical SaaS, and digital marketing — managed from a single control plane.",
 };
 
+// Catalog comes from the DB, which the deploy builder can't reach — render per request.
+export const dynamic = "force-dynamic";
+
 const PILLARS = [
   { icon: Rocket, name: "Onboarding", text: "From signed proposal to live product without a handoff gap." },
   { icon: Globe, name: "Provisioning", text: "Domains, DNS, and hosting managed and verified for you." },
