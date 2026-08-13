@@ -24,6 +24,12 @@ import {
   reconcileInvoiceDiscounts,
   resolveCheckoutPromo,
 } from "../promos/service";
+import { payments } from "./ar-schema";
+import {
+  ensureDunningCase,
+  recordPaymentRow,
+  resolveDunningForInvoice,
+} from "./ar-service";
 
 // ---------------------------------------------------------------------------
 // Stripe object provisioning
@@ -410,10 +416,15 @@ export async function applyInvoiceEvent(
   }
 
   const status = mapStripeInvoiceStatus(invoice.status, eventType);
+  const metaKind = invoice.metadata?.invoice_kind;
   const values = {
     tenantId,
-    subscriptionId: localSub?.id ?? null,
-    kind: "product" as const,
+    subscriptionId:
+      localSub?.id ?? (invoice.metadata?.subscription_id || null),
+    kind: (metaKind === "hosting" || metaKind === "manual"
+      ? metaKind
+      : "product") as "product" | "hosting" | "manual",
+    billingMonth: invoice.metadata?.billing_month ?? null,
     invoiceNumber: invoice.number ?? `INV-${invoice.id!.slice(-8).toUpperCase()}`,
     status,
     amountDueCents: invoice.amount_due,
@@ -433,7 +444,7 @@ export async function applyInvoiceEvent(
     paidAt: status === "paid" ? new Date() : null,
   };
 
-  await db
+  const [localInvoice] = await db
     .insert(invoices)
     .values(values)
     .onConflictDoUpdate({
@@ -447,12 +458,36 @@ export async function applyInvoiceEvent(
         invoicePdfUrl: values.invoicePdfUrl,
         paidAt: values.paidAt,
       },
-    });
+    })
+    .returning({ id: invoices.id });
 
-  if (status === "paid" && localSub) {
-    await onInvoicePaid(localSub);
-    // Savings ledger: accumulate the actual discounted dollars (PRD §4.6).
-    await reconcileInvoiceDiscounts(invoice, localSub.id);
+  if (status === "paid") {
+    if (localSub) {
+      await onInvoicePaid(localSub);
+      // Savings ledger: accumulate the actual discounted dollars (PRD §4.6).
+      await reconcileInvoiceDiscounts(invoice, localSub.id);
+    }
+    // Payments ledger: Stripe-collected money (skip out-of-band marks —
+    // those were recorded by ops when the offline payment came in).
+    if (localInvoice && invoice.amount_paid > 0) {
+      const already = await db.query.payments.findFirst({
+        where: eq(payments.invoiceId, localInvoice.id),
+      });
+      if (!already) {
+        await recordPaymentRow({
+          invoiceId: localInvoice.id,
+          tenantId,
+          amountCents: invoice.amount_paid,
+          method: "stripe_card",
+          reference: invoice.id ?? null,
+          sendReceipt: true,
+        });
+      }
+    }
+    if (localInvoice) await resolveDunningForInvoice(localInvoice.id);
+  }
+  if (status === "failed" && localInvoice) {
+    await ensureDunningCase(localInvoice.id, tenantId);
   }
 }
 

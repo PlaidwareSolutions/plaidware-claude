@@ -25,8 +25,10 @@ export default async function OpsHomePage() {
 
   const tiles = [
     { label: "MRR", value: formatCents(billing.mrrCents), href: "/ops/tenants" },
+    { label: "Past-due AR", value: formatCents(billing.pastDueCents), href: "/ops/tenants" },
     { label: "Live subscriptions", value: billing.liveSubscriptions, href: "/ops/tenants" },
     { label: "Trials", value: billing.trialing, href: "/ops/tenants" },
+    { label: "Suspended", value: billing.suspendedSubscriptions, href: "/ops/tenants" },
     { label: "Failed invoices", value: billing.failedInvoices, href: "/ops/tenants" },
     { label: "Tenants", value: tenants.length, href: "/ops/tenants" },
     { label: "Products", value: products.length, href: "/ops/products" },

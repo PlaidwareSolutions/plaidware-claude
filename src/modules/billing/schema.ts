@@ -59,6 +59,10 @@ export const subscriptions = pgTable(
     currentPeriodStart: timestamp("current_period_start"),
     currentPeriodEnd: timestamp("current_period_end"),
     trialEndsAt: timestamp("trial_ends_at"),
+    /** Monthly hosting fee (PRD §4.5): null = not configured. */
+    monthlyHostingCents: integer("monthly_hosting_cents"),
+    /** First month to bill hosting for, as YYYY-MM. */
+    hostingBillingStartMonth: text("hosting_billing_start_month"),
     subscribedAt: timestamp("subscribed_at").notNull().defaultNow(),
     canceledAt: timestamp("canceled_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -128,13 +132,20 @@ export const invoices = pgTable(
     periodEnd: timestamp("period_end"),
     dueDate: timestamp("due_date"),
     paidAt: timestamp("paid_at"),
+    /** YYYY-MM for hosting invoices — idempotency key with the partial unique. */
+    billingMonth: text("billing_month"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at")
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index("invoices_tenant_idx").on(t.tenantId)],
+  (t) => [
+    index("invoices_tenant_idx").on(t.tenantId),
+    uniqueIndex("invoices_hosting_month_uidx")
+      .on(t.subscriptionId, t.billingMonth)
+      .where(sql`${t.kind} = 'hosting'`),
+  ],
 );
 
 /** Webhook idempotency ledger (PRD §4.5) — insert-or-skip on Stripe event id. */

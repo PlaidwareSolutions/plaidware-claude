@@ -128,6 +128,20 @@ export async function getPlatformBillingStats() {
   const mrrCents = items.reduce((s, i) => s + itemMrrCents(i.kind, i.amountCents), 0);
   const failed = await db.query.invoices.findMany({
     where: eq(invoices.status, "failed"),
+    columns: { id: true, amountDueCents: true, amountPaidCents: true },
+  });
+  const now = new Date();
+  const open = await db.query.invoices.findMany({
+    where: eq(invoices.status, "open"),
+    columns: { amountDueCents: true, amountPaidCents: true, dueDate: true },
+  });
+  const pastDueCents =
+    failed.reduce((s, i) => s + i.amountDueCents - i.amountPaidCents, 0) +
+    open
+      .filter((i) => i.dueDate && i.dueDate < now)
+      .reduce((s, i) => s + i.amountDueCents - i.amountPaidCents, 0);
+  const suspended = await db.query.subscriptions.findMany({
+    where: eq(subscriptions.status, "suspended"),
     columns: { id: true },
   });
   return {
@@ -135,5 +149,7 @@ export async function getPlatformBillingStats() {
     liveSubscriptions: liveSubs.length,
     trialing: liveSubs.filter((s) => s.status === "trialing").length,
     failedInvoices: failed.length,
+    pastDueCents,
+    suspendedSubscriptions: suspended.length,
   };
 }

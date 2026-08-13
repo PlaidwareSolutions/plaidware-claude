@@ -156,7 +156,9 @@ export function OpsTenants({ tenants }: { tenants: OpsTenantRow[] }) {
             {tenants.map((t) => (
               <TableRow key={t.id}>
                 <TableCell>
-                  <div className="font-medium text-heading">{t.name}</div>
+                  <a href={`/ops/tenants/${t.id}`} className="font-medium text-heading hover:text-primary">
+                    {t.name}
+                  </a>
                   <div className="text-xs text-muted-foreground">{t.slug}</div>
                 </TableCell>
                 <TableCell>

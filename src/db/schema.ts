@@ -4,6 +4,7 @@
  */
 export * from "../modules/auth/schema";
 export * from "../modules/billing/schema";
+export * from "../modules/billing/ar-schema";
 export * from "../modules/catalog/schema";
 export * from "../modules/contact/schema";
 export * from "../modules/promos/schema";
