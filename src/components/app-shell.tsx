@@ -5,10 +5,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
+  Activity,
   Building2,
   Check,
   ChevronsUpDown,
   Home,
+  Siren,
   Inbox,
   LayoutDashboard,
   LogOut,
@@ -41,6 +43,7 @@ type NavItem = { href: string; label: string; icon: React.ComponentType<{ classN
 
 const TENANT_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: Home },
+  { href: "/monitoring", label: "Monitoring", icon: Activity },
   { href: "/billing", label: "Billing", icon: Receipt },
   { href: "/team", label: "Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -51,6 +54,7 @@ const OPS_NAV: NavItem[] = [
   { href: "/ops/tenants", label: "Tenants", icon: Building2 },
   { href: "/ops/products", label: "Products", icon: Package },
   { href: "/ops/promos", label: "Promos", icon: Ticket },
+  { href: "/ops/incidents", label: "Incidents", icon: Siren },
   { href: "/ops/users", label: "Access", icon: Users },
   { href: "/ops/contact-inbox", label: "Contact Inbox", icon: Inbox },
 ];

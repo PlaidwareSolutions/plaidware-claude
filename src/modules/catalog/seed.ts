@@ -1,6 +1,20 @@
 import { eq, and } from "drizzle-orm";
 import type { Db } from "../../db";
 import { productComponents, products } from "./schema";
+import { productMetricDefinitions } from "../monitoring/schema";
+
+/** KPI contracts (PRD §4.8) — seeded for Company Website like the legacy app. */
+const METRIC_DEFS: Record<
+  string,
+  { key: string; label: string; unit?: string; valueType?: string; aggregation?: string; isPrimary?: boolean }[]
+> = {
+  "company-website": [
+    { key: "page_views", label: "Page views", unit: "views", isPrimary: true },
+    { key: "leads_submitted", label: "Leads submitted", unit: "leads" },
+    { key: "contact_form_submissions", label: "Contact form submissions" },
+    { key: "avg_session_seconds", label: "Avg session", unit: "s", valueType: "duration_seconds", aggregation: "avg" },
+  ],
+};
 
 type SeedComponent = {
   kind: "one_time" | "recurring_monthly" | "recurring_yearly" | "metered";
@@ -161,6 +175,22 @@ export async function seedCatalog(db: Db): Promise<{ products: number; component
     const productId = existing
       ? (await db.update(products).set(values).where(eq(products.id, existing.id)), existing.id)
       : (await db.insert(products).values({ slug: p.slug, ...values }).returning({ id: products.id }))[0].id;
+
+    for (const [j, d] of (METRIC_DEFS[p.slug] ?? []).entries()) {
+      await db
+        .insert(productMetricDefinitions)
+        .values({
+          productId,
+          key: d.key,
+          label: d.label,
+          unit: d.unit,
+          valueType: d.valueType ?? "count",
+          aggregation: d.aggregation ?? "sum",
+          isPrimary: d.isPrimary ?? false,
+          displayOrder: j,
+        })
+        .onConflictDoNothing();
+    }
 
     for (const [j, c] of p.components.entries()) {
       const found = await db.query.productComponents.findFirst({

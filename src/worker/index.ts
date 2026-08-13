@@ -2,6 +2,7 @@ import { PgBoss } from "pg-boss";
 import { env } from "../env";
 import { registerPromoJobs } from "../modules/promos/jobs";
 import { registerBillingJobs } from "../modules/billing/jobs";
+import { registerMonitoringJobs } from "../modules/monitoring/jobs";
 
 /**
  * Background job runner — a separate Railway service sharing the same image
@@ -27,6 +28,7 @@ async function main() {
   const queues = [
     ...(await registerPromoJobs(boss)),
     ...(await registerBillingJobs(boss)),
+    ...(await registerMonitoringJobs(boss)),
   ];
 
   console.log(`[worker] started; queues: heartbeat${queues.map((q) => `, ${q}`).join("")}`);

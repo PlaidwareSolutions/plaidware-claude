@@ -30,6 +30,7 @@ import {
   recordPaymentRow,
   resolveDunningForInvoice,
 } from "./ar-service";
+import { mintIngestKey } from "../monitoring/service";
 
 // ---------------------------------------------------------------------------
 // Stripe object provisioning
@@ -283,6 +284,9 @@ export async function createCheckout(opts: {
           )?.id ?? null,
       })),
     );
+
+    // Every subscription gets an ingest credential at birth (PRD §4.8).
+    void mintIngestKey(subRow.id).catch(() => {});
 
     if (resolvedPromo) {
       await recordRedemption({
