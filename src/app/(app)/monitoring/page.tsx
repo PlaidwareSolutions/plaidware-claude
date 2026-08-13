@@ -8,6 +8,8 @@ import { healthChecks, ingestKeys } from "@/modules/monitoring/schema";
 import { subscriptionKpis, subscriptionUptime } from "@/modules/monitoring/service";
 import { env } from "@/env";
 import { MonitoringView } from "@/modules/monitoring/components/monitoring-view";
+import { seoPanelData } from "@/modules/seo/service";
+import { SeoPanel } from "@/modules/seo/components/seo-panel";
 
 export const metadata = { title: "Monitoring" };
 export const dynamic = "force-dynamic";
@@ -51,12 +53,29 @@ export default async function MonitoringPage() {
     }),
   );
 
+  const isOpsUser = session.user.platformRole === "ops_admin";
+  const seoSubs = subs.filter((s) => s.productSlug === "company-website");
+  const seoPanels = await Promise.all(
+    seoSubs.map(async (s) => ({ sub: s, panels: await seoPanelData(s.id) })),
+  );
+
   return (
-    <MonitoringView
-      tenantId={active.id}
-      canWrite={["owner", "admin"].includes(active.role) || session.user.platformRole === "ops_admin"}
-      ingestUrl={`${env.APP_BASE_URL}/api/metrics/ingest`}
-      cards={cards}
-    />
+    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+      <MonitoringView
+        tenantId={active.id}
+        canWrite={["owner", "admin"].includes(active.role) || isOpsUser}
+        ingestUrl={`${env.APP_BASE_URL}/api/metrics/ingest`}
+        cards={cards}
+      />
+      {seoPanels.map(({ sub, panels }) => (
+        <SeoPanel
+          key={sub.id}
+          productName={sub.productName}
+          subscriptionId={sub.id}
+          panels={panels}
+          opsControls={isOpsUser}
+        />
+      ))}
+    </div>
   );
 }
