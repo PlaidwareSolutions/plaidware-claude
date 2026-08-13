@@ -26,6 +26,13 @@ export function CheckoutFlow({
   publishableKey: string;
 }) {
   const [optional, setOptional] = useState<Set<string>>(new Set());
+  const [promoCode, setPromoCode] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    description: string;
+    source: string;
+    firstInvoiceSavingsCents: number;
+  } | null>(null);
   const [payment, setPayment] = useState<{
     clientSecret: string;
     mode: "payment" | "setup";
@@ -60,11 +67,20 @@ export function CheckoutFlow({
     const res = await createCheckoutAction({
       productId: product.id,
       componentIds: [...optional],
+      promoCode: promoCode.trim() || undefined,
     });
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error);
       return;
+    }
+    setAppliedPromo(res.appliedPromo);
+    if (res.appliedPromo) {
+      toast.success(
+        res.appliedPromo.source === "auto"
+          ? `Offer applied automatically: ${res.appliedPromo.code}`
+          : `Code ${res.appliedPromo.code} applied`,
+      );
     }
     if (res.clientSecret && res.mode !== "none") {
       setPayment({
@@ -197,10 +213,33 @@ export function CheckoutFlow({
               Recurring charges renew automatically. Cancel anytime.
             </p>
           </div>
+          {appliedPromo && (
+            <div className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-xs">
+              <span className="font-semibold text-success">{appliedPromo.code}</span>{" "}
+              — {appliedPromo.description}
+              {appliedPromo.firstInvoiceSavingsCents > 0 && (
+                <> · saves {formatCents(appliedPromo.firstInvoiceSavingsCents)} today</>
+              )}
+            </div>
+          )}
           {!payment && (
-            <Button className="mt-3" onClick={begin} disabled={busy}>
-              {busy ? "Preparing…" : "Continue to payment"}
-            </Button>
+            <>
+              <div className="mt-1 grid gap-1.5">
+                <label htmlFor="promo" className="text-xs text-muted-foreground">
+                  Promo code (optional)
+                </label>
+                <input
+                  id="promo"
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value)}
+                  placeholder="CODE"
+                  className="h-9 rounded-md border bg-transparent px-3 font-mono text-sm uppercase placeholder:normal-case focus-visible:outline-2 focus-visible:outline-ring"
+                />
+              </div>
+              <Button className="mt-2" onClick={begin} disabled={busy}>
+                {busy ? "Preparing…" : "Continue to payment"}
+              </Button>
+            </>
           )}
         </CardContent>
       </Card>

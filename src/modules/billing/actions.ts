@@ -17,6 +17,7 @@ import { getSubscriptionForTenant } from "./queries";
 const checkoutSchema = z.object({
   productId: z.string().uuid(),
   componentIds: z.array(z.string().uuid()).max(30),
+  promoCode: z.string().max(64).regex(/^[A-Za-z0-9_-]*$/).optional(),
 });
 
 export type CheckoutActionResult =
@@ -58,6 +59,8 @@ export async function createCheckoutAction(
       productId: parsed.productId,
       componentIds: parsed.componentIds,
       contact: { email: session.user.email, name: session.user.name },
+      promoCode: parsed.promoCode || null,
+      userId: session.user.id,
     });
     revalidatePath("/billing");
     revalidatePath("/dashboard");

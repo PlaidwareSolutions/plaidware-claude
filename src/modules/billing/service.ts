@@ -18,6 +18,12 @@ import {
   mapStripeInvoiceStatus,
   mapStripeSubscriptionStatus,
 } from "./mappers";
+import {
+  deleteMintedCoupon,
+  recordRedemption,
+  reconcileInvoiceDiscounts,
+  resolveCheckoutPromo,
+} from "../promos/service";
 
 // ---------------------------------------------------------------------------
 // Stripe object provisioning
@@ -95,6 +101,12 @@ export type CheckoutResult = {
   clientSecret: string | null;
   /** payment → confirmPayment; setup → confirmSetup (trial, nothing due today) */
   mode: "payment" | "setup" | "none";
+  appliedPromo: {
+    code: string;
+    description: string;
+    source: "manual" | "auto";
+    firstInvoiceSavingsCents: number;
+  } | null;
 };
 
 export async function createCheckout(opts: {
@@ -102,6 +114,8 @@ export async function createCheckout(opts: {
   productId: string;
   componentIds: string[];
   contact: { email: string; name: string };
+  promoCode?: string | null;
+  userId?: string | null;
 }): Promise<CheckoutResult> {
   const stripe = getStripe();
 
@@ -147,6 +161,18 @@ export async function createCheckout(opts: {
     priceIds.set(c.id, await ensureComponentStripePrice(c, product.name));
   }
 
+  // Promo: explicit code wins; otherwise best auto-apply. Never stacks (PRD §4.6).
+  const resolvedPromo = await resolveCheckoutPromo({
+    tenantId: opts.tenantId,
+    productId: opts.productId,
+    items: selected.map((c) => ({
+      componentId: c.id,
+      kind: c.kind,
+      amountCents: c.amountCents,
+    })),
+    code: opts.promoCode,
+  });
+
   let stripeSubscriptionId: string | null = null;
   let clientSecret: string | null = null;
   let mode: CheckoutResult["mode"] = "none";
@@ -165,6 +191,9 @@ export async function createCheckout(opts: {
         ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
         // One-time components ride the first invoice (PRD §4.4)
         add_invoice_items: oneTime.map((c) => ({ price: priceIds.get(c.id)! })),
+        ...(resolvedPromo
+          ? { discounts: [{ coupon: resolvedPromo.stripeCouponId }] }
+          : {}),
         expand: ["latest_invoice.confirmation_secret", "pending_setup_intent"],
       });
       stripeSubscriptionId = sub.id;
@@ -204,6 +233,9 @@ export async function createCheckout(opts: {
       const invoice = await stripe.invoices.create({
         customer: customerId,
         auto_advance: false,
+        ...(resolvedPromo
+          ? { discounts: [{ coupon: resolvedPromo.stripeCouponId }] }
+          : {}),
         metadata: { subscription_id: subRow.id, tenant_id: opts.tenantId },
       });
       for (const c of oneTime) {
@@ -246,9 +278,31 @@ export async function createCheckout(opts: {
       })),
     );
 
-    return { subscriptionId: subRow.id, clientSecret, mode };
+    if (resolvedPromo) {
+      await recordRedemption({
+        resolved: resolvedPromo,
+        tenantId: opts.tenantId,
+        subscriptionId: subRow.id,
+        userId: opts.userId ?? null,
+      });
+    }
+
+    return {
+      subscriptionId: subRow.id,
+      clientSecret,
+      mode,
+      appliedPromo: resolvedPromo
+        ? {
+            code: resolvedPromo.promo.code,
+            description: resolvedPromo.discount.description,
+            source: resolvedPromo.source,
+            firstInvoiceSavingsCents: resolvedPromo.discount.firstInvoiceCents,
+          }
+        : null,
+    };
   } catch (e) {
-    // Race-safe compensation: never leave an orphaned Stripe subscription.
+    // Race-safe compensation: never leave orphaned Stripe billing objects.
+    await deleteMintedCoupon(resolvedPromo);
     if (stripeSubscriptionId) {
       await stripe.subscriptions
         .cancel(stripeSubscriptionId)
@@ -397,6 +451,8 @@ export async function applyInvoiceEvent(
 
   if (status === "paid" && localSub) {
     await onInvoicePaid(localSub);
+    // Savings ledger: accumulate the actual discounted dollars (PRD §4.6).
+    await reconcileInvoiceDiscounts(invoice, localSub.id);
   }
 }
 

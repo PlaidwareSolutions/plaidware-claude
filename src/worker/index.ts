@@ -1,5 +1,6 @@
 import { PgBoss } from "pg-boss";
 import { env } from "../env";
+import { registerPromoJobs } from "../modules/promos/jobs";
 
 /**
  * Background job runner — a separate Railway service sharing the same image
@@ -22,7 +23,9 @@ async function main() {
     console.log(`[worker] heartbeat ${new Date().toISOString()}`);
   });
 
-  console.log("[worker] started; queues: heartbeat");
+  const promoQueues = await registerPromoJobs(boss);
+
+  console.log(`[worker] started; queues: heartbeat${promoQueues.map((q) => `, ${q}`).join("")}`);
 }
 
 main().catch((err) => {
