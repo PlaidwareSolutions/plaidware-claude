@@ -10,6 +10,7 @@ import {
   Check,
   ChevronsUpDown,
   Home,
+  MessageSquare,
   Siren,
   Inbox,
   LayoutDashboard,
@@ -45,6 +46,7 @@ const TENANT_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: Home },
   { href: "/monitoring", label: "Monitoring", icon: Activity },
   { href: "/billing", label: "Billing", icon: Receipt },
+  { href: "/inbox", label: "Messages", icon: MessageSquare },
   { href: "/team", label: "Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -55,6 +57,7 @@ const OPS_NAV: NavItem[] = [
   { href: "/ops/products", label: "Products", icon: Package },
   { href: "/ops/promos", label: "Promos", icon: Ticket },
   { href: "/ops/incidents", label: "Incidents", icon: Siren },
+  { href: "/ops/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/ops/users", label: "Access", icon: Users },
   { href: "/ops/contact-inbox", label: "Contact Inbox", icon: Inbox },
 ];
@@ -63,11 +66,13 @@ export function AppShell({
   user,
   tenants,
   activeTenantId,
+  unread,
   children,
 }: {
   user: { name: string; email: string; isOps: boolean };
   tenants: TenantSummary[];
   activeTenantId: string | null;
+  unread?: { tenant: number; ops: number };
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -113,6 +118,12 @@ export function AppShell({
           >
             <item.icon className="size-4" />
             {item.label}
+            {(item.href === "/inbox" && (unread?.tenant ?? 0) > 0) && (
+              <span className="ml-auto rounded-full bg-coral px-1.5 text-[10px] font-bold text-white">{unread!.tenant}</span>
+            )}
+            {(item.href === "/ops/inbox" && (unread?.ops ?? 0) > 0) && (
+              <span className="ml-auto rounded-full bg-coral px-1.5 text-[10px] font-bold text-white">{unread!.ops}</span>
+            )}
           </Link>
         );
       })}

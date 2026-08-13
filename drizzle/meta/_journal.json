@@ -57,6 +57,13 @@
       "when": 1786626024247,
       "tag": "0007_amazing_bloodscream",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786626687577,
+      "tag": "0008_chilly_gargoyle",
+      "breakpoints": true
     }
   ]
 }
