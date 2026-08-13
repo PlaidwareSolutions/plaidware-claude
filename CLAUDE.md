@@ -76,3 +76,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Production (cut over 2026-08-13)
+
+- https://hub.plaidware.com — Railway env `production` (fresh secrets, LIVE
+  Stripe keys + live webhook). Staging keeps test keys. Deploy with the
+  env-scoped project tokens (`railway up -s hub-web|hub-worker --detach`).
+- Legacy data migrated (ARCEM USA + live Stripe sub + hash-imported ingest
+  key); old Replit app pending decommission; legacy DB snapshot in backups/.
