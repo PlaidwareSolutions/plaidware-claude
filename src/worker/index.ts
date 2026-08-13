@@ -4,6 +4,7 @@ import { registerPromoJobs } from "../modules/promos/jobs";
 import { registerBillingJobs } from "../modules/billing/jobs";
 import { registerMonitoringJobs } from "../modules/monitoring/jobs";
 import { registerSeoJobs } from "../modules/seo/jobs";
+import { registerCostJobs } from "../modules/costs/jobs";
 
 /**
  * Background job runner — a separate Railway service sharing the same image
@@ -31,6 +32,7 @@ async function main() {
     ...(await registerBillingJobs(boss)),
     ...(await registerMonitoringJobs(boss)),
     ...(await registerSeoJobs(boss)),
+    ...(await registerCostJobs(boss)),
   ];
 
   console.log(`[worker] started; queues: heartbeat${queues.map((q) => `, ${q}`).join("")}`);

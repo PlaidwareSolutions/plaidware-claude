@@ -64,6 +64,13 @@
       "when": 1786626687577,
       "tag": "0008_chilly_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786627581019,
+      "tag": "0009_spicy_deathbird",
+      "breakpoints": true
     }
   ]
 }

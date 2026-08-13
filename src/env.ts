@@ -20,6 +20,7 @@ const schema = z.object({
   STRIPE_SECRET_KEY: z.string().startsWith("sk_").optional(),
   CREDENTIALS_ENCRYPTION_KEY: z.string().min(40).optional(),
   PAGESPEED_INSIGHTS_API_KEY: z.string().optional(),
+  RAILWAY_API_TOKEN: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

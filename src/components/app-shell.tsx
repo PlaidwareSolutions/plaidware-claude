@@ -11,6 +11,7 @@ import {
   ChevronsUpDown,
   Home,
   MessageSquare,
+  Server,
   Siren,
   Inbox,
   LayoutDashboard,
@@ -58,6 +59,7 @@ const OPS_NAV: NavItem[] = [
   { href: "/ops/promos", label: "Promos", icon: Ticket },
   { href: "/ops/incidents", label: "Incidents", icon: Siren },
   { href: "/ops/inbox", label: "Inbox", icon: MessageSquare },
+  { href: "/ops/costs", label: "Hosting Costs", icon: Server },
   { href: "/ops/users", label: "Access", icon: Users },
   { href: "/ops/contact-inbox", label: "Contact Inbox", icon: Inbox },
 ];
