@@ -12,8 +12,9 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-6 px-4">
-          <Link href="/" className="text-xs font-bold uppercase tracking-[0.2em] text-coral">
-            Plaidware
+          <Link href="/" className="flex items-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/plaidware-logo.png" alt="Plaidware" className="h-7 w-auto" />
           </Link>
           <nav className="hidden gap-5 text-sm text-muted-foreground sm:flex">
             {NAV.map((n) => (
@@ -37,7 +38,8 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
       <footer className="border-t">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-10 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="text-xs font-bold uppercase tracking-[0.2em] text-coral">Plaidware</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/plaidware-logo.png" alt="Plaidware" className="h-8 w-auto" />
             <p className="mt-2 max-w-xs text-xs text-muted-foreground">
               One control plane for every Plaidware product. Accelerating
               business throughput.

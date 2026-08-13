@@ -151,7 +151,12 @@ export function AppShell({
     <div className="flex min-h-screen w-full">
       <aside className="hidden w-56 shrink-0 border-r bg-card lg:block">
         <div className="flex h-14 items-center gap-2 border-b px-4">
-          <span className="text-xs font-bold uppercase tracking-[0.18em] text-coral">Plaidware</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/favicon-transparent.svg" alt="" className="size-6" />
+          <span className="text-sm font-semibold tracking-wide">
+            <span className="text-coral">PLAID</span>
+            <span className="text-primary">WARE</span>
+          </span>
           {inOps && (
             <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">OPS</span>
           )}
@@ -168,8 +173,10 @@ export function AppShell({
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-64 p-0">
-              <SheetTitle className="flex h-14 items-center border-b px-4 text-xs font-bold uppercase tracking-[0.18em] text-coral">
-                Plaidware
+              <SheetTitle className="flex h-14 items-center gap-2 border-b px-4 text-sm font-semibold tracking-wide">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/favicon-transparent.svg" alt="" className="size-6" />
+                <span><span className="text-coral">PLAID</span><span className="text-primary">WARE</span></span>
               </SheetTitle>
               {sidebar}
             </SheetContent>

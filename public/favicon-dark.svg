@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" shape-rendering="geometricPrecision">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1547"/>
+      <stop offset="55%" stop-color="#0d1030"/>
+      <stop offset="100%" stop-color="#070a1f"/>
+    </linearGradient>
+    <linearGradient id="coral" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff8a5c"/>
+      <stop offset="60%" stop-color="#ee5b3a"/>
+      <stop offset="100%" stop-color="#d83f1f"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7a6bc7"/>
+      <stop offset="60%" stop-color="#4f3f97"/>
+      <stop offset="100%" stop-color="#372b73"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="55%" r="55%">
+      <stop offset="0%" stop-color="#ee5b3a" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#ee5b3a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect width="64" height="64" rx="14" fill="url(#glow)"/>
+
+  <g transform="translate(7.5 11) scale(0.08)" fill="url(#coral)" fill-rule="evenodd">
+    <path d="M -0 187.456 C 0 375, 0 375, 11.500 375 C 23 375, 23 375, 23 310.078 L 23 245.157 69.250 244.743 C 119.878 244.290, 123.773 243.924, 142.955 237.827 C 193.987 221.605, 232.254 176.609, 234.231 130.500 C 229.848 60.437, 186.753 16.409, 127 2.384 C 120.383 0.830, 112.464 0.581, 59.750 0.267 L -0 -0.088 -0 187.456 M 23 122.500 L 23 224 63.250 223.997 C 116.782 223.993, 129.167 222.297, 150.743 212.012 C 186.034 195.190, 206.208 168.148, 210.043 132.525 C 214.620 90.019, 192.385 52.464, 150.831 32.512 C 130.220 22.616, 118.071 21, 64.276 21 L 23 21 23 122.500"/>
+  </g>
+
+  <g transform="translate(28.5 11) scale(0.0794)" fill="url(#purple)" fill-rule="evenodd">
+    <path d="M 0.003 139.250 C 0.005 234.248, 0.355 281.360, 1.104 287.500 C 4.348 314.081, 17.569 335.848, 41.565 354.117 C 84.186 386.564, 145.957 385.993, 186.196 352.780 C 190.892 348.904, 190.892 348.904, 199.196 355.216 C 227.597 376.804, 264.367 383.335, 301.870 373.453 C 335.539 364.580, 366.521 336.841, 377.208 306 C 380.500 296.500, 380.500 296.500, 380.801 148.250 L 381.103 -0 354.051 -0 L 327 0 327 143.411 C 327 281.353, 326.928 287.054, 325.105 292.909 C 318.192 315.121, 295.806 329.443, 268 329.443 C 248.832 329.443, 235.146 324.218, 223.827 312.578 C 218 306.587, 218 306.587, 218 153.293 L 218 0 191 0 L 164 0 163.995 153.250 C 163.990 306.500, 163.990 306.500, 158.119 312.640 C 133.264 338.635, 82.895 334.556, 63.123 304.947 C 54.356 291.818, 55 304.659, 55 142.895 L 55 0 27.500 0 L 0 0 0.003 139.250"/>
+  </g>
+
+  <g transform="translate(6 46) scale(0.04066)" fill="url(#coral)" fill-rule="evenodd">
+    <path d="M 13 6.559 C 66.753 32.799, 138.754 60.281, 210.990 82.130 C 432.070 148.999, 660.405 166.878, 872 133.887 C 989.404 115.582, 1101.462 82.371, 1210.500 33.564 C 1229.780 24.934, 1277.121 1.788, 1276.586 1.253 C 1276.361 1.027, 1269.171 2.470, 1260.609 4.459 C 1188.545 21.198, 1075.091 38.930, 976 48.942 C 660.841 80.785, 335.218 65.570, 22.500 4.390 C 12.600 2.454, 3.375 0.666, 2 0.419 C 0.625 0.172, 5.575 2.935, 13 6.559"/>
+  </g>
+
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="url(#sheen)"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none"
+        stroke="#ffffff" stroke-opacity="0.08" stroke-width="1"/>
+</svg>
