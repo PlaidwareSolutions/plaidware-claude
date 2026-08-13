@@ -7,6 +7,9 @@ import { dunningStates, payments } from "@/modules/billing/ar-schema";
 import { getTenant, listMembers } from "@/modules/tenancy/queries";
 import { listTenantSubscriptions } from "@/modules/billing/queries";
 import { OpsTenantBilling } from "@/modules/billing/components/ops-tenant-billing";
+import { subscriptionProvisioning, provisioningCredentials } from "@/modules/provisioning/schema";
+import { tenantTimeline } from "@/modules/audit/service";
+import { OpsProvisioning } from "@/modules/provisioning/components/ops-provisioning";
 
 export const metadata = { title: "Tenant" };
 export const dynamic = "force-dynamic";
@@ -34,6 +37,21 @@ export default async function OpsTenantDetailPage({
     }),
   ]);
 
+  const subIds = subscriptions.map((s) => s.id);
+  const [provRows, credRows, timeline] = await Promise.all([
+    subIds.length
+      ? db.query.subscriptionProvisioning.findMany({
+          where: inArray(subscriptionProvisioning.subscriptionId, subIds),
+        })
+      : Promise.resolve([]),
+    subIds.length
+      ? db.query.provisioningCredentials.findMany({
+          where: inArray(provisioningCredentials.subscriptionId, subIds),
+        })
+      : Promise.resolve([]),
+    tenantTimeline(id),
+  ]);
+
   const invoiceIds = tenantInvoices.map((i) => i.id);
   const [cases, paymentRows] = await Promise.all([
     invoiceIds.length
@@ -46,7 +64,36 @@ export default async function OpsTenantDetailPage({
       : Promise.resolve([]),
   ]);
 
+  const provisioningItems = subscriptions
+    .filter((s) => !["canceled", "expired"].includes(s.status))
+    .map((s) => {
+      const p = provRows.find((x) => x.subscriptionId === s.id);
+      return {
+        subscriptionId: s.id,
+        productName: s.productName,
+        domainUrl: p?.domainUrl ?? null,
+        hasVerifyToken: Boolean(p?.verifyToken),
+        verifyToken: p?.verifyToken ?? null,
+        expectedCname: p?.expectedCname ?? null,
+        expectedAIps: p?.expectedAIps ?? null,
+        dnsLastOk: p?.dnsLastOk ?? null,
+        dnsLastVerifiedAt: p?.dnsLastVerifiedAt?.toISOString() ?? null,
+        dnsLastResolved: p?.dnsLastResolved ?? null,
+        credentials: credRows
+          .filter((c) => c.subscriptionId === s.id)
+          .map((c) => ({
+            id: c.id,
+            kind: c.kind,
+            label: c.label,
+            url: c.url,
+            username: c.username,
+            hasSecret: Boolean(c.secretCiphertext),
+          })),
+      };
+    });
+
   return (
+    <div className="flex flex-col gap-8">
     <OpsTenantBilling
       tenant={{
         id: tenant.id,
@@ -88,5 +135,19 @@ export default async function OpsTenantDetailPage({
           })),
       }))}
     />
+    <div className="mx-auto w-full max-w-5xl">
+      <OpsProvisioning
+        tenantId={id}
+        items={provisioningItems}
+        timeline={timeline.map((t) => ({
+          id: t.id,
+          kind: t.kind,
+          actorName: t.actorName,
+          createdAt: t.createdAt,
+          payload: t.payload,
+        }))}
+      />
+    </div>
+    </div>
   );
 }

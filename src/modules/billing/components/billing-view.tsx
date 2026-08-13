@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { ExternalLink, Receipt } from "lucide-react";
 import type { InvoiceDto, SubscriptionDto } from "../queries";
 import { billingPortalAction, cancelSubscriptionAction } from "../actions";
+import { setDomainAction } from "@/modules/provisioning/actions";
+import { Input } from "@/components/ui/input";
 import { formatCents } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +20,33 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+function DomainEditor({ tenantId, sub }: { tenantId: string; sub: SubscriptionDto }) {
+  const [value, setValue] = useState(sub.domainUrl ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    const res = await setDomainAction({ tenantId, subscriptionId: sub.id, domainUrl: value.trim() || null });
+    setSaving(false);
+    if (res.ok) toast.success(value.trim() ? "Live URL saved" : "Live URL cleared");
+    else toast.error(res.error);
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        className="h-8 w-56 text-xs"
+        placeholder="Live URL (https://…)"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <Button variant="outline" size="sm" onClick={save} disabled={saving || value === (sub.domainUrl ?? "")}>
+        {saving ? "…" : "Save"}
+      </Button>
+    </div>
+  );
+}
 
 function statusBadge(status: string) {
   const variant =
@@ -124,7 +153,9 @@ export function BillingView({
                 ))}
               </ul>
               {canWrite && !["canceled", "expired"].includes(sub.status) && (
-                <div>
+                <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                  <DomainEditor tenantId={tenantId} sub={sub} />
+                  <div className="flex-1" />
                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => cancel(sub)}>
                     Cancel subscription
                   </Button>

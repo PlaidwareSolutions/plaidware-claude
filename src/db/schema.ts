@@ -8,3 +8,5 @@ export * from "../modules/billing/ar-schema";
 export * from "../modules/catalog/schema";
 export * from "../modules/contact/schema";
 export * from "../modules/promos/schema";
+export * from "../modules/audit/schema";
+export * from "../modules/provisioning/schema";

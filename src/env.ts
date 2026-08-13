@@ -18,6 +18,7 @@ const schema = z.object({
   EMAIL_FROM: z.string().default("Plaidware <no-reply@contact.plaidware.com>"),
   OPS_EMAIL: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().startsWith("sk_").optional(),
+  CREDENTIALS_ENCRYPTION_KEY: z.string().min(40).optional(),
 });
 
 const parsed = schema.safeParse(process.env);

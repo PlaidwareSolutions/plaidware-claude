@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
 import { products } from "../catalog/schema";
+import { subscriptionProvisioning } from "../provisioning/schema";
 import { invoices, subscriptionItems, subscriptions } from "./schema";
 import { itemMrrCents, LIVE_SUBSCRIPTION_STATUSES } from "./mappers";
 
@@ -23,6 +24,7 @@ export type SubscriptionDto = {
   currentPeriodEnd: string | null;
   subscribedAt: string;
   monthlyCents: number;
+  domainUrl: string | null;
   items: SubscriptionItemDto[];
 };
 
@@ -45,14 +47,20 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
     .orderBy(desc(subscriptions.subscribedAt));
   if (subs.length === 0) return [];
 
-  const items = await db.query.subscriptionItems.findMany({
-    where: inArray(subscriptionItems.subscriptionId, subs.map((s) => s.id)),
-  });
+  const [items, provRows] = await Promise.all([
+    db.query.subscriptionItems.findMany({
+      where: inArray(subscriptionItems.subscriptionId, subs.map((s) => s.id)),
+    }),
+    db.query.subscriptionProvisioning.findMany({
+      where: inArray(subscriptionProvisioning.subscriptionId, subs.map((s) => s.id)),
+    }),
+  ]);
 
   return subs.map((s) => {
     const own = items.filter((i) => i.subscriptionId === s.id);
     return {
       ...s,
+      domainUrl: provRows.find((p) => p.subscriptionId === s.id)?.domainUrl ?? null,
       trialEndsAt: s.trialEndsAt?.toISOString() ?? null,
       currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
       subscribedAt: s.subscribedAt.toISOString(),
