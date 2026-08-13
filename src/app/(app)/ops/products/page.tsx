@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession, isOps } from "@/policy";
 import { listActiveProducts } from "@/modules/catalog/queries";
@@ -26,8 +27,7 @@ export default async function OpsProductsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-heading">Products</h1>
         <p className="text-sm text-muted-foreground">
-          The catalog as customers see it. Editing and Stripe price sync arrive
-          in M3.
+          Click a product to edit its content, trial, and pricing components.
         </p>
       </div>
       <div className="rounded-lg border bg-card">
@@ -46,10 +46,10 @@ export default async function OpsProductsPage() {
               return (
                 <TableRow key={p.id}>
                   <TableCell>
-                    <div className="flex items-center gap-2 font-medium text-heading">
+                    <Link href={`/ops/products/${p.id}`} className="flex items-center gap-2 font-medium text-heading hover:text-primary">
                       <span className="size-2 rounded-full" style={{ background: p.color ?? "var(--primary)" }} />
                       {p.name}
-                    </div>
+                    </Link>
                     <div className="text-xs text-muted-foreground">{p.slug}</div>
                   </TableCell>
                   <TableCell>

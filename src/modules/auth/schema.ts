@@ -95,6 +95,7 @@ export const organization = pgTable(
     createdAt: timestamp("created_at").notNull(),
     metadata: text("metadata"),
     status: text("status").default("active"),
+    stripeCustomerId: text("stripe_customer_id"),
   },
   (table) => [uniqueIndex("organization_slug_uidx").on(table.slug)],
 );

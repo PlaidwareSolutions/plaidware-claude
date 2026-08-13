@@ -15,6 +15,7 @@ import {
   Moon,
   Menu,
   Package,
+  Receipt,
   Settings,
   Sun,
   Users,
@@ -39,6 +40,7 @@ type NavItem = { href: string; label: string; icon: React.ComponentType<{ classN
 
 const TENANT_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: Home },
+  { href: "/billing", label: "Billing", icon: Receipt },
   { href: "/team", label: "Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

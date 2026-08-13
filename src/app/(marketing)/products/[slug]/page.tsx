@@ -84,10 +84,10 @@ export default async function ProductPage({
               </div>
             ))}
             <Button asChild className="mt-2">
-              <Link href={`/signup?redirect=/products/${product.slug}`}>Get started</Link>
+              <Link href={`/checkout?product=${product.slug}`}>Get started</Link>
             </Button>
             <p className="text-center text-xs text-muted-foreground">
-              Online checkout opens soon — signing up reserves your account.
+              Secure checkout · cancel anytime
             </p>
           </CardContent>
         </Card>

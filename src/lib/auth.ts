@@ -70,6 +70,8 @@ export const auth = betterAuth({
           additionalFields: {
             // 'active' | 'suspended' | 'inactive' — tenant lifecycle (PRD §4.2)
             status: { type: "string", defaultValue: "active", input: false },
+            // Billing identity lives on the tenant, not the user (PRD §2)
+            stripeCustomerId: { type: "string", required: false, input: false },
           },
         },
       },

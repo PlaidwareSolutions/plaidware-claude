@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession, isOps } from "@/policy";
 import { getUserTenants, listMembers } from "@/modules/tenancy/queries";
+import { listTenantInvoices, listTenantSubscriptions } from "@/modules/billing/queries";
+import { formatCents } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +32,17 @@ export default async function DashboardPage() {
     );
   }
 
-  const members = await listMembers(active.id);
+  const [members, subscriptions, invoices] = await Promise.all([
+    listMembers(active.id),
+    listTenantSubscriptions(active.id),
+    listTenantInvoices(active.id),
+  ]);
+  const liveSubs = subscriptions.filter(
+    (s) => !["canceled", "expired"].includes(s.status),
+  );
+  const openInvoiceCents = invoices
+    .filter((i) => i.status === "open" || i.status === "failed")
+    .reduce((s, i) => s + i.amountDueCents, 0);
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
@@ -55,22 +67,28 @@ export default async function DashboardPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>Products</CardDescription>
-            <CardTitle className="text-3xl tabular-nums">—</CardTitle>
+            <CardDescription>Active products</CardDescription>
+            <CardTitle className="text-3xl tabular-nums">{liveSubs.length}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">
-              Subscriptions arrive with checkout (M3).
-            </p>
+            <Button asChild variant="outline" size="sm">
+              <Link href={liveSubs.length ? "/billing" : "/products"}>
+                {liveSubs.length ? "View billing" : "Browse catalog"}
+              </Link>
+            </Button>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>Open invoices</CardDescription>
-            <CardTitle className="text-3xl tabular-nums">—</CardTitle>
+            <CardDescription>Open balance</CardDescription>
+            <CardTitle className="text-3xl tabular-nums">
+              {formatCents(openInvoiceCents)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">Billing arrives in M3.</p>
+            <p className="text-xs text-muted-foreground">
+              {openInvoiceCents > 0 ? "Awaiting payment" : "All settled"}
+            </p>
           </CardContent>
         </Card>
       </div>
