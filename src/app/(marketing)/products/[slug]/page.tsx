@@ -42,12 +42,13 @@ export default async function ProductPage({
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-16">
+      <div className="relative mb-8 aspect-[21/9] w-full overflow-hidden rounded-xl border bg-secondary">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/images/products/${product.slug}.png`} alt={product.name} className="size-full object-cover" />
+      </div>
       <Badge variant="secondary">{product.category}</Badge>
-      <h1 className="mt-3 flex items-center gap-3 text-3xl font-bold text-heading">
-        <span className="size-3 rounded-full" style={{ background: product.color ?? "var(--primary)" }} />
-        {product.name}
-      </h1>
-      <p className="mt-3 max-w-2xl text-muted-foreground">{product.description}</p>
+      <h1 className="mt-3 text-3xl font-bold text-heading sm:text-4xl">{product.name}</h1>
+      <p className="mt-3 max-w-2xl text-sm font-light text-muted-foreground sm:text-base">{product.description}</p>
 
       <div className="mt-10 grid gap-8 md:grid-cols-[1fr_320px]">
         <div>

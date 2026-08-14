@@ -91,20 +91,25 @@ export default async function HomePage() {
             const monthly = p.components.find((c) => c.kind === "recurring_monthly");
             return (
               <Link key={p.id} href={`/products/${p.slug}`}>
-                <Card className="h-full transition-colors hover:border-primary/50">
+                <Card className="group h-full overflow-hidden pt-0 transition-all hover:border-primary/50 hover:shadow-lg">
+                  <div className="relative aspect-[16/9] w-full overflow-hidden bg-secondary">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/images/products/${p.slug}.png`}
+                      alt={p.name}
+                      className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                    />
+                  </div>
                   <CardHeader>
                     <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
                       {p.category}
                     </div>
-                    <CardTitle className="flex items-center gap-2">
-                      <span className="size-2.5 rounded-full" style={{ background: p.color ?? "var(--primary)" }} />
-                      {p.name}
-                    </CardTitle>
+                    <CardTitle className="text-xl font-bold text-heading">{p.name}</CardTitle>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-3">
                     <p className="text-sm text-muted-foreground">{p.tagline}</p>
                     {monthly && (
-                      <p className="text-sm font-medium text-heading">
+                      <p className="text-sm font-semibold text-heading">
                         from {formatCents(monthly.amountCents)}/mo
                       </p>
                     )}
