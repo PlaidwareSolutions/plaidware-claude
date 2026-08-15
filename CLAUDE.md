@@ -79,6 +79,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Production (cut over 2026-08-13)
 
+- **Domain split (2026-08-15):** plaidware.com (apex, Cloudflare-proxied CNAME
+  → Railway) serves ONLY marketing (/, /platform, /products*, /contact, legal)
+  via src/proxy.ts host routing; hub.plaidware.com is the app ("/" routes by
+  session cookie). www is CF-proxied but unroutable at Railway (2-domain/service
+  plan limit) — clean fix = Cloudflare Redirect Rule (needs token permission)
+  or Railway plan upgrade. Old Replit site is now fully off DNS.
+- Next 16: middleware.ts is deprecated → src/proxy.ts exporting `proxy()`.
 - https://hub.plaidware.com — Railway env `production` (fresh secrets, LIVE
   Stripe keys + live webhook). Staging keeps test keys. Deploy with the
   env-scoped project tokens (`railway up -s hub-web|hub-worker --detach`).
