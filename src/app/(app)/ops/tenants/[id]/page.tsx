@@ -10,6 +10,9 @@ import { OpsTenantBilling } from "@/modules/billing/components/ops-tenant-billin
 import { subscriptionProvisioning, provisioningCredentials } from "@/modules/provisioning/schema";
 import { tenantTimeline } from "@/modules/audit/service";
 import { OpsProvisioning } from "@/modules/provisioning/components/ops-provisioning";
+import { listActiveProducts } from "@/modules/catalog/queries";
+import { getTenantOverrides } from "@/modules/billing/service";
+import { OpsCustomPricing } from "@/modules/billing/components/ops-custom-pricing";
 
 export const metadata = { title: "Tenant" };
 export const dynamic = "force-dynamic";
@@ -63,6 +66,27 @@ export default async function OpsTenantDetailPage({
       ? db.query.payments.findMany({ where: inArray(payments.invoiceId, invoiceIds) })
       : Promise.resolve([]),
   ]);
+
+  // Custom pricing rows: components of products this tenant subscribes to.
+  const activeProducts = await listActiveProducts();
+  const subscribedProductIds = new Set(
+    subscriptions.filter((s) => !["canceled", "expired"].includes(s.status)).map((s) => s.productId),
+  );
+  const pricingProducts = activeProducts.filter((p) => subscribedProductIds.has(p.id));
+  const pricingComponents = pricingProducts.flatMap((p) =>
+    p.components.map((c) => ({ ...c, productName: p.name })),
+  );
+  const priceOverrides = await getTenantOverrides(id, pricingComponents.map((c) => c.id));
+  const pricingRows = pricingComponents.map((c) => ({
+    componentId: c.id,
+    productName: c.productName,
+    name: c.name,
+    kind: c.kind,
+    interval: c.interval,
+    intervalCount: c.intervalCount,
+    listCents: c.amountCents,
+    overrideCents: priceOverrides.get(c.id)?.amountCents ?? null,
+  }));
 
   const provisioningItems = subscriptions
     .filter((s) => !["canceled", "expired"].includes(s.status))
@@ -135,6 +159,9 @@ export default async function OpsTenantDetailPage({
           })),
       }))}
     />
+    <div className="mx-auto w-full max-w-5xl">
+      <OpsCustomPricing tenantId={id} rows={pricingRows} />
+    </div>
     <div className="mx-auto w-full max-w-5xl">
       <OpsProvisioning
         tenantId={id}

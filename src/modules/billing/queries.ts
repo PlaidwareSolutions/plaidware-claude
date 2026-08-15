@@ -8,6 +8,8 @@ import { itemMrrCents, LIVE_SUBSCRIPTION_STATUSES } from "./mappers";
 export type SubscriptionItemDto = {
   id: string;
   kind: string;
+  interval: string | null;
+  intervalCount: number;
   name: string;
   amountCents: number;
   status: string;
@@ -69,11 +71,13 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
       )
         ? own
             .filter((i) => i.status === "active")
-            .reduce((sum, i) => sum + itemMrrCents(i.kind, i.amountCents), 0)
+            .reduce((sum, i) => sum + itemMrrCents(i, i.amountCents), 0)
         : 0,
       items: own.map((i) => ({
         id: i.id,
         kind: i.kind,
+        interval: i.interval,
+        intervalCount: i.intervalCount,
         name: i.name,
         amountCents: i.amountCents,
         status: i.status,
@@ -133,7 +137,7 @@ export async function getPlatformBillingStats() {
         ),
       })
     : [];
-  const mrrCents = items.reduce((s, i) => s + itemMrrCents(i.kind, i.amountCents), 0);
+  const mrrCents = items.reduce((s, i) => s + itemMrrCents(i, i.amountCents), 0);
   const failed = await db.query.invoices.findMany({
     where: eq(invoices.status, "failed"),
     columns: { id: true, amountDueCents: true, amountPaidCents: true },

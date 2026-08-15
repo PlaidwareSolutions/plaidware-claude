@@ -1,8 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   integer,
   jsonb,
-  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -10,12 +10,9 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const componentKind = pgEnum("component_kind", [
-  "one_time",
-  "recurring_monthly",
-  "recurring_yearly",
-  "metered", // reserved — not sold yet (PRD §5)
-]);
+/** 'one_time' | 'recurring' (interval fields carry frequency) |
+ *  legacy 'recurring_monthly'/'recurring_yearly' on old rows | 'metered' reserved.
+ *  Plain text (not a pg enum) so adding kinds never fights transactional migrations. */
 
 export const products = pgTable("products", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -47,7 +44,12 @@ export const productComponents = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
-    kind: componentKind("kind").notNull(),
+    kind: text("kind").notNull(),
+    /** 'base' = the product's single main charge; everything else is 'addon'. */
+    role: text("role").notNull().default("addon"),
+    /** Billing frequency for kind='recurring': every `intervalCount` `interval`s. */
+    interval: text("interval"), // 'week' | 'month' | 'year'
+    intervalCount: integer("interval_count").notNull().default(1),
     name: text("name").notNull(),
     description: text("description"),
     amountCents: integer("amount_cents").notNull(),
@@ -66,5 +68,11 @@ export const productComponents = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [uniqueIndex("product_components_product_name_uidx").on(t.productId, t.name)],
+  (t) => [
+    uniqueIndex("product_components_product_name_uidx").on(t.productId, t.name),
+    // One main charge per product (PRD billing v2).
+    uniqueIndex("product_components_base_uidx")
+      .on(t.productId)
+      .where(sql`${t.role} = 'base'`),
+  ],
 );

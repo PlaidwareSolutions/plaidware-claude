@@ -93,6 +93,8 @@ export const subscriptionItems = pgTable(
       .references(() => productComponents.id),
     /** Snapshot at purchase — later catalog edits never rewrite history. */
     kind: text("kind").notNull(),
+    interval: text("interval"), // snapshot: 'week' | 'month' | 'year'
+    intervalCount: integer("interval_count").notNull().default(1),
     name: text("name").notNull(),
     amountCents: integer("amount_cents").notNull(),
     currency: text("currency").notNull().default("usd"),
@@ -132,6 +134,8 @@ export const invoices = pgTable(
     periodEnd: timestamp("period_end"),
     dueDate: timestamp("due_date"),
     paidAt: timestamp("paid_at"),
+    /** Pre-due reminder dedupe (billing v2). */
+    upcomingReminderSentAt: timestamp("upcoming_reminder_sent_at"),
     /** YYYY-MM for hosting invoices — idempotency key with the partial unique. */
     billingMonth: text("billing_month"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -146,6 +150,31 @@ export const invoices = pgTable(
       .on(t.subscriptionId, t.billingMonth)
       .where(sql`${t.kind} = 'hosting'`),
   ],
+);
+
+/** Ops-negotiated per-tenant prices; apply to future checkouts and add-ons.
+ *  Existing subscriptions keep their snapshots (billing v2). */
+export const tenantPriceOverrides = pgTable(
+  "tenant_price_overrides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    componentId: uuid("component_id")
+      .notNull()
+      .references(() => productComponents.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+    /** Lazily minted tenant-specific Stripe Price. */
+    stripePriceId: text("stripe_price_id"),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [uniqueIndex("tenant_price_overrides_uidx").on(t.tenantId, t.componentId)],
 );
 
 /** Webhook idempotency ledger (PRD §4.5) — insert-or-skip on Stripe event id. */

@@ -8,6 +8,7 @@ import { getUserTenants } from "../tenancy/queries";
 import { createTenantWithOwner, uniqueSlug } from "../tenancy/service";
 import {
   cancelSubscription,
+  changeSubscriptionItems,
   createBillingPortalSession,
   createCheckout,
   type CheckoutResult,
@@ -82,6 +83,35 @@ export async function billingPortalAction(
     return { ok: true, url };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Portal unavailable" };
+  }
+}
+
+const changeItemsSchema = z.object({
+  tenantId: z.string().min(1),
+  subscriptionId: z.string().uuid(),
+  addComponentIds: z.array(z.string().uuid()).max(20).default([]),
+  removeItemIds: z.array(z.string().uuid()).max(20).default([]),
+});
+
+/** Mid-subscription add-on changes (billing v2): prorated immediately. */
+export async function changeSubscriptionItemsAction(
+  input: z.infer<typeof changeItemsSchema>,
+): Promise<{ ok: true; added: number; removed: number } | { ok: false; error: string }> {
+  try {
+    const p = changeItemsSchema.parse(input);
+    const { session } = await requireMembership(p.tenantId, "write");
+    const sub = await getSubscriptionForTenant(p.subscriptionId, p.tenantId);
+    if (!sub) throw new Error("Subscription not found");
+    const r = await changeSubscriptionItems({
+      subscriptionId: p.subscriptionId,
+      addComponentIds: p.addComponentIds,
+      removeItemIds: p.removeItemIds,
+      actorUserId: session.user.id,
+    });
+    revalidatePath("/billing");
+    return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Change failed" };
   }
 }
 

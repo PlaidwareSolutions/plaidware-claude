@@ -43,6 +43,9 @@ export default async function OpsProductEditPage({
       components={components.map((c) => ({
         id: c.id,
         kind: c.kind,
+        role: c.role,
+        interval: c.interval,
+        intervalCount: c.intervalCount,
         name: c.name,
         description: c.description,
         amountCents: c.amountCents,

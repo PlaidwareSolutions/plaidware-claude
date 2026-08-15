@@ -1,6 +1,6 @@
 import type { PgBoss } from "pg-boss";
 import { stripeConfigured } from "../../lib/stripe";
-import { generateHostingInvoices, runDunningSweep } from "./ar-service";
+import { generateHostingInvoices, runDunningSweep, sendPreDueReminders } from "./ar-service";
 
 export async function registerBillingJobs(boss: PgBoss): Promise<string[]> {
   if (!stripeConfigured()) return [];
@@ -9,9 +9,10 @@ export async function registerBillingJobs(boss: PgBoss): Promise<string[]> {
   await boss.createQueue("billing.dunning-sweep");
   await boss.schedule("billing.dunning-sweep", "0 14 * * *"); // 14:00 UTC daily
   await boss.work("billing.dunning-sweep", async () => {
+    const pre = await sendPreDueReminders();
     const r = await runDunningSweep();
     console.log(
-      `[billing] dunning sweep: opened ${r.opened}, reminded ${r.reminded}, suspended ${r.suspended}`,
+      `[billing] dunning sweep: pre-due ${pre}, opened ${r.opened}, reminded ${r.reminded}, suspended ${r.suspended}`,
     );
   });
 

@@ -8,15 +8,13 @@ import { toast } from "sonner";
 import type { ProductDto } from "@/modules/catalog/queries";
 import { createCheckoutAction } from "../actions";
 import { formatCents } from "@/lib/money";
+import { intervalLabel, isRecurringKind, itemMrrCents } from "../mappers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 
-const KIND_LABEL: Record<string, string> = {
-  one_time: "one-time",
-  recurring_monthly: "/mo",
-  recurring_yearly: "/yr",
-};
+const label = (c: { kind: string; interval?: string | null; intervalCount?: number | null }) =>
+  c.kind === "one_time" ? "one-time" : intervalLabel(c);
 
 export function CheckoutFlow({
   product,
@@ -44,9 +42,9 @@ export function CheckoutFlow({
     [publishableKey],
   );
 
-  const required = product.components.filter((c) => c.isRequired);
+  const required = product.components.filter((c) => c.role === "base" || c.isRequired);
   const optionals = product.components.filter(
-    (c) => !c.isRequired && c.kind !== "metered",
+    (c) => c.role !== "base" && !c.isRequired && c.kind !== "metered",
   );
   const selected = [
     ...required,
@@ -55,12 +53,12 @@ export function CheckoutFlow({
   const dueTodayCents = selected
     .filter((c) => c.kind === "one_time")
     .reduce((s, c) => s + c.amountCents, 0);
-  const monthlyCents = selected
-    .filter((c) => c.kind === "recurring_monthly")
-    .reduce((s, c) => s + c.amountCents, 0);
-  const yearlyCents = selected
-    .filter((c) => c.kind === "recurring_yearly")
-    .reduce((s, c) => s + c.amountCents, 0);
+  const recurringSelected = selected.filter((c) => isRecurringKind(c.kind));
+  const monthlyEquivalentCents = recurringSelected.reduce(
+    (s, c) => s + itemMrrCents(c, c.amountCents),
+    0,
+  );
+  const firstRecurringCents = recurringSelected.reduce((s, c) => s + c.amountCents, 0);
 
   async function begin() {
     setBusy(true);
@@ -122,7 +120,7 @@ export function CheckoutFlow({
                   </div>
                   <div className="whitespace-nowrap text-sm font-semibold tabular-nums text-heading">
                     {formatCents(c.amountCents)}
-                    <span className="text-xs font-normal text-muted-foreground"> {KIND_LABEL[c.kind]}</span>
+                    <span className="text-xs font-normal text-muted-foreground"> {label(c)}</span>
                   </div>
                 </div>
               ))}
@@ -149,7 +147,7 @@ export function CheckoutFlow({
                   </div>
                   <div className="whitespace-nowrap text-sm font-semibold tabular-nums text-heading">
                     {formatCents(c.amountCents)}
-                    <span className="text-xs font-normal text-muted-foreground"> {KIND_LABEL[c.kind]}</span>
+                    <span className="text-xs font-normal text-muted-foreground"> {label(c)}</span>
                   </div>
                 </label>
               ))}
@@ -189,25 +187,19 @@ export function CheckoutFlow({
           {selected.map((c) => (
             <div key={c.id} className="flex justify-between gap-2">
               <span className="text-muted-foreground">{c.name}</span>
-              <span className="tabular-nums">{formatCents(c.amountCents)}{KIND_LABEL[c.kind] !== "one-time" ? KIND_LABEL[c.kind] : ""}</span>
+              <span className="tabular-nums">{formatCents(c.amountCents)}{label(c) !== "one-time" ? label(c) : ""}</span>
             </div>
           ))}
           <div className="mt-2 border-t pt-2">
-            {monthlyCents > 0 && (
+            {monthlyEquivalentCents > 0 && (
               <div className="flex justify-between font-medium">
-                <span>Monthly</span>
-                <span className="tabular-nums">{formatCents(monthlyCents)}/mo</span>
-              </div>
-            )}
-            {yearlyCents > 0 && (
-              <div className="flex justify-between font-medium">
-                <span>Yearly</span>
-                <span className="tabular-nums">{formatCents(yearlyCents)}/yr</span>
+                <span>Recurring (monthly equivalent)</span>
+                <span className="tabular-nums">{formatCents(monthlyEquivalentCents)}/mo</span>
               </div>
             )}
             <div className="flex justify-between text-base font-semibold text-heading">
               <span>Due today</span>
-              <span className="tabular-nums">{formatCents(dueTodayCents + monthlyCents + yearlyCents)}</span>
+              <span className="tabular-nums">{formatCents(dueTodayCents + firstRecurringCents)}</span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Recurring charges renew automatically. Cancel anytime.

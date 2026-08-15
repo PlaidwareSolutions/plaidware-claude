@@ -26,7 +26,7 @@ export type PromoLike = {
 
 export type SelectionItem = {
   componentId: string;
-  kind: string; // one_time | recurring_monthly | recurring_yearly
+  kind: string; // one_time | recurring | legacy recurring_monthly/yearly
   amountCents: number;
 };
 
@@ -75,7 +75,7 @@ export function computeDiscount(promo: PromoLike, items: SelectionItem[]): Disco
 
   const scopedFirstTotal = scoped.reduce((s, i) => s + i.amountCents, 0);
   const scopedRecurring = scoped
-    .filter((i) => i.kind === "recurring_monthly" || i.kind === "recurring_yearly")
+    .filter((i) => i.kind === "recurring" || i.kind === "recurring_monthly" || i.kind === "recurring_yearly")
     .reduce((s, i) => s + i.amountCents, 0);
 
   const periods =

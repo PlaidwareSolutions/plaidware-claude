@@ -5,6 +5,8 @@ import {
   listTenantInvoices,
   listTenantSubscriptions,
 } from "@/modules/billing/queries";
+import { getTenantOverrides } from "@/modules/billing/service";
+import { listActiveProducts } from "@/modules/catalog/queries";
 import { BillingView } from "@/modules/billing/components/billing-view";
 
 export const metadata = { title: "Billing" };
@@ -31,12 +33,41 @@ export default async function BillingPage() {
     listTenantInvoices(active.id),
   ]);
 
+  // Add-on options per live subscription, with tenant pricing applied (v2).
+  const products = await listActiveProducts();
+  const allComponentIds = products.flatMap((p) => p.components.map((c) => c.id));
+  const overrides = await getTenantOverrides(active.id, allComponentIds);
+  const addonOptions = Object.fromEntries(
+    subscriptions
+      .filter((s) => !["canceled", "expired"].includes(s.status))
+      .map((s) => {
+        const product = products.find((p) => p.id === s.productId);
+        const activeItems = new Set(
+          s.items.filter((i) => ["active", "pending"].includes(i.status)).map((i) => i.name),
+        );
+        return [
+          s.id,
+          (product?.components ?? [])
+            .filter((c) => c.role !== "base" && !activeItems.has(c.name))
+            .map((c) => ({
+              id: c.id,
+              name: c.name,
+              kind: c.kind,
+              interval: c.interval,
+              intervalCount: c.intervalCount,
+              amountCents: overrides.get(c.id)?.amountCents ?? c.amountCents,
+            })),
+        ];
+      }),
+  );
+
   return (
     <BillingView
       tenantId={active.id}
       canWrite={roleHasCapability(active.role, "write")}
       subscriptions={subscriptions}
       invoices={invoices}
+      addonOptions={addonOptions}
     />
   );
 }

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { requireOps } from "../../policy";
@@ -52,16 +52,23 @@ export async function updateProductAction(
   }
 }
 
-const componentSchema = z.object({
-  id: z.string().uuid().optional(), // absent = create
-  productId: z.string().uuid(),
-  kind: z.enum(["one_time", "recurring_monthly", "recurring_yearly"]),
-  name: z.string().min(2).max(80),
-  description: z.string().max(200).optional(),
-  amountCents: z.number().int().min(0).max(100_000_000),
-  isRequired: z.boolean(),
-  isActive: z.boolean(),
-});
+const componentSchema = z
+  .object({
+    id: z.string().uuid().optional(), // absent = create
+    productId: z.string().uuid(),
+    kind: z.enum(["one_time", "recurring"]),
+    interval: z.enum(["week", "month", "year"]).optional(),
+    intervalCount: z.number().int().min(1).max(36).default(1),
+    role: z.enum(["base", "addon"]).default("addon"),
+    name: z.string().min(2).max(80),
+    description: z.string().max(200).optional(),
+    amountCents: z.number().int().min(0).max(100_000_000),
+    isRequired: z.boolean(),
+    isActive: z.boolean(),
+  })
+  .refine((v) => v.kind !== "recurring" || v.interval != null, {
+    message: "Recurring components need a billing interval",
+  });
 
 export async function upsertComponentAction(
   input: z.infer<typeof componentSchema>,
@@ -69,17 +76,39 @@ export async function upsertComponentAction(
   try {
     await requireOps();
     const c = componentSchema.parse(input);
+    const interval = c.kind === "recurring" ? c.interval! : null;
+    const intervalCount = c.kind === "recurring" ? c.intervalCount : 1;
+
+    // One main charge per product (billing v2) — friendly error before the
+    // partial unique index would reject it.
+    if (c.role === "base") {
+      const existingBase = await db.query.productComponents.findFirst({
+        where: and(eq(productComponents.productId, c.productId), eq(productComponents.role, "base")),
+      });
+      if (existingBase && existingBase.id !== c.id) {
+        throw new Error(
+          `"${existingBase.name}" is already this product's main charge. Change it to an add-on first.`,
+        );
+      }
+    }
+
     if (c.id) {
       const existing = await db.query.productComponents.findFirst({
         where: eq(productComponents.id, c.id),
       });
       if (!existing) throw new Error("Component not found");
       const priceChanged =
-        existing.amountCents !== c.amountCents || existing.kind !== c.kind;
+        existing.amountCents !== c.amountCents ||
+        existing.kind !== c.kind ||
+        existing.interval !== interval ||
+        existing.intervalCount !== intervalCount;
       await db
         .update(productComponents)
         .set({
           kind: c.kind,
+          interval,
+          intervalCount,
+          role: c.role,
           name: c.name,
           description: c.description ?? null,
           amountCents: c.amountCents,
@@ -95,6 +124,9 @@ export async function upsertComponentAction(
       await db.insert(productComponents).values({
         productId: c.productId,
         kind: c.kind,
+        interval,
+        intervalCount,
+        role: c.role,
         name: c.name,
         description: c.description ?? null,
         amountCents: c.amountCents,

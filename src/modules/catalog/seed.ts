@@ -17,7 +17,10 @@ const METRIC_DEFS: Record<
 };
 
 type SeedComponent = {
-  kind: "one_time" | "recurring_monthly" | "recurring_yearly" | "metered";
+  kind: "one_time" | "recurring";
+  interval?: "week" | "month" | "year";
+  intervalCount?: number;
+  role?: "base";
   name: string;
   description?: string;
   amountCents: number;
@@ -55,9 +58,9 @@ const CATALOG: SeedProduct[] = [
     ],
     color: "#7a6cf0",
     components: [
-      { kind: "one_time", name: "Initial Build", amountCents: 450000, isRequired: true, description: "Design, build, and launch of your website" },
-      { kind: "recurring_monthly", name: "Hosting", amountCents: 7900, description: "Managed hosting, TLS, and monitoring" },
-      { kind: "recurring_yearly", name: "Maintenance", amountCents: 96000, description: "Content updates and annual refresh" },
+      { kind: "one_time", role: "base", name: "Initial Build", amountCents: 450000, isRequired: true, description: "Design, build, and launch of your website" },
+      { kind: "recurring", interval: "month", name: "Hosting", amountCents: 7900, description: "Managed hosting, TLS, and monitoring" },
+      { kind: "recurring", interval: "year", name: "Maintenance", amountCents: 96000, description: "Content updates and annual refresh" },
     ],
   },
   {
@@ -71,8 +74,8 @@ const CATALOG: SeedProduct[] = [
     color: "#f0663f",
     components: [
       { kind: "one_time", name: "Onboarding & Setup", amountCents: 250000, isRequired: true },
-      { kind: "recurring_monthly", name: "Subscription", amountCents: 19900, isRequired: true },
-      { kind: "recurring_yearly", name: "Annual Compliance & Backup", amountCents: 48000 },
+      { kind: "recurring", interval: "month", role: "base", name: "Subscription", amountCents: 19900, isRequired: true },
+      { kind: "recurring", interval: "year", name: "Annual Compliance & Backup", amountCents: 48000 },
     ],
   },
   {
@@ -86,8 +89,8 @@ const CATALOG: SeedProduct[] = [
     color: "#34d399",
     components: [
       { kind: "one_time", name: "Onboarding + POS Integration", amountCents: 150000, isRequired: true },
-      { kind: "recurring_monthly", name: "Subscription", amountCents: 14900, isRequired: true },
-      { kind: "recurring_monthly", name: "Extra Terminal", amountCents: 3900 },
+      { kind: "recurring", interval: "month", role: "base", name: "Subscription", amountCents: 14900, isRequired: true },
+      { kind: "recurring", interval: "month", name: "Extra Terminal", amountCents: 3900 },
     ],
   },
   {
@@ -101,8 +104,8 @@ const CATALOG: SeedProduct[] = [
     color: "#fbbf24",
     components: [
       { kind: "one_time", name: "School Onboarding", amountCents: 120000, isRequired: true },
-      { kind: "recurring_monthly", name: "Subscription", amountCents: 12900, isRequired: true },
-      { kind: "recurring_monthly", name: "Extra Location", amountCents: 5900 },
+      { kind: "recurring", interval: "month", role: "base", name: "Subscription", amountCents: 12900, isRequired: true },
+      { kind: "recurring", interval: "month", name: "Extra Location", amountCents: 5900 },
     ],
   },
   {
@@ -116,8 +119,8 @@ const CATALOG: SeedProduct[] = [
     color: "#60a5fa",
     components: [
       { kind: "one_time", name: "Property Onboarding", amountCents: 180000, isRequired: true },
-      { kind: "recurring_monthly", name: "Subscription per Property", amountCents: 22900, isRequired: true },
-      { kind: "recurring_yearly", name: "Resident Billing & Payments", amountCents: 120000 },
+      { kind: "recurring", interval: "month", role: "base", name: "Subscription per Property", amountCents: 22900, isRequired: true },
+      { kind: "recurring", interval: "year", name: "Resident Billing & Payments", amountCents: 120000 },
     ],
   },
   {
@@ -131,9 +134,9 @@ const CATALOG: SeedProduct[] = [
     color: "#c084fc",
     components: [
       { kind: "one_time", name: "Onboarding & Setup", amountCents: 500000, isRequired: true },
-      { kind: "recurring_monthly", name: "Subscription (up to 100 units)", amountCents: 14900, isRequired: true },
-      { kind: "recurring_monthly", name: "Additional Units (per 50)", amountCents: 4900 },
-      { kind: "recurring_yearly", name: "Annual Compliance & Backup", amountCents: 24000 },
+      { kind: "recurring", interval: "month", role: "base", name: "Subscription (up to 100 units)", amountCents: 14900, isRequired: true },
+      { kind: "recurring", interval: "month", name: "Additional Units (per 50)", amountCents: 4900 },
+      { kind: "recurring", interval: "year", name: "Annual Compliance & Backup", amountCents: 24000 },
     ],
   },
   {
@@ -146,13 +149,13 @@ const CATALOG: SeedProduct[] = [
     features: ["SEO retainer", "Paid ads management", "Content production", "Social management", "Email campaigns", "Quarterly strategy reviews"],
     color: "#f472b6",
     components: [
-      { kind: "one_time", name: "Onboarding & Strategy Audit", amountCents: 150000, isRequired: true },
-      { kind: "recurring_monthly", name: "SEO Retainer", amountCents: 89900 },
-      { kind: "recurring_monthly", name: "Paid Ads Management", amountCents: 120000 },
-      { kind: "recurring_monthly", name: "Content Production", amountCents: 79900 },
-      { kind: "recurring_monthly", name: "Social Management", amountCents: 69900 },
-      { kind: "recurring_monthly", name: "Email Campaigns", amountCents: 49900 },
-      { kind: "recurring_yearly", name: "Quarterly Strategy Review", amountCents: 120000 },
+      { kind: "one_time", role: "base", name: "Onboarding & Strategy Audit", amountCents: 150000, isRequired: true },
+      { kind: "recurring", interval: "month", name: "SEO Retainer", amountCents: 89900 },
+      { kind: "recurring", interval: "month", name: "Paid Ads Management", amountCents: 120000 },
+      { kind: "recurring", interval: "month", name: "Content Production", amountCents: 79900 },
+      { kind: "recurring", interval: "month", name: "Social Management", amountCents: 69900 },
+      { kind: "recurring", interval: "month", name: "Email Campaigns", amountCents: 49900 },
+      { kind: "recurring", interval: "year", name: "Quarterly Strategy Review", amountCents: 120000 },
     ],
   },
 ];
@@ -200,12 +203,23 @@ export async function seedCatalog(db: Db): Promise<{ products: number; component
         // Reconcile structure/copy; never touch price of an existing component.
         await db
           .update(productComponents)
-          .set({ kind: c.kind, description: c.description, isRequired: c.isRequired ?? false, sortOrder: j })
+          .set({
+            kind: c.kind,
+            interval: c.interval ?? null,
+            intervalCount: c.intervalCount ?? 1,
+            role: c.role ?? "addon",
+            description: c.description,
+            isRequired: c.isRequired ?? false,
+            sortOrder: j,
+          })
           .where(eq(productComponents.id, found.id));
       } else {
         await db.insert(productComponents).values({
           productId,
           kind: c.kind,
+          interval: c.interval ?? null,
+          intervalCount: c.intervalCount ?? 1,
+          role: c.role ?? "addon",
           name: c.name,
           description: c.description,
           amountCents: c.amountCents,

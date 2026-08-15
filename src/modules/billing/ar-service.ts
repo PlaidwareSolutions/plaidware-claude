@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../../db";
 import { getStripe } from "../../lib/stripe";
@@ -58,14 +58,24 @@ export async function createManualInvoice(opts: {
   daysUntilDue: number;
   memo?: string;
   contact: { email: string; name: string };
-}): Promise<{ invoiceId: string; hostedInvoiceUrl: string | null }> {
+  /** "auto" charges the card on file immediately (falls back to a hosted
+   *  payment link when none exists); "send" always emails the link. */
+  collect?: "auto" | "send";
+}): Promise<{ invoiceId: string; hostedInvoiceUrl: string | null; autoCharged: boolean }> {
   const stripe = getStripe();
   const customerId = await ensureTenantStripeCustomer(opts.tenantId, opts.contact);
 
+  let autoCharge = false;
+  if (opts.collect === "auto") {
+    const customer = (await stripe.customers.retrieve(customerId)) as import("stripe").Stripe.Customer;
+    autoCharge = Boolean(customer.invoice_settings?.default_payment_method);
+  }
+
   const invoice = await stripe.invoices.create({
     customer: customerId,
-    collection_method: "send_invoice",
-    days_until_due: opts.daysUntilDue,
+    ...(autoCharge
+      ? { collection_method: "charge_automatically" as const }
+      : { collection_method: "send_invoice" as const, days_until_due: opts.daysUntilDue }),
     description: opts.memo,
     metadata: { tenant_id: opts.tenantId, invoice_kind: "manual" },
   });
@@ -79,8 +89,12 @@ export async function createManualInvoice(opts: {
     });
   }
   const finalized = await stripe.invoices.finalizeInvoice(invoice.id!);
-  // Stripe emails the customer the hosted payment link.
-  await stripe.invoices.sendInvoice(finalized.id!).catch(() => {});
+  if (autoCharge) {
+    await stripe.invoices.pay(finalized.id!).catch(() => {});
+  } else {
+    // Stripe emails the customer the hosted payment link.
+    await stripe.invoices.sendInvoice(finalized.id!).catch(() => {});
+  }
 
   const [row] = await db
     .insert(invoices)
@@ -100,7 +114,49 @@ export async function createManualInvoice(opts: {
     })
     .onConflictDoNothing({ target: invoices.stripeInvoiceId })
     .returning();
-  return { invoiceId: row.id, hostedInvoiceUrl: finalized.hosted_invoice_url ?? null };
+  return {
+    invoiceId: row.id,
+    hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
+    autoCharged: autoCharge,
+  };
+}
+
+/** Pre-due reminders (billing v2): open invoices with a due date inside the
+ *  configured window get one "payment due soon" email, deduped by stamp. */
+export async function sendPreDueReminders(now = new Date()): Promise<number> {
+  const policy = await getBillingPolicy();
+  const windowEnd = new Date(now.getTime() + policy.upcomingReminderDays * 86_400_000);
+  const upcoming = await db.query.invoices.findMany({
+    where: and(
+      eq(invoices.status, "open"),
+      isNull(invoices.upcomingReminderSentAt),
+      gt(invoices.dueDate, now),
+      lt(invoices.dueDate, windowEnd),
+    ),
+  });
+  let sent = 0;
+  for (const inv of upcoming) {
+    const contacts = await tenantBillingContacts(inv.tenantId);
+    if (contacts.length) {
+      await sendEmail({
+        to: contacts[0],
+        subject: `Payment due soon — invoice ${inv.invoiceNumber}`,
+        html: emailShell(
+          "Payment due soon",
+          `<p>Invoice ${inv.invoiceNumber} for ${formatCents(inv.amountDueCents - inv.amountPaidCents)} is due on ${inv.dueDate!.toLocaleDateString()}.</p>` +
+            (inv.hostedInvoiceUrl
+              ? emailButton(inv.hostedInvoiceUrl, "Pay now")
+              : emailButton(`${env.APP_BASE_URL}/billing`, "View billing")),
+        ),
+      });
+    }
+    await db
+      .update(invoices)
+      .set({ upcomingReminderSentAt: now })
+      .where(eq(invoices.id, inv.id));
+    sent++;
+  }
+  return sent;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { requireOps } from "../../policy";
 import { dunningStates } from "./ar-schema";
+import { tenantPriceOverrides } from "./schema";
 import {
   createManualInvoice,
   generateHostingInvoices,
@@ -28,6 +29,7 @@ const manualInvoiceSchema = z.object({
     .max(20),
   daysUntilDue: z.number().int().min(1).max(90),
   memo: z.string().max(500).optional(),
+  collect: z.enum(["auto", "send"]).default("send"),
 });
 
 export async function createManualInvoiceAction(
@@ -129,6 +131,55 @@ export async function runDunningSweepAction(): Promise<
     return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Sweep failed" };
+  }
+}
+
+const overrideSchema = z.object({
+  tenantId: z.string().min(1),
+  componentId: z.string().uuid(),
+  /** Cents; null clears the override. */
+  amountCents: z.number().int().min(0).nullable(),
+});
+
+/** Per-tenant negotiated pricing (billing v2) — applies to future checkouts
+ *  and add-ons; existing subscriptions keep their snapshots. */
+export async function setTenantPriceOverrideAction(
+  input: z.infer<typeof overrideSchema>,
+): Promise<ActionResult> {
+  try {
+    const session = await requireOps();
+    const p = overrideSchema.parse(input);
+    if (p.amountCents == null || p.amountCents === 0) {
+      await db
+        .delete(tenantPriceOverrides)
+        .where(
+          and(
+            eq(tenantPriceOverrides.tenantId, p.tenantId),
+            eq(tenantPriceOverrides.componentId, p.componentId),
+          ),
+        );
+    } else {
+      await db
+        .insert(tenantPriceOverrides)
+        .values({
+          tenantId: p.tenantId,
+          componentId: p.componentId,
+          amountCents: p.amountCents,
+          createdByUserId: session.user.id,
+        })
+        .onConflictDoUpdate({
+          target: [tenantPriceOverrides.tenantId, tenantPriceOverrides.componentId],
+          set: {
+            amountCents: p.amountCents,
+            stripePriceId: null, // re-mint at next use
+            createdByUserId: session.user.id,
+          },
+        });
+    }
+    revalidatePath(`/ops/tenants/${p.tenantId}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
   }
 }
 

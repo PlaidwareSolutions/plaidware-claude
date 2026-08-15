@@ -9,6 +9,7 @@ import {
   applySubscriptionEvent,
   claimStripeEvent,
   sendTrialEndingReminder,
+  sendUpcomingRenewalReminder,
 } from "@/modules/billing/service";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,9 @@ export async function POST(req: Request) {
         break;
       case "customer.subscription.trial_will_end":
         await sendTrialEndingReminder(event.data.object as Stripe.Subscription);
+        break;
+      case "invoice.upcoming":
+        await sendUpcomingRenewalReminder(event.data.object as Stripe.Invoice);
         break;
       default:
         break; // ignored event types

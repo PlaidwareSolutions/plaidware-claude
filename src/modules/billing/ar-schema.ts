@@ -79,6 +79,8 @@ export const billingPolicy = pgTable(
     reminderDays: jsonb("reminder_days").$type<number[]>().notNull().default([3, 7, 14]),
     graceDays: integer("grace_days").notNull().default(14),
     autoSuspend: boolean("auto_suspend").notNull().default(true),
+    /** Days before dueDate to send the pre-due reminder (billing v2). */
+    upcomingReminderDays: integer("upcoming_reminder_days").notNull().default(3),
     updatedAt: timestamp("updated_at")
       .notNull()
       .defaultNow()

@@ -12,11 +12,14 @@ import {
   stripeEvents,
   subscriptionItems,
   subscriptions,
+  tenantPriceOverrides,
 } from "./schema";
 import {
+  isRecurringKind,
   LIVE_SUBSCRIPTION_STATUSES,
   mapStripeInvoiceStatus,
   mapStripeSubscriptionStatus,
+  resolveInterval,
 } from "./mappers";
 import {
   deleteMintedCoupon,
@@ -31,6 +34,7 @@ import {
   resolveDunningForInvoice,
 } from "./ar-service";
 import { mintIngestKey } from "../monitoring/service";
+import { writeAudit } from "../audit/service";
 
 // ---------------------------------------------------------------------------
 // Stripe object provisioning
@@ -58,12 +62,21 @@ export async function ensureTenantStripeCustomer(
   return customer.id;
 }
 
-const KIND_INTERVAL: Record<string, "month" | "year" | null> = {
-  recurring_monthly: "month",
-  recurring_yearly: "year",
-  one_time: null,
-  metered: null,
-};
+async function ensureStripeProductFor(
+  component: typeof productComponents.$inferSelect,
+  productName: string,
+): Promise<string> {
+  if (component.stripeProductId) return component.stripeProductId;
+  const p = await getStripe().products.create({
+    name: `${productName} — ${component.name}`,
+    metadata: { component_id: component.id },
+  });
+  await db
+    .update(productComponents)
+    .set({ stripeProductId: p.id })
+    .where(eq(productComponents.id, component.id));
+  return p.id;
+}
 
 /** Lazily create the Stripe Product/Price for a component; prices are
  *  immutable, so catalog edits clear stripePriceId and we mint fresh here. */
@@ -73,30 +86,55 @@ export async function ensureComponentStripePrice(
 ): Promise<string> {
   if (component.stripePriceId) return component.stripePriceId;
   const stripe = getStripe();
-
-  let stripeProductId = component.stripeProductId;
-  if (!stripeProductId) {
-    const p = await stripe.products.create({
-      name: `${productName} — ${component.name}`,
-      metadata: { component_id: component.id },
-    });
-    stripeProductId = p.id;
-  }
-
-  const interval = KIND_INTERVAL[component.kind];
+  const stripeProductId = await ensureStripeProductFor(component, productName);
+  const iv = resolveInterval(component);
   const price = await stripe.prices.create({
     product: stripeProductId,
     unit_amount: component.amountCents,
     currency: component.currency,
-    ...(interval ? { recurring: { interval } } : {}),
+    ...(iv ? { recurring: { interval: iv.interval, interval_count: iv.intervalCount } } : {}),
     metadata: { component_id: component.id },
   });
-
   await db
     .update(productComponents)
-    .set({ stripeProductId, stripePriceId: price.id })
+    .set({ stripePriceId: price.id })
     .where(eq(productComponents.id, component.id));
   return price.id;
+}
+
+/** Tenant-negotiated price (billing v2): its own lazily minted Stripe Price. */
+export async function ensureOverrideStripePrice(
+  override: typeof tenantPriceOverrides.$inferSelect,
+  component: typeof productComponents.$inferSelect,
+  productName: string,
+): Promise<string> {
+  if (override.stripePriceId) return override.stripePriceId;
+  const stripeProductId = await ensureStripeProductFor(component, productName);
+  const iv = resolveInterval(component);
+  const price = await getStripe().prices.create({
+    product: stripeProductId,
+    unit_amount: override.amountCents,
+    currency: component.currency,
+    ...(iv ? { recurring: { interval: iv.interval, interval_count: iv.intervalCount } } : {}),
+    metadata: { component_id: component.id, tenant_id: override.tenantId, override: "1" },
+  });
+  await db
+    .update(tenantPriceOverrides)
+    .set({ stripePriceId: price.id })
+    .where(eq(tenantPriceOverrides.id, override.id));
+  return price.id;
+}
+
+/** Effective per-tenant pricing map for a product's components. */
+export async function getTenantOverrides(tenantId: string, componentIds: string[]) {
+  if (componentIds.length === 0) return new Map<string, typeof tenantPriceOverrides.$inferSelect>();
+  const rows = await db.query.tenantPriceOverrides.findMany({
+    where: and(
+      eq(tenantPriceOverrides.tenantId, tenantId),
+      inArray(tenantPriceOverrides.componentId, componentIds),
+    ),
+  });
+  return new Map(rows.map((r) => [r.componentId, r]));
 }
 
 // ---------------------------------------------------------------------------
@@ -137,17 +175,21 @@ export async function createCheckout(opts: {
       eq(productComponents.isActive, true),
     ),
   });
-  // Required components are always in; optional only when selected.
+  // The base charge and required add-ons are always in; optional add-ons only
+  // when selected (billing v2 main + add-ons model).
   const selected = allComponents.filter(
-    (c) => c.isRequired || opts.componentIds.includes(c.id),
+    (c) => c.role === "base" || c.isRequired || opts.componentIds.includes(c.id),
   );
-  const recurring = selected.filter(
-    (c) => c.kind === "recurring_monthly" || c.kind === "recurring_yearly",
-  );
+  const recurring = selected.filter((c) => isRecurringKind(c.kind));
   const oneTime = selected.filter((c) => c.kind === "one_time");
   if (recurring.length === 0 && oneTime.length === 0) {
     throw new Error("Select at least one billable component");
   }
+
+  // Per-tenant negotiated prices apply to this checkout (billing v2).
+  const overrides = await getTenantOverrides(opts.tenantId, selected.map((c) => c.id));
+  const effectiveAmount = (c: (typeof selected)[number]) =>
+    overrides.get(c.id)?.amountCents ?? c.amountCents;
 
   // Pre-check the one-live-subscription rule for a friendly error;
   // the partial unique index is the race-proof backstop.
@@ -165,17 +207,24 @@ export async function createCheckout(opts: {
   const customerId = await ensureTenantStripeCustomer(opts.tenantId, opts.contact);
   const priceIds = new Map<string, string>();
   for (const c of selected) {
-    priceIds.set(c.id, await ensureComponentStripePrice(c, product.name));
+    const ov = overrides.get(c.id);
+    priceIds.set(
+      c.id,
+      ov
+        ? await ensureOverrideStripePrice(ov, c, product.name)
+        : await ensureComponentStripePrice(c, product.name),
+    );
   }
 
   // Promo: explicit code wins; otherwise best auto-apply. Never stacks (PRD §4.6).
+  // Discount math runs on the tenant's effective (possibly overridden) prices.
   const resolvedPromo = await resolveCheckoutPromo({
     tenantId: opts.tenantId,
     productId: opts.productId,
     items: selected.map((c) => ({
       componentId: c.id,
       kind: c.kind,
-      amountCents: c.amountCents,
+      amountCents: effectiveAmount(c),
     })),
     code: opts.promoCode,
   });
@@ -269,20 +318,25 @@ export async function createCheckout(opts: {
       ? await stripe.subscriptions.retrieve(stripeSubscriptionId)
       : null;
     await db.insert(subscriptionItems).values(
-      selected.map((c) => ({
-        subscriptionId: subRow.id,
-        componentId: c.id,
-        kind: c.kind,
-        name: c.name,
-        amountCents: c.amountCents,
-        currency: c.currency,
-        status: c.kind === "one_time" ? ("pending" as const) : ("active" as const),
-        stripePriceId: priceIds.get(c.id),
-        stripeSubscriptionItemId:
-          stripeSub?.items.data.find(
-            (si) => si.price.id === priceIds.get(c.id),
-          )?.id ?? null,
-      })),
+      selected.map((c) => {
+        const iv = resolveInterval(c);
+        return {
+          subscriptionId: subRow.id,
+          componentId: c.id,
+          kind: c.kind,
+          interval: iv?.interval ?? null,
+          intervalCount: iv?.intervalCount ?? 1,
+          name: c.name,
+          amountCents: effectiveAmount(c),
+          currency: c.currency,
+          status: c.kind === "one_time" ? ("pending" as const) : ("active" as const),
+          stripePriceId: priceIds.get(c.id),
+          stripeSubscriptionItemId:
+            stripeSub?.items.data.find(
+              (si) => si.price.id === priceIds.get(c.id),
+            )?.id ?? null,
+        };
+      }),
     );
 
     // Every subscription gets an ingest credential at birth (PRD §4.8).
@@ -348,6 +402,141 @@ export async function cancelSubscription(subscriptionId: string): Promise<void> 
         notInArray(subscriptionItems.status, ["paid"]),
       ),
     );
+}
+
+/**
+ * Mid-subscription add-on changes (billing v2). Recurring changes prorate
+ * immediately; one-time add-ons are invoiced and charged right away.
+ */
+export async function changeSubscriptionItems(opts: {
+  subscriptionId: string;
+  addComponentIds?: string[];
+  removeItemIds?: string[];
+  actorUserId: string;
+}): Promise<{ added: number; removed: number }> {
+  const stripe = getStripe();
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.id, opts.subscriptionId),
+  });
+  if (!sub) throw new Error("Subscription not found");
+  if (!LIVE_SUBSCRIPTION_STATUSES.includes(sub.status)) {
+    throw new Error("Add-ons can only change on a live subscription");
+  }
+  const product = await db.query.products.findFirst({
+    where: eq(products.id, sub.productId),
+  });
+  const existingItems = await db.query.subscriptionItems.findMany({
+    where: eq(subscriptionItems.subscriptionId, sub.id),
+  });
+  let added = 0;
+  let removed = 0;
+
+  // ---- removals: optional recurring add-ons only, prorated credit ----------
+  for (const itemId of opts.removeItemIds ?? []) {
+    const item = existingItems.find((i) => i.id === itemId);
+    if (!item || item.status !== "active") continue;
+    const component = item.componentId
+      ? await db.query.productComponents.findFirst({
+          where: eq(productComponents.id, item.componentId),
+        })
+      : null;
+    if (component?.role === "base") throw new Error("The base charge can't be removed — cancel the subscription instead.");
+    if (!isRecurringKind(item.kind) || !item.stripeSubscriptionItemId) continue;
+    await stripe.subscriptionItems.del(item.stripeSubscriptionItemId, {
+      proration_behavior: "create_prorations",
+    });
+    await db
+      .update(subscriptionItems)
+      .set({ status: "canceled" })
+      .where(eq(subscriptionItems.id, item.id));
+    removed++;
+  }
+
+  // ---- additions ------------------------------------------------------------
+  const overrides = await getTenantOverrides(sub.tenantId, opts.addComponentIds ?? []);
+  for (const componentId of opts.addComponentIds ?? []) {
+    const c = await db.query.productComponents.findFirst({
+      where: eq(productComponents.id, componentId),
+    });
+    if (!c || !c.isActive || c.productId !== sub.productId) {
+      throw new Error("That add-on doesn't belong to this product");
+    }
+    if (existingItems.some((i) => i.componentId === c.id && ["active", "pending"].includes(i.status))) {
+      continue; // already on the subscription
+    }
+    const ov = overrides.get(c.id);
+    const priceId = ov
+      ? await ensureOverrideStripePrice(ov, c, product?.name ?? "Plaidware")
+      : await ensureComponentStripePrice(c, product?.name ?? "Plaidware");
+    const amount = ov?.amountCents ?? c.amountCents;
+    const iv = resolveInterval(c);
+
+    if (isRecurringKind(c.kind)) {
+      if (!sub.stripeSubscriptionId) throw new Error("This subscription has no Stripe billing to attach recurring add-ons to");
+      const si = await stripe.subscriptionItems.create({
+        subscription: sub.stripeSubscriptionId,
+        price: priceId,
+        proration_behavior: "create_prorations",
+      });
+      await db.insert(subscriptionItems).values({
+        subscriptionId: sub.id,
+        componentId: c.id,
+        kind: c.kind,
+        interval: iv?.interval ?? null,
+        intervalCount: iv?.intervalCount ?? 1,
+        name: c.name,
+        amountCents: amount,
+        currency: c.currency,
+        status: "active",
+        stripePriceId: priceId,
+        stripeSubscriptionItemId: si.id,
+      });
+    } else {
+      // One-time add-on: standalone invoice, charged immediately when a card
+      // is on file (owner decision), else hosted payment link.
+      const org = await db.query.organization.findFirst({
+        where: eq(organization.id, sub.tenantId),
+      });
+      const customer = (await stripe.customers.retrieve(org!.stripeCustomerId!)) as Stripe.Customer;
+      const hasPm = Boolean(customer.invoice_settings?.default_payment_method);
+      const invoice = await stripe.invoices.create({
+        customer: org!.stripeCustomerId!,
+        ...(hasPm
+          ? { collection_method: "charge_automatically" as const, auto_advance: true }
+          : { collection_method: "send_invoice" as const, days_until_due: 7 }),
+        description: `${c.name} — added to ${product?.name ?? "subscription"}`,
+        metadata: { subscription_id: sub.id, tenant_id: sub.tenantId },
+      });
+      await stripe.invoiceItems.create({
+        customer: org!.stripeCustomerId!,
+        invoice: invoice.id,
+        pricing: { price: priceId },
+      });
+      const finalized = await stripe.invoices.finalizeInvoice(invoice.id!);
+      if (hasPm) await stripe.invoices.pay(finalized.id!).catch(() => {});
+      else await stripe.invoices.sendInvoice(finalized.id!).catch(() => {});
+      await db.insert(subscriptionItems).values({
+        subscriptionId: sub.id,
+        componentId: c.id,
+        kind: c.kind,
+        name: c.name,
+        amountCents: amount,
+        currency: c.currency,
+        status: "pending", // flips to paid via the invoice.paid webhook
+        stripePriceId: priceId,
+      });
+    }
+    added++;
+  }
+
+  await writeAudit({
+    tenantId: sub.tenantId,
+    subscriptionId: sub.id,
+    actorUserId: opts.actorUserId,
+    kind: "subscription_items_changed",
+    payload: { added, removed },
+  });
+  return { added, removed };
 }
 
 export async function createBillingPortalSession(
@@ -495,7 +684,33 @@ export async function applyInvoiceEvent(
   }
 }
 
+/** Promote the subscription's saved card to the customer's default payment
+ *  method so hosting/manual/add-on invoices can auto-charge (billing v2). */
+async function promoteDefaultPaymentMethod(sub: typeof subscriptions.$inferSelect) {
+  try {
+    const stripe = getStripe();
+    const org = await db.query.organization.findFirst({
+      where: eq(organization.id, sub.tenantId),
+    });
+    if (!org?.stripeCustomerId || !sub.stripeSubscriptionId) return;
+    const customer = (await stripe.customers.retrieve(org.stripeCustomerId)) as Stripe.Customer;
+    if (customer.invoice_settings?.default_payment_method) return; // already set
+    const stripeSub = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    const pm =
+      typeof stripeSub.default_payment_method === "string"
+        ? stripeSub.default_payment_method
+        : stripeSub.default_payment_method?.id;
+    if (!pm) return;
+    await stripe.customers.update(org.stripeCustomerId, {
+      invoice_settings: { default_payment_method: pm },
+    });
+  } catch (e) {
+    console.warn("[billing] default-pm promotion skipped:", e instanceof Error ? e.message : e);
+  }
+}
+
 async function onInvoicePaid(sub: typeof subscriptions.$inferSelect) {
+  await promoteDefaultPaymentMethod(sub);
   // One-time items settle with the first paid invoice.
   await db
     .update(subscriptionItems)
@@ -575,6 +790,61 @@ export async function applySubscriptionEvent(
       canceledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
     })
     .where(eq(subscriptions.id, localSub.id));
+
+  // Reconcile recurring items so mid-cycle changes made anywhere stay mirrored.
+  const liveStripeItemIds = new Set(stripeSub.items.data.map((i) => i.id));
+  const localItems = await db.query.subscriptionItems.findMany({
+    where: eq(subscriptionItems.subscriptionId, localSub.id),
+  });
+  for (const item of localItems) {
+    if (
+      item.status === "active" &&
+      item.stripeSubscriptionItemId &&
+      !liveStripeItemIds.has(item.stripeSubscriptionItemId)
+    ) {
+      await db
+        .update(subscriptionItems)
+        .set({ status: "canceled" })
+        .where(eq(subscriptionItems.id, item.id));
+    }
+  }
+}
+
+/** invoice.upcoming → renewal notice to billing contacts (billing v2). */
+export async function sendUpcomingRenewalReminder(invoice: Stripe.Invoice): Promise<void> {
+  const parentSub = invoice.parent?.subscription_details;
+  const stripeSubId =
+    typeof parentSub?.subscription === "string"
+      ? parentSub.subscription
+      : (parentSub?.subscription?.id ?? null);
+  const localSub = await resolveSubscriptionRef({
+    stripeSubscriptionId: stripeSubId,
+    localSubscriptionId: invoice.metadata?.subscription_id,
+  });
+  if (!localSub) return;
+  const [product, owner] = await Promise.all([
+    db.query.products.findFirst({ where: eq(products.id, localSub.productId) }),
+    db
+      .select({ email: user.email })
+      .from(member)
+      .innerJoin(user, eq(member.userId, user.id))
+      .where(and(eq(member.organizationId, localSub.tenantId), inArray(member.role, ["owner", "admin", "billing"])))
+      .limit(1),
+  ]);
+  if (!owner[0]) return;
+  const lines = (invoice.lines?.data ?? [])
+    .map((l) => `<li>${l.description ?? "Line item"} — ${formatCents(l.amount)}</li>`)
+    .join("");
+  const dueTs = invoice.next_payment_attempt ?? invoice.due_date ?? invoice.period_end;
+  await sendEmail({
+    to: owner[0].email,
+    subject: `Upcoming ${product?.name ?? "subscription"} renewal — ${formatCents(invoice.amount_due)}`,
+    html: emailShell(
+      "Your renewal is coming up",
+      `<p>Your ${product?.name ?? "Plaidware"} subscription renews${dueTs ? ` on ${new Date(dueTs * 1000).toLocaleDateString()}` : " soon"}. Your card on file will be charged automatically — nothing to do.</p><ul>${lines}</ul><p><strong>Total: ${formatCents(invoice.amount_due)}</strong></p>` +
+        emailButton(`${env.APP_BASE_URL}/billing`, "View billing"),
+    ),
+  });
 }
 
 export async function sendTrialEndingReminder(stripeSub: Stripe.Subscription) {

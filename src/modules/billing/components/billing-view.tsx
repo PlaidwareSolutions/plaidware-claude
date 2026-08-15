@@ -5,7 +5,8 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { ExternalLink, Receipt } from "lucide-react";
 import type { InvoiceDto, SubscriptionDto } from "../queries";
-import { billingPortalAction, cancelSubscriptionAction } from "../actions";
+import { billingPortalAction, cancelSubscriptionAction, changeSubscriptionItemsAction } from "../actions";
+import { intervalLabel } from "../mappers";
 import { setDomainAction } from "@/modules/provisioning/actions";
 import { Input } from "@/components/ui/input";
 import { formatCents } from "@/lib/money";
@@ -58,16 +59,27 @@ function statusBadge(status: string) {
   return <Badge variant={variant}>{status.replace("_", " ")}</Badge>;
 }
 
+export type AddonOption = {
+  id: string;
+  name: string;
+  kind: string;
+  interval: string | null;
+  intervalCount: number;
+  amountCents: number;
+};
+
 export function BillingView({
   tenantId,
   canWrite,
   subscriptions,
   invoices,
+  addonOptions = {},
 }: {
   tenantId: string;
   canWrite: boolean;
   subscriptions: SubscriptionDto[];
   invoices: InvoiceDto[];
+  addonOptions?: Record<string, AddonOption[]>;
 }) {
   const [busy, setBusy] = useState(false);
   const totalMonthly = subscriptions.reduce((s, x) => s + x.monthlyCents, 0);
@@ -147,7 +159,7 @@ export function BillingView({
                     </span>
                     <span className="tabular-nums">
                       {formatCents(i.amountCents)}
-                      {i.kind === "recurring_monthly" ? "/mo" : i.kind === "recurring_yearly" ? "/yr" : ""}
+                      {intervalLabel(i)}
                     </span>
                   </li>
                 ))}
@@ -156,6 +168,13 @@ export function BillingView({
                 <div className="flex flex-wrap items-center gap-2 border-t pt-3">
                   <DomainEditor tenantId={tenantId} sub={sub} />
                   <div className="flex-1" />
+                  {(addonOptions[sub.id]?.length || sub.items.some((i) => i.status === "active")) && (
+                    <ManageAddons
+                      tenantId={tenantId}
+                      sub={sub}
+                      options={addonOptions[sub.id] ?? []}
+                    />
+                  )}
                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => cancel(sub)}>
                     Cancel subscription
                   </Button>
@@ -212,5 +231,126 @@ export function BillingView({
         </div>
       )}
     </div>
+  );
+}
+
+function ManageAddons({
+  tenantId,
+  sub,
+  options,
+}: {
+  tenantId: string;
+  sub: SubscriptionDto;
+  options: AddonOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [toAdd, setToAdd] = useState<Set<string>>(new Set());
+  const [toRemove, setToRemove] = useState<Set<string>>(new Set());
+
+  // Removable = active recurring items beyond the base (base can't be removed).
+  const removable = sub.items.filter(
+    (i) => i.status === "active" && i.interval != null,
+  );
+
+  async function apply() {
+    setBusy(true);
+    const res = await changeSubscriptionItemsAction({
+      tenantId,
+      subscriptionId: sub.id,
+      addComponentIds: [...toAdd],
+      removeItemIds: [...toRemove],
+    });
+    setBusy(false);
+    if (res.ok) {
+      toast.success(
+        `Updated — ${res.added} added, ${res.removed} removed. Prorated charges/credits apply immediately.`,
+      );
+      setOpen(false);
+      setToAdd(new Set());
+      setToRemove(new Set());
+      window.location.reload();
+    } else toast.error(res.error);
+  }
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        Manage add-ons
+      </Button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
+          <div className="w-full max-w-md rounded-xl border bg-card p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="mb-1 text-lg font-semibold text-heading">Manage add-ons</h2>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Recurring changes are prorated immediately; one-time add-ons are
+              charged right away.
+            </p>
+            {options.length > 0 && (
+              <div className="mb-4">
+                <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">Available</div>
+                <div className="flex flex-col gap-2">
+                  {options.map((o) => (
+                    <label key={o.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={toAdd.has(o.id)}
+                          onChange={(e) => {
+                            const next = new Set(toAdd);
+                            if (e.target.checked) next.add(o.id);
+                            else next.delete(o.id);
+                            setToAdd(next);
+                          }}
+                        />
+                        {o.name}
+                      </span>
+                      <span className="tabular-nums text-heading">
+                        {formatCents(o.amountCents)}
+                        {o.kind === "one_time" ? " once" : intervalLabel(o)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {removable.length > 0 && (
+              <div className="mb-4">
+                <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">Current recurring items</div>
+                <div className="flex flex-col gap-2">
+                  {removable.map((i) => (
+                    <label key={i.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={toRemove.has(i.id)}
+                          onChange={(e) => {
+                            const next = new Set(toRemove);
+                            if (e.target.checked) next.add(i.id);
+                            else next.delete(i.id);
+                            setToRemove(next);
+                          }}
+                        />
+                        Remove {i.name}
+                      </span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {formatCents(i.amountCents)}
+                        {intervalLabel(i)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Close</Button>
+              <Button size="sm" onClick={apply} disabled={busy || (toAdd.size === 0 && toRemove.size === 0)}>
+                {busy ? "Applying…" : "Apply changes"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

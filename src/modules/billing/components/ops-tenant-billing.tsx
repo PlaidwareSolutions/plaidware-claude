@@ -88,6 +88,7 @@ export function OpsTenantBilling({
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [lines, setLines] = useState([{ name: "", amount: "" }]);
   const [daysUntilDue, setDaysUntilDue] = useState("14");
+  const [collect, setCollect] = useState<"send" | "auto">("send");
   const [memo, setMemo] = useState("");
   const [payFor, setPayFor] = useState<InvoiceRow | null>(null);
   const [payForm, setPayForm] = useState({ amount: "", method: "check", reference: "" });
@@ -105,9 +106,14 @@ export function OpsTenantBilling({
         lineItems,
         daysUntilDue: parseInt(daysUntilDue, 10),
         memo: memo || undefined,
+        collect,
       });
       if (res.ok) {
-        toast.success("Invoice created — Stripe emailed the payment link");
+        toast.success(
+          collect === "auto"
+            ? "Invoice created — charging the card on file"
+            : "Invoice created — Stripe emailed the payment link",
+        );
         setInvoiceOpen(false);
         setLines([{ name: "", amount: "" }]);
         setMemo("");
@@ -373,9 +379,19 @@ export function OpsTenantBilling({
                 <Input value={memo} onChange={(e) => setMemo(e.target.value)} />
               </div>
             </div>
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-1.5">
+                <input type="radio" checked={collect === "send"} onChange={() => setCollect("send")} />
+                Email payment link
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="radio" checked={collect === "auto"} onChange={() => setCollect("auto")} />
+                Charge card on file now
+              </label>
+            </div>
             <p className="text-xs text-muted-foreground">
-              The customer receives a Stripe-hosted payment link by email (card or
-              ACH). You can also record offline payments against it.
+              Auto-charge falls back to the emailed link when no card is on
+              file. Offline payments can be recorded against either.
             </p>
           </div>
           <DialogFooter>

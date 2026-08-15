@@ -4,7 +4,10 @@ import { productComponents, products } from "./schema";
 
 export type ComponentDto = {
   id: string;
-  kind: "one_time" | "recurring_monthly" | "recurring_yearly" | "metered";
+  kind: string; // 'one_time' | 'recurring' | legacy kinds
+  role: string; // 'base' | 'addon'
+  interval: string | null;
+  intervalCount: number;
   name: string;
   description: string | null;
   amountCents: number;
@@ -27,6 +30,9 @@ function toComponentDto(c: typeof productComponents.$inferSelect): ComponentDto 
   return {
     id: c.id,
     kind: c.kind,
+    role: c.role,
+    interval: c.interval,
+    intervalCount: c.intervalCount,
     name: c.name,
     description: c.description,
     amountCents: c.amountCents,
