@@ -85,7 +85,7 @@ export default async function ProductPage({
               </div>
             ))}
             <Button asChild className="mt-2">
-              <Link href={`/checkout?product=${product.slug}`}>Get started</Link>
+              <a href={`https://hub.plaidware.com/checkout?product=${product.slug}`}>Get started</a>
             </Button>
             <p className="text-center text-xs text-muted-foreground">
               Secure checkout · cancel anytime

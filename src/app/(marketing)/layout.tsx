@@ -25,10 +25,10 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           </nav>
           <div className="flex-1" />
           <Button asChild variant="ghost" size="sm">
-            <Link href="/login">Sign in</Link>
+            <a href="https://hub.plaidware.com/login">Sign in</a>
           </Button>
           <Button asChild size="sm">
-            <Link href="/signup">Get started</Link>
+            <a href="https://hub.plaidware.com/signup">Get started</a>
           </Button>
         </div>
       </header>

@@ -132,7 +132,7 @@ export default async function HomePage() {
           </p>
           <div className="flex gap-3">
             <Button asChild>
-              <Link href="/signup">Get started</Link>
+              <a href="https://hub.plaidware.com/signup">Get started</a>
             </Button>
             <Button asChild variant="outline">
               <Link href="/contact">Talk to us</Link>

@@ -9,7 +9,10 @@ const nextConfig: NextConfig = {
       allowedOrigins: [
         "hub-staging.plaidware.com",
         "hub-web-staging-3ab0.up.railway.app",
+        "hub-web-production-4df4.up.railway.app",
         "hub.plaidware.com",
+        "plaidware.com",
+        "www.plaidware.com",
       ],
     },
   },
