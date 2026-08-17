@@ -515,6 +515,26 @@ export async function changeSubscriptionItems(opts: {
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id!);
       if (hasPm) await stripe.invoices.pay(finalized.id!).catch(() => {});
       else await stripe.invoices.sendInvoice(finalized.id!).catch(() => {});
+      // Mirror immediately (same pattern as manual invoices); the webhook
+      // upserts on stripe_invoice_id and keeps status current.
+      await db
+        .insert(invoices)
+        .values({
+          tenantId: sub.tenantId,
+          subscriptionId: sub.id,
+          kind: "product",
+          invoiceNumber: finalized.number ?? `ADD-${finalized.id!.slice(-8).toUpperCase()}`,
+          status: "open",
+          amountDueCents: finalized.amount_due,
+          currency: finalized.currency,
+          description: `${c.name} — added mid-subscription`,
+          lineItems: [{ name: c.name, amountCents: amount }],
+          stripeInvoiceId: finalized.id!,
+          hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
+          invoicePdfUrl: finalized.invoice_pdf ?? null,
+          dueDate: finalized.due_date ? new Date(finalized.due_date * 1000) : null,
+        })
+        .onConflictDoNothing({ target: invoices.stripeInvoiceId });
       await db.insert(subscriptionItems).values({
         subscriptionId: sub.id,
         componentId: c.id,

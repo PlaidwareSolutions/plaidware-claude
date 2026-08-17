@@ -158,6 +158,30 @@ const CATALOG: SeedProduct[] = [
       { kind: "recurring", interval: "year", name: "Quarterly Strategy Review", amountCents: 120000 },
     ],
   },
+  {
+    slug: "custom-application",
+    name: "Custom Application",
+    category: "Custom Software",
+    tagline: "Software built for your business, hosted and cared for by ours.",
+    description:
+      "A custom-built web application — scheduling, booking, portals, workflows — designed for your business and run on managed hosting with monitoring, backups, and a real human when you need one.",
+    features: [
+      "Custom design and build",
+      "Managed application hosting",
+      "Managed website hosting",
+      "Domain registration & renewal",
+      "Uptime monitoring",
+      "Optional annual maintenance",
+    ],
+    color: "#38bdf8",
+    components: [
+      { kind: "recurring", interval: "month", role: "base", name: "Website Hosting", amountCents: 3500, isRequired: true, description: "Managed hosting for your website" },
+      { kind: "recurring", interval: "month", name: "Application Hosting", amountCents: 4500, isRequired: true, description: "Managed hosting for your custom application" },
+      { kind: "recurring", interval: "year", name: "Domain Renewal", amountCents: 2200, description: "Domain registration kept current, every year" },
+      { kind: "one_time", name: "Website Application Build", amountCents: 50000, description: "Design and build of your custom application" },
+      { kind: "recurring", interval: "year", name: "Annual Maintenance", amountCents: 96000, description: "Updates, fixes, and an annual refresh" },
+    ],
+  },
 ];
 
 export async function seedCatalog(db: Db): Promise<{ products: number; componentsAdded: number }> {

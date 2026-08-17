@@ -13,6 +13,47 @@ function fail(e: unknown): ActionResult {
   return { ok: false, error: e instanceof Error ? e.message : "Update failed" };
 }
 
+const createProductSchema = z.object({
+  name: z.string().min(2).max(80),
+  category: z.string().min(2).max(60),
+  tagline: z.string().max(140).optional(),
+  description: z.string().min(10).max(2000),
+});
+
+/** New catalog product (billing v2 addendum); lands hidden until components exist. */
+export async function createProductAction(
+  input: z.infer<typeof createProductSchema>,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  try {
+    await requireOps();
+    const p = createProductSchema.parse(input);
+    const base = p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "product";
+    let slug = base;
+    for (let i = 2; ; i++) {
+      const hit = await db.query.products.findFirst({ where: eq(products.slug, slug), columns: { id: true } });
+      if (!hit) break;
+      slug = `${base}-${i}`;
+    }
+    const [row] = await db
+      .insert(products)
+      .values({
+        slug,
+        name: p.name,
+        category: p.category,
+        tagline: p.tagline ?? null,
+        description: p.description,
+        features: [],
+        isActive: false, // hidden until priced and reviewed
+        sortOrder: 99,
+      })
+      .returning({ id: products.id });
+    revalidatePath("/ops/products");
+    return { ok: true, id: row.id };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Create failed" };
+  }
+}
+
 const productSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(2).max(80),

@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession, isOps } from "@/policy";
-import { listActiveProducts } from "@/modules/catalog/queries";
+import { listAllProductsOps } from "@/modules/catalog/queries";
 import { formatCents } from "@/lib/money";
+import { NewProductDialog } from "@/modules/catalog/components/new-product-dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -20,15 +21,18 @@ export default async function OpsProductsPage() {
   if (!session) redirect("/login");
   if (!isOps(session)) redirect("/dashboard");
 
-  const products = await listActiveProducts();
+  const products = await listAllProductsOps();
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-heading">Products</h1>
-        <p className="text-sm text-muted-foreground">
-          Click a product to edit its content, trial, and pricing components.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-heading">Products</h1>
+          <p className="text-sm text-muted-foreground">
+            Click a product to edit its content, trial, and pricing components.
+          </p>
+        </div>
+        <NewProductDialog />
       </div>
       <div className="rounded-lg border bg-card">
         <Table>
@@ -50,7 +54,10 @@ export default async function OpsProductsPage() {
                       <span className="size-2 rounded-full" style={{ background: p.color ?? "var(--primary)" }} />
                       {p.name}
                     </Link>
-                    <div className="text-xs text-muted-foreground">{p.slug}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {p.slug}
+                      {!p.isActive && <Badge variant="destructive" className="ml-1.5 text-[9px]">hidden</Badge>}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{p.category}</Badge>

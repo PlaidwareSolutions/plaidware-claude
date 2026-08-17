@@ -101,7 +101,10 @@ async function main() {
   assert(after?.status === "active", `subscription active (got ${after?.status})`);
   const items = await db.query.subscriptionItems.findMany({ where: eq(subscriptionItems.subscriptionId, co.subscriptionId) });
   assert(items.find((i) => i.kind === "one_time")?.status === "paid", "one-time item flipped to paid");
-  assert(items.find((i) => i.kind === "recurring_monthly")?.status === "active", "recurring item active");
+  assert(
+    items.find((i) => i.kind === "recurring" && i.interval === "month")?.status === "active",
+    "recurring item active",
+  );
   const mirrored = await db.query.invoices.findFirst({ where: eq(invoices.stripeInvoiceId, inv.id!) });
   assert(mirrored?.status === "paid", "invoice mirrored as paid");
   assert(mirrored.amountDueCents === 269900, `first invoice $2,699 (got ${mirrored.amountDueCents})`);

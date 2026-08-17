@@ -10,8 +10,9 @@ import { OpsTenantBilling } from "@/modules/billing/components/ops-tenant-billin
 import { subscriptionProvisioning, provisioningCredentials } from "@/modules/provisioning/schema";
 import { tenantTimeline } from "@/modules/audit/service";
 import { OpsProvisioning } from "@/modules/provisioning/components/ops-provisioning";
-import { listActiveProducts } from "@/modules/catalog/queries";
-import { getTenantOverrides } from "@/modules/billing/service";
+import { listAllProductsOps } from "@/modules/catalog/queries";
+import { tenantPriceOverrides } from "@/modules/billing/schema";
+import { intervalLabel } from "@/modules/billing/mappers";
 import { OpsCustomPricing } from "@/modules/billing/components/ops-custom-pricing";
 
 export const metadata = { title: "Tenant" };
@@ -55,6 +56,23 @@ export default async function OpsTenantDetailPage({
     tenantTimeline(id),
   ]);
 
+  const [allProducts, overrides] = await Promise.all([
+    listAllProductsOps(),
+    db.query.tenantPriceOverrides.findMany({
+      where: eq(tenantPriceOverrides.tenantId, id),
+    }),
+  ]);
+  const pricingRows = allProducts.flatMap((p) =>
+    p.components.map((c) => ({
+      componentId: c.id,
+      productName: p.name,
+      componentName: c.name,
+      listCents: c.amountCents,
+      intervalLabel: intervalLabel(c),
+      overrideCents: overrides.find((o) => o.componentId === c.id)?.amountCents ?? null,
+    })),
+  );
+
   const invoiceIds = tenantInvoices.map((i) => i.id);
   const [cases, paymentRows] = await Promise.all([
     invoiceIds.length
@@ -66,27 +84,6 @@ export default async function OpsTenantDetailPage({
       ? db.query.payments.findMany({ where: inArray(payments.invoiceId, invoiceIds) })
       : Promise.resolve([]),
   ]);
-
-  // Custom pricing rows: components of products this tenant subscribes to.
-  const activeProducts = await listActiveProducts();
-  const subscribedProductIds = new Set(
-    subscriptions.filter((s) => !["canceled", "expired"].includes(s.status)).map((s) => s.productId),
-  );
-  const pricingProducts = activeProducts.filter((p) => subscribedProductIds.has(p.id));
-  const pricingComponents = pricingProducts.flatMap((p) =>
-    p.components.map((c) => ({ ...c, productName: p.name })),
-  );
-  const priceOverrides = await getTenantOverrides(id, pricingComponents.map((c) => c.id));
-  const pricingRows = pricingComponents.map((c) => ({
-    componentId: c.id,
-    productName: c.productName,
-    name: c.name,
-    kind: c.kind,
-    interval: c.interval,
-    intervalCount: c.intervalCount,
-    listCents: c.amountCents,
-    overrideCents: priceOverrides.get(c.id)?.amountCents ?? null,
-  }));
 
   const provisioningItems = subscriptions
     .filter((s) => !["canceled", "expired"].includes(s.status))

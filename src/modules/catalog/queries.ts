@@ -62,6 +62,26 @@ export async function listActiveProducts(): Promise<ProductDto[]> {
   }));
 }
 
+/** Ops view: every product, hidden ones included, flagged. */
+export async function listAllProductsOps(): Promise<(ProductDto & { isActive: boolean })[]> {
+  const rows = await db.query.products.findMany({ orderBy: [asc(products.sortOrder)] });
+  const comps = await db.query.productComponents.findMany({
+    orderBy: [asc(productComponents.sortOrder)],
+  });
+  return rows.map((p) => ({
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    category: p.category,
+    tagline: p.tagline,
+    description: p.description,
+    features: p.features,
+    color: p.color,
+    isActive: p.isActive,
+    components: comps.filter((c) => c.productId === p.id && c.isActive).map(toComponentDto),
+  }));
+}
+
 export async function getProductBySlug(slug: string): Promise<ProductDto | null> {
   const p = await db.query.products.findFirst({
     where: eq(products.slug, slug),
