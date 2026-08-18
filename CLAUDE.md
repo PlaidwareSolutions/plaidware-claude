@@ -36,6 +36,17 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
 - **Theme**: dark-first + light, tokens only in `src/app/globals.css`
   (`@custom-variant dark`); components never use raw hex.
 
+## Billing v2 (2026-08-16)
+
+- Components: one base (main charge) per product + add-ons; kind one_time |
+  recurring with interval/intervalCount (legacy kinds map via
+  billing/mappers.resolveInterval). Per-tenant price overrides
+  (tenant_price_overrides, lazily minted Stripe Prices). Mid-sub add-on
+  changes prorate immediately; one-time adds invoice+charge instantly.
+  invoice.upcoming renewal notices + pre-due reminders (billing_policy).
+  First paid invoice promotes the card to customer default (standalone
+  invoice auto-charge depends on it). Smokes: scripts/smoke-*.ts.
+
 ## Deployment (Railway project "plaidware-hub")
 
 - Staging env: services hub-web (healthcheck /api/system/health, pre-deploy
