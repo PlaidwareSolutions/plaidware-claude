@@ -22,7 +22,6 @@ import {
   Receipt,
   Settings,
   Sun,
-  Ticket,
   Users,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
@@ -56,7 +55,6 @@ const OPS_NAV: NavItem[] = [
   { href: "/ops", label: "Command Center", icon: LayoutDashboard },
   { href: "/ops/tenants", label: "Tenants", icon: Building2 },
   { href: "/ops/products", label: "Products", icon: Package },
-  { href: "/ops/promos", label: "Promos", icon: Ticket },
   { href: "/ops/incidents", label: "Incidents", icon: Siren },
   { href: "/ops/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/ops/costs", label: "Hosting Costs", icon: Server },

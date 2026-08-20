@@ -112,7 +112,12 @@ export async function createManualInvoice(opts: {
       invoicePdfUrl: finalized.invoice_pdf ?? null,
       dueDate: finalized.due_date ? new Date(finalized.due_date * 1000) : null,
     })
-    .onConflictDoNothing({ target: invoices.stripeInvoiceId })
+    // The live webhook can mirror this invoice before we do (invoice.paid on
+    // auto-charge) — merge instead of skipping so a row always comes back.
+    .onConflictDoUpdate({
+      target: invoices.stripeInvoiceId,
+      set: { kind: "manual", description: opts.memo ?? null, lineItems: opts.lineItems },
+    })
     .returning();
   return {
     invoiceId: row.id,

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { env } from "@/env";
 import { getSession, isOps } from "@/policy";
 import { listPromos, listProductOptions, listTenantOptions } from "@/modules/promos/queries";
 import { PromoManager } from "@/modules/promos/components/promo-manager";
@@ -7,6 +8,7 @@ export const metadata = { title: "Promos" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsPromosPage() {
+  if (env.PROMOS_ENABLED !== "true") redirect("/ops");
   const session = await getSession();
   if (!session) redirect("/login");
   if (!isOps(session)) redirect("/dashboard");

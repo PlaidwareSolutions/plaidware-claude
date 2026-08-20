@@ -224,8 +224,9 @@ export async function createCheckout(opts: {
   // negotiated deal must never be silently discounted further.
   const negotiated = [...overrides.keys()].some((id) => selected.some((c) => c.id === id));
   const allowAuto = !negotiated && !opts.skipAutoPromos;
+  const promosOn = env.PROMOS_ENABLED === "true";
   const resolvedPromo =
-    opts.promoCode || allowAuto
+    promosOn && (opts.promoCode || allowAuto)
       ? await resolveCheckoutPromo({
           tenantId: opts.tenantId,
           productId: opts.productId,

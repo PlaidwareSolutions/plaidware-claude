@@ -37,6 +37,7 @@ export default async function CheckoutPage({
     <CheckoutFlow
       product={product}
       publishableKey={process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ""}
+      promosEnabled={process.env.PROMOS_ENABLED === "true"}
     />
   );
 }

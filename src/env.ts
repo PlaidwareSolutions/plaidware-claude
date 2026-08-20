@@ -21,6 +21,8 @@ const schema = z.object({
   CREDENTIALS_ENCRYPTION_KEY: z.string().min(40).optional(),
   PAGESPEED_INSIGHTS_API_KEY: z.string().optional(),
   RAILWAY_API_TOKEN: z.string().optional(),
+  /** Promo engine kill-switch — the feature is OFF unless explicitly "true". */
+  PROMOS_ENABLED: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

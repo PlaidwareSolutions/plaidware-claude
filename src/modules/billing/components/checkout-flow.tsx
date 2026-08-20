@@ -19,9 +19,11 @@ const label = (c: { kind: string; interval?: string | null; intervalCount?: numb
 export function CheckoutFlow({
   product,
   publishableKey,
+  promosEnabled = false,
 }: {
   product: ProductDto;
   publishableKey: string;
+  promosEnabled?: boolean;
 }) {
   const [optional, setOptional] = useState<Set<string>>(new Set());
   const [promoCode, setPromoCode] = useState("");
@@ -216,18 +218,20 @@ export function CheckoutFlow({
           )}
           {!payment && (
             <>
-              <div className="mt-1 grid gap-1.5">
-                <label htmlFor="promo" className="text-xs text-muted-foreground">
-                  Promo code (optional)
-                </label>
-                <input
-                  id="promo"
-                  value={promoCode}
-                  onChange={(e) => setPromoCode(e.target.value)}
-                  placeholder="CODE"
-                  className="h-9 rounded-md border bg-transparent px-3 font-mono text-sm uppercase placeholder:normal-case focus-visible:outline-2 focus-visible:outline-ring"
-                />
-              </div>
+              {promosEnabled && (
+                <div className="mt-1 grid gap-1.5">
+                  <label htmlFor="promo" className="text-xs text-muted-foreground">
+                    Promo code (optional)
+                  </label>
+                  <input
+                    id="promo"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    placeholder="CODE"
+                    className="h-9 rounded-md border bg-transparent px-3 font-mono text-sm uppercase placeholder:normal-case focus-visible:outline-2 focus-visible:outline-ring"
+                  />
+                </div>
+              )}
               <Button className="mt-2" onClick={begin} disabled={busy}>
                 {busy ? "Preparing…" : "Continue to payment"}
               </Button>
