@@ -239,7 +239,7 @@ export function CheckoutFlow({
   );
 }
 
-function PaymentForm({
+export function PaymentForm({
   mode,
   subscriptionId,
 }: {

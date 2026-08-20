@@ -14,3 +14,4 @@ export * from "../modules/monitoring/schema";
 export * from "../modules/seo/schema";
 export * from "../modules/messaging/schema";
 export * from "../modules/costs/schema";
+export * from "../modules/onboarding/schema";

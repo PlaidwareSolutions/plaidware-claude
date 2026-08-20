@@ -19,6 +19,8 @@ const checkoutSchema = z.object({
   productId: z.string().uuid(),
   componentIds: z.array(z.string().uuid()).max(30),
   promoCode: z.string().max(64).regex(/^[A-Za-z0-9_-]*$/).optional(),
+  /** Explicit tenant (client-setup flow); caller must be a writing member. */
+  tenantId: z.string().min(1).optional(),
 });
 
 export type CheckoutActionResult =
@@ -35,9 +37,13 @@ export async function createCheckoutAction(
     // Resolve the buyer's tenant; first purchase auto-creates one (PRD §4.2).
     const tenants = await getUserTenants(session.user.id);
     let tenant =
+      (parsed.tenantId ? tenants.find((t) => t.id === parsed.tenantId) : null) ??
       tenants.find((t) => t.id === session.session.activeOrganizationId) ??
       tenants[0] ??
       null;
+    if (parsed.tenantId && tenant?.id !== parsed.tenantId) {
+      return { ok: false, error: "You don't have access to that workspace." };
+    }
     if (tenant && !["owner", "admin"].includes(tenant.role)) {
       return { ok: false, error: "Ask a workspace owner or admin to make purchases." };
     }
