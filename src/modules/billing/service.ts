@@ -160,6 +160,8 @@ export async function createCheckout(opts: {
   componentIds: string[];
   contact: { email: string; name: string };
   promoCode?: string | null;
+  /** Suppress auto-apply promos (client-setup links pass true). */
+  skipAutoPromos?: boolean;
   userId?: string | null;
 }): Promise<CheckoutResult> {
   const stripe = getStripe();
@@ -216,18 +218,25 @@ export async function createCheckout(opts: {
     );
   }
 
-  // Promo: explicit code wins; otherwise best auto-apply. Never stacks (PRD §4.6).
-  // Discount math runs on the tenant's effective (possibly overridden) prices.
-  const resolvedPromo = await resolveCheckoutPromo({
-    tenantId: opts.tenantId,
-    productId: opts.productId,
-    items: selected.map((c) => ({
-      componentId: c.id,
-      kind: c.kind,
-      amountCents: effectiveAmount(c),
-    })),
-    code: opts.promoCode,
-  });
+  // Promo: an explicitly typed code always wins. AUTO-apply promos are
+  // suppressed when the tenant has negotiated (override) pricing on any
+  // selected item, or when the caller opts out (client-setup links) — a
+  // negotiated deal must never be silently discounted further.
+  const negotiated = [...overrides.keys()].some((id) => selected.some((c) => c.id === id));
+  const allowAuto = !negotiated && !opts.skipAutoPromos;
+  const resolvedPromo =
+    opts.promoCode || allowAuto
+      ? await resolveCheckoutPromo({
+          tenantId: opts.tenantId,
+          productId: opts.productId,
+          items: selected.map((c) => ({
+            componentId: c.id,
+            kind: c.kind,
+            amountCents: effectiveAmount(c),
+          })),
+          code: opts.promoCode,
+        })
+      : null;
 
   let stripeSubscriptionId: string | null = null;
   let clientSecret: string | null = null;

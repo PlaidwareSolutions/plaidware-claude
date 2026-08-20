@@ -21,6 +21,8 @@ const checkoutSchema = z.object({
   promoCode: z.string().max(64).regex(/^[A-Za-z0-9_-]*$/).optional(),
   /** Explicit tenant (client-setup flow); caller must be a writing member. */
   tenantId: z.string().min(1).optional(),
+  /** Client-setup links: the quoted price is final — no auto promos. */
+  skipAutoPromos: z.boolean().optional(),
 });
 
 export type CheckoutActionResult =
@@ -67,6 +69,7 @@ export async function createCheckoutAction(
       componentIds: parsed.componentIds,
       contact: { email: session.user.email, name: session.user.name },
       promoCode: parsed.promoCode || null,
+      skipAutoPromos: parsed.skipAutoPromos ?? false,
       userId: session.user.id,
     });
     revalidatePath("/billing");

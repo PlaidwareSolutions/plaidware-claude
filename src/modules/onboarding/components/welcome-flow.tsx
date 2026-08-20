@@ -108,6 +108,7 @@ export function WelcomeFlow({
       productId: proposal.productId,
       componentIds: proposal.componentIds,
       tenantId: proposal.tenantId,
+      skipAutoPromos: true, // the quoted price is the final price
     });
     if (!res.ok) {
       setBusy(false);
