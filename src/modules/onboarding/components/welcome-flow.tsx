@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements } from "@stripe/react-stripe-js";
 import { toast } from "sonner";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import type { SetupProposal } from "../service";
 import { completeSetupPasswordAction, finalizeSetupAction } from "../actions";
 import { createCheckoutAction } from "@/modules/billing/actions";
@@ -16,6 +16,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+type RecoveryItem = {
+  productId: string;
+  productName: string;
+  status: "requires_action" | "requires_payment";
+  clientSecret: string;
+};
 
 export function WelcomeFlow({
   token,
@@ -34,8 +41,10 @@ export function WelcomeFlow({
   const [payment, setPayment] = useState<{
     clientSecret: string;
     mode: "payment" | "setup";
-    subscriptionId: string;
   } | null>(null);
+  const [phase, setPhase] = useState<"idle" | "finishing" | "waiting" | "done">("idle");
+  const [recovery, setRecovery] = useState<RecoveryItem | null>(null);
+  const settling = useRef(false);
   const stripePromise = useMemo(
     () => (publishableKey ? loadStripe(publishableKey) : null),
     [publishableKey],
@@ -44,16 +53,87 @@ export function WelcomeFlow({
   const signedInCorrectly =
     session?.user.email.toLowerCase() === proposal.clientEmail.toLowerCase();
 
-  if (proposal.status === "accepted") {
+  const primary = proposal.products[proposal.primaryIndex];
+  const others = proposal.products.filter((_, i) => i !== proposal.primaryIndex);
+  const othersDueCents = others.reduce((s, p) => s + p.dueTodayCents, 0);
+  const productNames = proposal.products.map((p) => p.productName).join(" + ");
+  const welcomeReturnUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/welcome/${token}?paid=1`
+      : undefined;
+
+  /** Drive the server-side fan-out until every product is live. */
+  async function settle(silent = false) {
+    if (settling.current) return;
+    settling.current = true;
+    if (!silent) setPhase("finishing");
+    setRecovery(null);
+    try {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const res = await finalizeSetupAction(token);
+        if (!res.ok) {
+          if (!silent) toast.error(res.error);
+          setPhase("idle");
+          return;
+        }
+        if (res.state === "complete") {
+          setPhase("done");
+          return;
+        }
+        if (res.state === "awaiting_primary") {
+          setPhase("idle");
+          return;
+        }
+        if (res.state === "awaiting_payment") {
+          setPhase("finishing");
+          await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
+          continue;
+        }
+        // Secondary charge needs the client's help.
+        const item = res.items[0];
+        if (item.status === "requires_action" && stripePromise) {
+          setPhase("finishing");
+          const stripe = await stripePromise;
+          if (stripe) {
+            const { error } = await stripe.handleNextAction({ clientSecret: item.clientSecret });
+            if (!error) continue; // authenticated — re-run the fan-out
+          }
+        }
+        setRecovery(item);
+        setPhase("idle");
+        return;
+      }
+      setPhase("waiting"); // webhook backstop finishes it
+    } finally {
+      settling.current = false;
+    }
+  }
+
+  // Resume on every visit while signed in: covers the 3DS redirect return
+  // (?paid=1) and any revisit after a partial run — runFinalize is idempotent.
+  useEffect(() => {
+    if (!(signedInCorrectly && proposal.status === "pending")) return;
+    const t = setTimeout(() => void settle(true), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedInCorrectly]);
+
+  if (proposal.status === "accepted" || phase === "done") {
     return (
       <div className="flex w-full max-w-md flex-col gap-3 text-center">
         <CheckCircle2 className="mx-auto size-10 text-success" />
-        <h1 className="text-xl font-semibold text-heading">Setup already completed</h1>
+        <h1 className="text-xl font-semibold text-heading">
+          {phase === "done" ? "You're all set!" : "Setup already completed"}
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Your services are active. Sign in anytime to see billing and status.
+          {phase === "done"
+            ? `${productNames} ${proposal.products.length > 1 ? "are" : "is"} active for ${proposal.tenantName}.`
+            : "Your services are active. Sign in anytime to see billing and status."}
         </p>
         <Button asChild>
-          <Link href="/login">Sign in</Link>
+          <Link href={phase === "done" ? "/dashboard" : "/login"}>
+            {phase === "done" ? "Open your dashboard" : "Sign in"}
+          </Link>
         </Button>
       </div>
     );
@@ -105,27 +185,25 @@ export function WelcomeFlow({
   async function startPayment() {
     setBusy(true);
     const res = await createCheckoutAction({
-      productId: proposal.productId,
-      componentIds: proposal.componentIds,
+      productId: primary.productId,
+      componentIds: primary.componentIds,
       tenantId: proposal.tenantId,
       skipAutoPromos: true, // the quoted price is the final price
     });
+    setBusy(false);
     if (!res.ok) {
-      setBusy(false);
+      // Revisit after the primary was already paid — just resume the fan-out.
+      if (/already have an active/i.test(res.error)) {
+        void settle();
+        return;
+      }
       toast.error(res.error);
       return;
     }
-    // Mark accepted + attach the pre-configured domain right away.
-    await finalizeSetupAction(token, res.subscriptionId);
-    setBusy(false);
     if (res.clientSecret && res.mode !== "none") {
-      setPayment({
-        clientSecret: res.clientSecret,
-        mode: res.mode,
-        subscriptionId: res.subscriptionId,
-      });
+      setPayment({ clientSecret: res.clientSecret, mode: res.mode });
     } else {
-      window.location.href = `/checkout/complete?subscription=${res.subscriptionId}`;
+      void settle();
     }
   }
 
@@ -136,7 +214,7 @@ export function WelcomeFlow({
           Welcome, {proposal.clientName.split(" ")[0]}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your {proposal.productName} setup for {proposal.tenantName} is ready.
+          Your {productNames} setup for {proposal.tenantName} is ready.
         </p>
       </div>
 
@@ -145,13 +223,22 @@ export function WelcomeFlow({
           <CardTitle className="text-base">Your plan</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-sm">
-          {proposal.lines.map((l) => (
-            <div key={l.name} className="flex justify-between gap-2">
-              <span className="text-muted-foreground">{l.name}</span>
-              <span className="tabular-nums text-heading">
-                {formatCents(l.amountCents)}
-                <span className="text-xs text-muted-foreground"> {l.oneTime ? "one-time" : l.cadence}</span>
-              </span>
+          {proposal.products.map((p) => (
+            <div key={p.productId} className="flex flex-col gap-1.5">
+              {proposal.products.length > 1 && (
+                <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-primary">
+                  {p.productName}
+                </div>
+              )}
+              {p.lines.map((l) => (
+                <div key={l.name} className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">{l.name}</span>
+                  <span className="tabular-nums text-heading">
+                    {formatCents(l.amountCents)}
+                    <span className="text-xs text-muted-foreground"> {l.oneTime ? "one-time" : l.cadence}</span>
+                  </span>
+                </div>
+              ))}
             </div>
           ))}
           <div className="mt-2 flex justify-between border-t pt-2 text-base font-semibold text-heading">
@@ -165,20 +252,79 @@ export function WelcomeFlow({
             {(proposal.monthlyCents > 0 || proposal.yearlyCents > 0) &&
               ", charged automatically with an emailed notice before each renewal."}
           </p>
+          {proposal.products.length > 1 && (
+            <p className="text-xs text-muted-foreground">
+              Your card will be charged separately for each service —{" "}
+              {proposal.products.length} charges totaling {formatCents(proposal.dueTodayCents)}{" "}
+              today.
+            </p>
+          )}
         </CardContent>
       </Card>
 
-      {isPending ? null : payment && stripePromise ? (
+      {isPending ? null : phase === "finishing" || phase === "waiting" ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 pt-6 text-center text-sm">
+            <Loader2 className="size-6 animate-spin text-primary" />
+            <p className="text-muted-foreground">
+              {phase === "waiting"
+                ? "Payment is still confirming — this page will finish automatically. If nothing changes in a minute, refresh."
+                : proposal.products.length > 1
+                  ? "Payment received — activating your remaining services…"
+                  : "Finishing your setup…"}
+            </p>
+            {phase === "waiting" && (
+              <Button variant="outline" onClick={() => void settle()}>
+                Check again
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      ) : recovery && stripePromise ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Confirm payment — {recovery.productName}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-xs text-muted-foreground">
+              We couldn&apos;t charge your saved card for {recovery.productName}. Please
+              confirm this payment to finish your setup.
+            </p>
+            <Elements stripe={stripePromise} options={{ clientSecret: recovery.clientSecret }}>
+              <PaymentForm
+                mode="payment"
+                returnUrl={welcomeReturnUrl}
+                onSuccess={() => void settle()}
+              />
+            </Elements>
+          </CardContent>
+        </Card>
+      ) : payment && stripePromise ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              {payment.mode === "setup" ? "Save your payment method" : "Payment"}
+              {payment.mode === "setup"
+                ? "Save your payment method"
+                : proposal.products.length > 1
+                  ? `Payment — ${primary.productName}`
+                  : "Payment"}
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-3">
             <Elements stripe={stripePromise} options={{ clientSecret: payment.clientSecret }}>
-              <PaymentForm mode={payment.mode} subscriptionId={payment.subscriptionId} />
+              <PaymentForm
+                mode={payment.mode}
+                returnUrl={welcomeReturnUrl}
+                onSuccess={() => void settle()}
+              />
             </Elements>
+            {others.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Paying {formatCents(primary.dueTodayCents)} for {primary.productName} now;{" "}
+                {others.map((p) => p.productName).join(", ")} ({formatCents(othersDueCents)})
+                will be charged to the same card immediately after.
+              </p>
+            )}
           </CardContent>
         </Card>
       ) : signedInCorrectly ? (

@@ -246,9 +246,15 @@ export function CheckoutFlow({
 export function PaymentForm({
   mode,
   subscriptionId,
+  returnUrl,
+  onSuccess,
 }: {
   mode: "payment" | "setup";
-  subscriptionId: string;
+  subscriptionId?: string;
+  /** Where Stripe redirects after 3DS etc.; defaults to /checkout/complete. */
+  returnUrl?: string;
+  /** Called instead of the default redirect when confirmation succeeds in-page. */
+  onSuccess?: () => void;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -259,18 +265,20 @@ export function PaymentForm({
     e.preventDefault();
     if (!stripe || !elements) return;
     setBusy(true);
-    const returnUrl = `${window.location.origin}/checkout/complete?subscription=${subscriptionId}`;
+    const target =
+      returnUrl ?? `${window.location.origin}/checkout/complete?subscription=${subscriptionId}`;
     const confirm =
       mode === "setup"
-        ? stripe.confirmSetup({ elements, confirmParams: { return_url: returnUrl } })
-        : stripe.confirmPayment({ elements, confirmParams: { return_url: returnUrl } });
+        ? stripe.confirmSetup({ elements, confirmParams: { return_url: target } })
+        : stripe.confirmPayment({ elements, confirmParams: { return_url: target } });
     const { error } = await confirm;
     setBusy(false);
     if (error) {
       toast.error(error.message ?? "Payment failed");
       return;
     }
-    router.push(`/checkout/complete?subscription=${subscriptionId}`);
+    if (onSuccess) onSuccess();
+    else router.push(`/checkout/complete?subscription=${subscriptionId}`);
   }
 
   return (

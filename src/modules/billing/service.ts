@@ -146,6 +146,9 @@ export type CheckoutResult = {
   clientSecret: string | null;
   /** payment → confirmPayment; setup → confirmSetup (trial, nothing due today) */
   mode: "payment" | "setup" | "none";
+  /** Off-session checkouts only: what happened to the first-invoice charge.
+   *  requires_action/requires_payment come with clientSecret for on-session recovery. */
+  paymentStatus?: "paid" | "requires_action" | "requires_payment";
   appliedPromo: {
     code: string;
     description: string;
@@ -163,6 +166,10 @@ export async function createCheckout(opts: {
   /** Suppress auto-apply promos (client-setup links pass true). */
   skipAutoPromos?: boolean;
   userId?: string | null;
+  /** Charge the customer's saved card server-side instead of collecting one
+   *  in the browser (multi-product setup links). Money moves only AFTER the
+   *  local row has won the one-live-sub-per-product slot. */
+  offSession?: { paymentMethodId: string };
 }): Promise<CheckoutResult> {
   const stripe = getStripe();
 
@@ -244,6 +251,8 @@ export async function createCheckout(opts: {
   let mode: CheckoutResult["mode"] = "none";
   let trialEndsAt: Date | null = null;
   let localStatus: "incomplete" | "trialing" = "incomplete";
+  let firstInvoiceId: string | null = null;
+  let firstInvoiceDueCents = 0;
 
   try {
     if (recurring.length > 0) {
@@ -254,6 +263,9 @@ export async function createCheckout(opts: {
         billing_mode: { type: "flexible" },
         payment_behavior: "default_incomplete",
         payment_settings: { save_default_payment_method: "on_subscription" },
+        ...(opts.offSession
+          ? { default_payment_method: opts.offSession.paymentMethodId }
+          : {}),
         ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
         // One-time components ride the first invoice (PRD §4.4)
         add_invoice_items: oneTime.map((c) => ({ price: priceIds.get(c.id)! })),
@@ -268,6 +280,8 @@ export async function createCheckout(opts: {
       if (sub.status === "trialing") localStatus = "trialing";
       trialEndsAt = sub.trial_end ? new Date(sub.trial_end * 1000) : null;
       const latestInvoice = sub.latest_invoice as Stripe.Invoice | null;
+      firstInvoiceId = latestInvoice?.id ?? null;
+      firstInvoiceDueCents = latestInvoice?.amount_due ?? 0;
       const confirmation = latestInvoice?.confirmation_secret ?? null;
       if (confirmation?.client_secret) {
         clientSecret = confirmation.client_secret;
@@ -314,6 +328,8 @@ export async function createCheckout(opts: {
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id!, {
         expand: ["confirmation_secret"],
       });
+      firstInvoiceId = finalized.id ?? null;
+      firstInvoiceDueCents = finalized.amount_due;
       clientSecret = finalized.confirmation_secret?.client_secret ?? null;
       mode = clientSecret ? "payment" : "none";
     } else if (stripeSubscriptionId) {
@@ -361,10 +377,46 @@ export async function createCheckout(opts: {
       });
     }
 
+    // Off-session: charge the saved card now that the local row has committed.
+    // A failed charge is a returnable outcome, never a reason for cleanup —
+    // an unpaid incomplete sub self-expires in ~23h (existing hygiene).
+    let paymentStatus: CheckoutResult["paymentStatus"];
+    if (opts.offSession) {
+      if (!firstInvoiceId || firstInvoiceDueCents <= 0) {
+        // Trial / nothing due today; the saved default PM covers renewals.
+        paymentStatus = "paid";
+        mode = "none";
+        clientSecret = null;
+      } else {
+        try {
+          await stripe.invoices.pay(firstInvoiceId, {
+            payment_method: opts.offSession.paymentMethodId,
+            off_session: true,
+          });
+          paymentStatus = "paid";
+          mode = "none";
+          clientSecret = null;
+        } catch (err) {
+          const code = (err as { code?: string })?.code ?? "";
+          const msg = err instanceof Error ? err.message : String(err);
+          if (code === "invoice_already_paid" || /already paid/i.test(msg)) {
+            paymentStatus = "paid";
+            mode = "none";
+            clientSecret = null;
+          } else if (code === "authentication_required") {
+            paymentStatus = "requires_action"; // clientSecret drives handleNextAction
+          } else {
+            paymentStatus = "requires_payment"; // clientSecret drives PaymentElement
+          }
+        }
+      }
+    }
+
     return {
       subscriptionId: subRow.id,
       clientSecret,
       mode,
+      paymentStatus,
       appliedPromo: resolvedPromo
         ? {
             code: resolvedPromo.promo.code,
@@ -716,7 +768,7 @@ export async function applyInvoiceEvent(
 
 /** Promote the subscription's saved card to the customer's default payment
  *  method so hosting/manual/add-on invoices can auto-charge (billing v2). */
-async function promoteDefaultPaymentMethod(sub: typeof subscriptions.$inferSelect) {
+export async function promoteDefaultPaymentMethod(sub: typeof subscriptions.$inferSelect) {
   try {
     const stripe = getStripe();
     const org = await db.query.organization.findFirst({

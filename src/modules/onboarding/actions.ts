@@ -6,21 +6,35 @@ import { requireOps, requireUser } from "../../policy";
 import {
   completeSetupPassword,
   createClientSetup,
-  finalizeSetup,
   getSetupByToken,
   revokeSetup,
+  runFinalize,
+  type FinalizeState,
 } from "./service";
 
 const createSchema = z.object({
   clientName: z.string().min(2).max(100),
   clientEmail: z.string().email(),
   tenantName: z.string().min(2).max(80),
-  productId: z.string().uuid(),
-  items: z
-    .array(z.object({ componentId: z.string().uuid(), priceCents: z.number().int().min(0).nullable() }))
+  products: z
+    .array(
+      z.object({
+        productId: z.string().uuid(),
+        items: z
+          .array(
+            z.object({ componentId: z.string().uuid(), priceCents: z.number().int().min(0).nullable() }),
+          )
+          .min(1)
+          .max(30),
+        domainUrl: z.string().max(200).optional(),
+      }),
+    )
     .min(1)
-    .max(30),
-  domainUrl: z.string().max(200).optional(),
+    .max(5)
+    .refine(
+      (ps) => new Set(ps.map((p) => p.productId)).size === ps.length,
+      "Each product can appear only once",
+    ),
   sendEmailToClient: z.boolean().default(false),
 });
 
@@ -53,8 +67,7 @@ export async function completeSetupPasswordAction(
 
 export async function finalizeSetupAction(
   token: string,
-  subscriptionId: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<({ ok: true } & FinalizeState) | { ok: false; error: string }> {
   try {
     const session = await requireUser();
     const proposal = await getSetupByToken(token);
@@ -62,8 +75,8 @@ export async function finalizeSetupAction(
     if (proposal.clientEmail.toLowerCase() !== session.user.email.toLowerCase()) {
       throw new Error("This setup belongs to a different account");
     }
-    await finalizeSetup(proposal.inviteId, subscriptionId);
-    return { ok: true };
+    const state = await runFinalize(proposal.inviteId);
+    return { ok: true, ...state };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Finalize failed" };
   }

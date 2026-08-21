@@ -16,8 +16,8 @@ import { createCheckout } from "../src/modules/billing/service";
 import {
   completeSetupPassword,
   createClientSetup,
-  finalizeSetup,
   getSetupByToken,
+  runFinalize,
 } from "../src/modules/onboarding/service";
 
 const stripe = getStripe();
@@ -47,14 +47,18 @@ async function main() {
     clientName: "Setup Smoke",
     clientEmail,
     tenantName: `Setup Smoke Co ${stamp}`,
-    productId: custom.id,
-    items: [
-      { componentId: byName("Website Hosting").id, priceCents: null },
-      { componentId: byName("Application Hosting").id, priceCents: null },
-      { componentId: byName("Domain Renewal").id, priceCents: 2200 },
-      { componentId: byName("Website Application Build").id, priceCents: 100 },
+    products: [
+      {
+        productId: custom.id,
+        items: [
+          { componentId: byName("Website Hosting").id, priceCents: null },
+          { componentId: byName("Application Hosting").id, priceCents: null },
+          { componentId: byName("Domain Renewal").id, priceCents: 2200 },
+          { componentId: byName("Website Application Build").id, priceCents: 100 },
+        ],
+        domainUrl: "https://smoke-client-site.com",
+      },
     ],
-    domainUrl: "https://smoke-client-site.com",
     sendEmailToClient: false,
     actorUserId: opsId,
   });
@@ -65,7 +69,8 @@ async function main() {
   const proposal = await getSetupByToken(token);
   assert(proposal?.status === "pending" && proposal.needsPassword, "pending + needs password");
   assert(proposal.dueTodayCents === 3500 + 4500 + 2200 + 100, `due today ${proposal.dueTodayCents}`);
-  const domainLine = proposal.lines.find((l) => l.name === "Domain Renewal");
+  assert(proposal.products.length === 1 && proposal.primaryIndex === 0, "single product proposal");
+  const domainLine = proposal.products[0].lines.find((l) => l.name === "Domain Renewal");
   assert(domainLine?.amountCents === 2200, "domain at $22 custom");
 
   console.log("3) client sets password (verifies account)…");
@@ -84,18 +89,28 @@ async function main() {
   const co = await createCheckout({
     tenantId: proposal.tenantId,
     productId: custom.id,
-    componentIds: proposal.componentIds,
+    componentIds: proposal.products[0].componentIds,
     contact: { email: clientEmail, name: "Setup Smoke" },
     userId: clientUser!.id,
   });
   assert(co.mode === "payment" && co.clientSecret, "payment secret returned");
+
+  console.log("4b) finalize BEFORE payment is a no-op (invite stays pending)…");
+  const early = await runFinalize(proposal.inviteId);
+  assert(early.state === "awaiting_payment", `pre-payment finalize → ${early.state}`);
+  const mid = await getSetupByToken(token);
+  assert(mid?.status === "pending", "invite still pending before payment");
+
   const pi = await stripe.paymentIntents.confirm(co.clientSecret!.split("_secret_")[0], {
     payment_method: "pm_card_visa",
   });
   assert(pi.status === "succeeded" && pi.amount === 10300, `charged ${pi.amount}, expected 10300`);
+  // Simulate the invoice.paid webhook (no listener in the smoke env).
+  await db.update(subscriptions).set({ status: "active" }).where(eq(subscriptions.id, co.subscriptionId));
 
   console.log("5) finalize → accepted + domain attached…");
-  await finalizeSetup(proposal.inviteId, co.subscriptionId);
+  const fin = await runFinalize(proposal.inviteId);
+  assert(fin.state === "complete", `finalize state ${fin.state}`);
   const after = await getSetupByToken(token);
   assert(after?.status === "accepted", "invite accepted");
   const prov = await db.query.subscriptionProvisioning.findFirst({
@@ -107,6 +122,8 @@ async function main() {
   });
   assert(items.find((i) => i.name === "Domain Renewal")?.amountCents === 2200, "item snapshot at custom price");
   assert(items.find((i) => i.name === "Website Application Build")?.amountCents === 100, "build at $1");
+  const finAgain = await runFinalize(proposal.inviteId);
+  assert(finAgain.state === "complete", "finalize is idempotent");
 
   console.log("cleanup…");
   const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, co.subscriptionId) });

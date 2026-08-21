@@ -8,7 +8,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization, user } from "../auth/schema";
-import { products } from "../catalog/schema";
+import type { InviteProductEntry } from "./proposal";
 
 /** One-shot client setup links: ops prepares tenant + pricing + selection,
  *  the client opens one link, sets a password, pays — done. */
@@ -24,12 +24,8 @@ export const onboardingInvites = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id),
-    /** Locked component selection (uuid[]) — the client can't alter it. */
-    componentIds: jsonb("component_ids").$type<string[]>().notNull().default([]),
-    domainUrl: text("domain_url"),
+    /** Locked per-product configuration — the client can't alter it. */
+    products: jsonb("products").$type<InviteProductEntry[]>().notNull().default([]),
     status: text("status").notNull().default("pending"), // pending|accepted|expired|revoked
     createdByUserId: text("created_by_user_id").references(() => user.id, {
       onDelete: "set null",

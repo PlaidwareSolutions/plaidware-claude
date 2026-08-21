@@ -11,6 +11,7 @@ import {
   sendTrialEndingReminder,
   sendUpcomingRenewalReminder,
 } from "@/modules/billing/service";
+import { finalizePendingInvitesForCustomer } from "@/modules/onboarding/service";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,17 @@ export async function POST(req: Request) {
       case "invoice.voided":
       case "invoice.marked_uncollectible":
         await applyInvoiceEvent(event.data.object as Stripe.Invoice, event.type);
+        // Backstop for multi-product setup links: a paid invoice may unlock a
+        // pending onboarding fan-out even if the client's browser is gone.
+        if (event.type === "invoice.paid") {
+          const inv = event.data.object as Stripe.Invoice;
+          const customerId = typeof inv.customer === "string" ? inv.customer : inv.customer?.id;
+          if (customerId) {
+            void finalizePendingInvitesForCustomer(customerId).catch((e) =>
+              console.warn("[webhook] onboarding finalize skipped:", e),
+            );
+          }
+        }
         break;
       case "customer.subscription.created":
       case "customer.subscription.updated":
