@@ -16,6 +16,7 @@ import { getUserTenants } from "../tenancy/queries";
 import { setDomain } from "../provisioning/service";
 import { subscriptionProvisioning } from "../provisioning/schema";
 import { writeAudit } from "../audit/service";
+import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 import { onboardingInvites } from "./schema";
 import {
   buildProductProposal,
@@ -418,6 +419,7 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
           .update(subscriptions)
           .set({ status: "active" })
           .where(eq(subscriptions.id, existing.id));
+        await emitSubscriptionLifecycle(existing.id, "subscription.activated");
       } else {
         const detailed = await stripe.invoices.retrieve(inv.id, {
           expand: ["confirmation_secret"],
@@ -446,6 +448,7 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
           .update(subscriptions)
           .set({ status: "active" })
           .where(and(eq(subscriptions.id, res.subscriptionId), eq(subscriptions.status, "incomplete")));
+        await emitSubscriptionLifecycle(res.subscriptionId, "subscription.activated");
       } else if (res.clientSecret) {
         // No saved card (mode payment/setup) or the off-session charge needs help.
         recovery.push({

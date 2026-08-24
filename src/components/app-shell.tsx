@@ -23,6 +23,7 @@ import {
   Settings,
   Sun,
   Users,
+  Webhook,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { setActiveTenantAction } from "@/modules/tenancy/actions";
@@ -58,6 +59,7 @@ const OPS_NAV: NavItem[] = [
   { href: "/ops/incidents", label: "Incidents", icon: Siren },
   { href: "/ops/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/ops/costs", label: "Hosting Costs", icon: Server },
+  { href: "/ops/webhooks", label: "Webhooks", icon: Webhook },
   { href: "/ops/users", label: "Access", icon: Users },
   { href: "/ops/contact-inbox", label: "Contact Inbox", icon: Inbox },
 ];

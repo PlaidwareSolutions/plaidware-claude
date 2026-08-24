@@ -14,6 +14,7 @@ import { listAllProductsOps } from "@/modules/catalog/queries";
 import { tenantPriceOverrides } from "@/modules/billing/schema";
 import { intervalLabel } from "@/modules/billing/mappers";
 import { OpsCustomPricing } from "@/modules/billing/components/ops-custom-pricing";
+import { isMarketingSlug } from "@/modules/webhooks_out/logic";
 
 export const metadata = { title: "Tenant" };
 export const dynamic = "force-dynamic";
@@ -92,6 +93,7 @@ export default async function OpsTenantDetailPage({
       return {
         subscriptionId: s.id,
         productName: s.productName,
+        managedByPartner: isMarketingSlug(s.productSlug),
         domainUrl: p?.domainUrl ?? null,
         hasVerifyToken: Boolean(p?.verifyToken),
         verifyToken: p?.verifyToken ?? null,

@@ -26,6 +26,23 @@ function DomainEditor({ tenantId, sub }: { tenantId: string; sub: SubscriptionDt
   const [value, setValue] = useState(sub.domainUrl ?? "");
   const [saving, setSaving] = useState(false);
 
+  // marketing-* products: the URL is MHub's portal, written by the
+  // provisioning handshake — not customer-editable.
+  if (sub.productSlug.startsWith("marketing-")) {
+    return sub.domainUrl ? (
+      <a
+        href={sub.domainUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="text-xs text-primary hover:underline"
+      >
+        Open portal
+      </a>
+    ) : (
+      <Badge variant="outline">Provisioning pending</Badge>
+    );
+  }
+
   async function save() {
     setSaving(true);
     const res = await setDomainAction({ tenantId, subscriptionId: sub.id, domainUrl: value.trim() || null });

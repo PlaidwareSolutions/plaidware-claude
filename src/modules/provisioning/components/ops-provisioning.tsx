@@ -35,6 +35,8 @@ import {
 export type ProvisioningView = {
   subscriptionId: string;
   productName: string;
+  /** marketing-* products: MHub owns the domain via the provisioning handshake — no DNS controls. */
+  managedByPartner: boolean;
   domainUrl: string | null;
   hasVerifyToken: boolean;
   verifyToken: string | null;
@@ -293,14 +295,34 @@ function ProvisioningCard({
         <CardTitle className="flex items-center gap-2 text-base">
           <Globe className="size-4 text-primary" /> {item.productName}
         </CardTitle>
-        {item.dnsLastOk != null && (
-          <Badge variant={item.dnsLastOk ? "secondary" : "destructive"}>
-            DNS {item.dnsLastOk ? "verified" : "failing"}
-            {item.dnsLastVerifiedAt && ` · ${new Date(item.dnsLastVerifiedAt).toLocaleDateString()}`}
+        {item.managedByPartner ? (
+          <Badge variant={item.domainUrl ? "secondary" : "outline"}>
+            {item.domainUrl ? "Provisioned by MHub" : "Provisioning pending"}
           </Badge>
+        ) : (
+          item.dnsLastOk != null && (
+            <Badge variant={item.dnsLastOk ? "secondary" : "destructive"}>
+              DNS {item.dnsLastOk ? "verified" : "failing"}
+              {item.dnsLastVerifiedAt && ` · ${new Date(item.dnsLastVerifiedAt).toLocaleDateString()}`}
+            </Badge>
+          )
         )}
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        {item.managedByPartner ? (
+          <p className="text-sm text-muted-foreground">
+            {item.domainUrl ? (
+              <>
+                Portal:{" "}
+                <a href={item.domainUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                  {item.domainUrl}
+                </a>
+              </>
+            ) : (
+              "Waiting for the MHub provisioning handshake — retries run automatically (see Ops → Webhooks)."
+            )}
+          </p>
+        ) : (
         <div className="flex flex-wrap items-end gap-2">
           <div className="grid min-w-64 flex-1 gap-2">
             <Label>Live domain</Label>
@@ -314,11 +336,12 @@ function ProvisioningCard({
             {showConfig ? "Hide config" : "Verify config"}
           </Button>
         </div>
-        {item.dnsLastResolved && (
+        )}
+        {!item.managedByPartner && item.dnsLastResolved && (
           <p className="text-xs text-muted-foreground">Last resolved: {item.dnsLastResolved}</p>
         )}
 
-        {showConfig && (
+        {!item.managedByPartner && showConfig && (
           <div className="grid gap-3 rounded-md border p-3">
             <div className="grid gap-2">
               <Label>Ownership token (TXT: plaidware-verify=…)</Label>

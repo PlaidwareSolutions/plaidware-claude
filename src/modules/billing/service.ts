@@ -35,6 +35,8 @@ import {
 } from "./ar-service";
 import { mintIngestKey } from "../monitoring/service";
 import { writeAudit } from "../audit/service";
+import { emitSubscriptionLifecycle } from "../webhooks_out/service";
+import { subscriptionEventForStatusChange } from "../webhooks_out/logic";
 
 // ---------------------------------------------------------------------------
 // Stripe object provisioning
@@ -308,6 +310,12 @@ export async function createCheckout(opts: {
       })
       .returning();
 
+    // A trial is live immediately — MHub gets its activation now, not at
+    // first payment (webhooks_out no-ops for non-marketing products).
+    if (localStatus === "trialing") {
+      await emitSubscriptionLifecycle(subRow.id, "subscription.activated");
+    }
+
     if (recurring.length === 0) {
       // One-time-only purchase: finalized invoice + PaymentIntent, no subscription.
       const invoice = await stripe.invoices.create({
@@ -464,6 +472,7 @@ export async function cancelSubscription(subscriptionId: string): Promise<void> 
         notInArray(subscriptionItems.status, ["paid"]),
       ),
     );
+  await emitSubscriptionLifecycle(subscriptionId, "subscription.canceled");
 }
 
 /**
@@ -618,6 +627,9 @@ export async function changeSubscriptionItems(opts: {
     kind: "subscription_items_changed",
     payload: { added, removed },
   });
+  if (added || removed) {
+    await emitSubscriptionLifecycle(sub.id, "subscription.updated");
+  }
   return { added, removed };
 }
 
@@ -808,6 +820,7 @@ async function onInvoicePaid(sub: typeof subscriptions.$inferSelect) {
       .update(subscriptions)
       .set({ status: "active" })
       .where(eq(subscriptions.id, sub.id));
+    await emitSubscriptionLifecycle(sub.id, "subscription.activated");
   }
 
   // Checkout confirmation on the FIRST paid invoice (old-app gap, PRD §4.13).
@@ -856,11 +869,13 @@ export async function applySubscriptionEvent(
   const periodStarts = stripeSub.items.data
     .map((i) => i.current_period_start)
     .filter(Boolean);
+  const prevStatus = localSub.status;
+  const nextStatus = mapStripeSubscriptionStatus(stripeSub.status);
 
   await db
     .update(subscriptions)
     .set({
-      status: mapStripeSubscriptionStatus(stripeSub.status),
+      status: nextStatus,
       stripeSubscriptionId: stripeSub.id,
       currentPeriodStart: periodStarts.length
         ? new Date(Math.min(...periodStarts) * 1000)
@@ -889,6 +904,17 @@ export async function applySubscriptionEvent(
         .set({ status: "canceled" })
         .where(eq(subscriptionItems.id, item.id));
     }
+  }
+
+  // MHub lifecycle: status transitions map to their contract event; a
+  // same-status Stripe update on a live sub still means data moved (period
+  // end, items) → subscription.updated. Emitted after item reconciliation so
+  // the payload carries the settled add-on list.
+  const lifecycleEvent =
+    subscriptionEventForStatusChange(prevStatus, nextStatus) ??
+    (nextStatus === "active" || nextStatus === "trialing" ? "subscription.updated" : null);
+  if (lifecycleEvent) {
+    await emitSubscriptionLifecycle(localSub.id, lifecycleEvent);
   }
 }
 

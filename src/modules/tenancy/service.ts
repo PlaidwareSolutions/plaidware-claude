@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { member, organization } from "../auth/schema";
+import { emitMembershipChanged } from "../webhooks_out/service";
 
 export type TenantStatus = "active" | "suspended" | "inactive";
 
@@ -66,19 +67,26 @@ export async function setTenantStatus(tenantId: string, status: TenantStatus) {
  * to admin and promotes the target, atomically.
  */
 export async function transferOwnership(tenantId: string, toUserId: string) {
-  return db.transaction(async (tx) => {
+  const changed = await db.transaction(async (tx) => {
     const owner = await tx.query.member.findFirst({
       where: and(eq(member.organizationId, tenantId), eq(member.role, "owner")),
     });
     if (!owner) throw new Error("Tenant has no owner");
-    if (owner.userId === toUserId) return; // already the owner
+    if (owner.userId === toUserId) return null; // already the owner
     const target = await tx.query.member.findFirst({
       where: and(eq(member.organizationId, tenantId), eq(member.userId, toUserId)),
     });
     if (!target) throw new Error("New owner must already be a member");
     await tx.update(member).set({ role: "admin" }).where(eq(member.id, owner.id));
     await tx.update(member).set({ role: "owner" }).where(eq(member.id, target.id));
+    return { demoted: owner.userId, promoted: target.userId };
   });
+  // Direct Drizzle writes bypass the Better Auth organizationHooks, so the
+  // MHub membership events are emitted here (no-ops outside marketing scope).
+  if (changed) {
+    await emitMembershipChanged({ orgId: tenantId, userId: changed.demoted, role: "admin", action: "updated" });
+    await emitMembershipChanged({ orgId: tenantId, userId: changed.promoted, role: "owner", action: "updated" });
+  }
 }
 
 /** Owner memberships are protected: not removable, role not editable (PRD §4.2). */

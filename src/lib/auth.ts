@@ -1,10 +1,14 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization } from "better-auth/plugins";
+import { magicLink, organization } from "better-auth/plugins";
 import { db } from "../db";
 import { env } from "../env";
 import { sendEmail, emailShell, emailButton } from "./email";
 import { ac, orgRoles } from "./org-roles";
+import {
+  emitMembershipChanged,
+  emitOrganizationUpdated,
+} from "../modules/webhooks_out/service";
 
 export const auth = betterAuth({
   baseURL: env.APP_BASE_URL,
@@ -14,6 +18,14 @@ export const auth = betterAuth({
     ...(env.TRUSTED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
   ],
   database: drizzleAdapter(db, { provider: "pg" }),
+
+  advanced: {
+    // Session shared with sibling apps (marketing.plaidware.com) via
+    // Domain=.plaidware.com. Unset locally so localhost keeps host-only cookies.
+    ...(env.COOKIE_DOMAIN && {
+      crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN },
+    }),
+  },
 
   emailAndPassword: {
     enabled: true,
@@ -61,6 +73,28 @@ export const auth = betterAuth({
   },
 
   plugins: [
+    magicLink({
+      // Sign-in only: signup needs firstName/lastName/phone, which a magic
+      // link can't collect — new users go through /signup. Verifying the link
+      // proves the address, so Better Auth flips emailVerified for
+      // still-unverified accounts (consistent with the verification gate).
+      disableSignUp: true,
+      expiresIn: 60 * 5,
+      rateLimit: { window: 60, max: 5 },
+      storeToken: "hashed",
+      sendMagicLink: async ({ email, url }) => {
+        await sendEmail({
+          to: email,
+          subject: "Your Plaidware sign-in link",
+          html: emailShell(
+            "Sign in to Plaidware",
+            `<p>Click the button below to sign in as ${email}. This link is valid for 5 minutes and can be used once.</p>` +
+              emailButton(url, "Sign in") +
+              `<p>If you didn't request this, you can safely ignore this email.</p>`,
+          ),
+        });
+      },
+    }),
     organization({
       ac,
       roles: orgRoles,
@@ -73,6 +107,47 @@ export const auth = betterAuth({
             // Billing identity lives on the tenant, not the user (PRD §2)
             stripeCustomerId: { type: "string", required: false, input: false },
           },
+        },
+      },
+      // MHub lifecycle (integration contract §B): org/membership changes made
+      // through Better Auth surface here. The emit functions no-op unless the
+      // org holds a live marketing-* subscription, and never throw.
+      // Direct-Drizzle mutations (transferOwnership) emit at their own sites.
+      organizationHooks: {
+        afterUpdateOrganization: async ({ organization: org }) => {
+          if (org) await emitOrganizationUpdated(org.id);
+        },
+        afterAddMember: async ({ member }) => {
+          await emitMembershipChanged({
+            orgId: member.organizationId,
+            userId: member.userId,
+            role: member.role,
+            action: "added",
+          });
+        },
+        afterAcceptInvitation: async ({ member }) => {
+          await emitMembershipChanged({
+            orgId: member.organizationId,
+            userId: member.userId,
+            role: member.role,
+            action: "added",
+          });
+        },
+        afterUpdateMemberRole: async ({ member }) => {
+          await emitMembershipChanged({
+            orgId: member.organizationId,
+            userId: member.userId,
+            role: member.role,
+            action: "updated",
+          });
+        },
+        afterRemoveMember: async ({ member }) => {
+          await emitMembershipChanged({
+            orgId: member.organizationId,
+            userId: member.userId,
+            role: member.role,
+            action: "removed",
+          });
         },
       },
       // Invite emails get their real template in M2's tenancy milestone.

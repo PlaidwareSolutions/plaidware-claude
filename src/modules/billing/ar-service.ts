@@ -10,6 +10,7 @@ import { invoices, subscriptions } from "./schema";
 import { billingPolicy, dunningStates, payments } from "./ar-schema";
 import { daysPastDue, decideDunningAction, isCovered } from "./dunning-logic";
 import { ensureTenantStripeCustomer } from "./service";
+import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 
 // ---------------------------------------------------------------------------
 // Policy
@@ -401,6 +402,9 @@ export async function resolveDunningForInvoice(invoiceId: string): Promise<void>
     .update(subscriptions)
     .set({ status: "active" })
     .where(and(eq(subscriptions.tenantId, dcase.tenantId), eq(subscriptions.status, "suspended")));
+  for (const sub of suspended) {
+    await emitSubscriptionLifecycle(sub.id, "subscription.activated");
+  }
 
   const contacts = await tenantBillingContacts(dcase.tenantId);
   if (contacts.length) {
@@ -487,7 +491,7 @@ export async function runDunningSweep(now = new Date()): Promise<{
         .where(eq(dunningStates.id, dcase.id));
       reminded++;
     } else if (action.kind === "suspend") {
-      await db
+      const flipped = await db
         .update(subscriptions)
         .set({ status: "suspended" })
         .where(
@@ -495,7 +499,11 @@ export async function runDunningSweep(now = new Date()): Promise<{
             eq(subscriptions.tenantId, dcase.tenantId),
             inArray(subscriptions.status, ["active", "trialing", "past_due"]),
           ),
-        );
+        )
+        .returning({ id: subscriptions.id });
+      for (const sub of flipped) {
+        await emitSubscriptionLifecycle(sub.id, "subscription.suspended");
+      }
       await db
         .update(dunningStates)
         .set({ suspendedAt: now })

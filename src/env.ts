@@ -23,6 +23,12 @@ const schema = z.object({
   RAILWAY_API_TOKEN: z.string().optional(),
   /** Promo engine kill-switch — the feature is OFF unless explicitly "true". */
   PROMOS_ENABLED: z.string().optional(),
+  /** Share the session cookie across subdomains (e.g. ".plaidware.com"). Unset in local dev. */
+  COOKIE_DOMAIN: z.string().startsWith(".").optional(),
+  /** MHub integration (marketing.plaidware.com). All optional: without them, lifecycle deliveries queue and fail-retry. */
+  MHUB_BASE_URL: z.string().startsWith("http").optional(),
+  MHUB_LIFECYCLE_URL: z.string().startsWith("http").optional(),
+  MHUB_WEBHOOK_SECRET: z.string().min(16).optional(),
 });
 
 const parsed = schema.safeParse(process.env);

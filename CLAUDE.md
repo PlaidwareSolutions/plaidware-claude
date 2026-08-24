@@ -47,6 +47,21 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   First paid invoice promotes the card to customer default (standalone
   invoice auto-charge depends on it). Smokes: scripts/smoke-*.ts.
 
+## MHub integration (2026-08-23)
+
+- Hub is identity+billing for the external Marketing Ops Hub
+  (marketing.plaidware.com, separate repo). Hub knows only `marketing-*`
+  product slugs: outbound lifecycle webhooks + provisioning handshake
+  (src/modules/webhooks_out, outbox drained by the worker every minute),
+  read-only partner feed (/api/partners/subscriptions, hashed `partner_keys`),
+  cross-subdomain session cookie (COOKIE_DOMAIN), magic-link login.
+  Env: MHUB_BASE_URL / MHUB_LIFECYCLE_URL / MHUB_WEBHOOK_SECRET.
+  Ops: dead letters at /ops/webhooks. Details: docs/RUNBOOK.md;
+  contract deviations: docs/INTEGRATION-DEVIATIONS.md.
+- Marketing plan level change = cancel the old `marketing-*` subscription,
+  checkout the new product; the provisioning handshake hits the existing
+  MHub tenant and MHub reactivates/relevels it.
+
 ## Deployment (Railway project "plaidware-hub")
 
 - Staging env: services hub-web (healthcheck /api/system/health, pre-deploy

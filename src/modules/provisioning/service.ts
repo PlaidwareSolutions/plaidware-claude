@@ -60,6 +60,26 @@ export async function setDomain(
   });
 }
 
+/**
+ * MHub provisioning handshake result (integration contract §C): the returned
+ * portal URL is stored as the subscription's domainUrl. DNS-verification
+ * fields stay null for marketing-* products — their domain is MHub's, never
+ * DNS-checked by Hub.
+ */
+export async function setPortalUrl(subscriptionId: string, portalUrl: string): Promise<void> {
+  const prov = await getOrCreateProvisioning(subscriptionId);
+  await db
+    .update(subscriptionProvisioning)
+    .set({ domainUrl: portalUrl })
+    .where(eq(subscriptionProvisioning.id, prov.id));
+  await writeAudit({
+    tenantId: await subscriptionTenant(subscriptionId),
+    subscriptionId,
+    kind: "domain_changed",
+    payload: { before: prov.domainUrl, after: portalUrl, source: "mhub_provision" },
+  });
+}
+
 export async function setVerificationConfig(
   subscriptionId: string,
   config: { verifyToken?: string | null; expectedCname?: string | null; expectedAIps?: string | null },

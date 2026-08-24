@@ -15,3 +15,5 @@ export * from "../modules/seo/schema";
 export * from "../modules/messaging/schema";
 export * from "../modules/costs/schema";
 export * from "../modules/onboarding/schema";
+export * from "../modules/webhooks_out/schema";
+export * from "../modules/partners/schema";

@@ -16,7 +16,7 @@ const METRIC_DEFS: Record<
   ],
 };
 
-type SeedComponent = {
+export type SeedComponent = {
   kind: "one_time" | "recurring";
   interval?: "week" | "month" | "year";
   intervalCount?: number;
@@ -27,7 +27,7 @@ type SeedComponent = {
   isRequired?: boolean;
 };
 
-type SeedProduct = {
+export type SeedProduct = {
   slug: string;
   name: string;
   category: string;
@@ -184,9 +184,21 @@ const CATALOG: SeedProduct[] = [
   },
 ];
 
-export async function seedCatalog(db: Db): Promise<{ products: number; componentsAdded: number }> {
+/**
+ * Reconcile a declarative catalog into products/components — shared by the
+ * core seed and scripts/seed-marketing-catalog.ts. Same contract as always:
+ * adds missing rows, updates copy/structure, NEVER touches an existing
+ * component's price or a product's isActive that ops may have flipped.
+ */
+export async function upsertSeedProducts(
+  db: Db,
+  catalog: SeedProduct[],
+  opts: { sortOrderBase?: number } = {},
+): Promise<{ products: number; componentsAdded: number; idsBySlug: Map<string, string> }> {
+  const sortOrderBase = opts.sortOrderBase ?? 0;
   let componentsAdded = 0;
-  for (const [i, p] of CATALOG.entries()) {
+  const idsBySlug = new Map<string, string>();
+  for (const [i, p] of catalog.entries()) {
     const existing = await db.query.products.findFirst({
       where: eq(products.slug, p.slug),
     });
@@ -197,27 +209,12 @@ export async function seedCatalog(db: Db): Promise<{ products: number; component
       description: p.description,
       features: p.features,
       color: p.color,
-      sortOrder: i,
+      sortOrder: sortOrderBase + i,
     };
     const productId = existing
       ? (await db.update(products).set(values).where(eq(products.id, existing.id)), existing.id)
       : (await db.insert(products).values({ slug: p.slug, ...values }).returning({ id: products.id }))[0].id;
-
-    for (const [j, d] of (METRIC_DEFS[p.slug] ?? []).entries()) {
-      await db
-        .insert(productMetricDefinitions)
-        .values({
-          productId,
-          key: d.key,
-          label: d.label,
-          unit: d.unit,
-          valueType: d.valueType ?? "count",
-          aggregation: d.aggregation ?? "sum",
-          isPrimary: d.isPrimary ?? false,
-          displayOrder: j,
-        })
-        .onConflictDoNothing();
-    }
+    idsBySlug.set(p.slug, productId);
 
     for (const [j, c] of p.components.entries()) {
       const found = await db.query.productComponents.findFirst({
@@ -254,5 +251,30 @@ export async function seedCatalog(db: Db): Promise<{ products: number; component
       }
     }
   }
-  return { products: CATALOG.length, componentsAdded };
+  return { products: catalog.length, componentsAdded, idsBySlug };
+}
+
+export async function seedCatalog(db: Db): Promise<{ products: number; componentsAdded: number }> {
+  const { products: count, componentsAdded, idsBySlug } = await upsertSeedProducts(db, CATALOG);
+
+  for (const [slug, defs] of Object.entries(METRIC_DEFS)) {
+    const productId = idsBySlug.get(slug);
+    if (!productId) continue;
+    for (const [j, d] of defs.entries()) {
+      await db
+        .insert(productMetricDefinitions)
+        .values({
+          productId,
+          key: d.key,
+          label: d.label,
+          unit: d.unit,
+          valueType: d.valueType ?? "count",
+          aggregation: d.aggregation ?? "sum",
+          isPrimary: d.isPrimary ?? false,
+          displayOrder: j,
+        })
+        .onConflictDoNothing();
+    }
+  }
+  return { products: count, componentsAdded };
 }
