@@ -4,13 +4,17 @@
  * Run: node --env-file=.env --import tsx scripts/seed-marketing-catalog.ts
  * Idempotent: upserts by slug, never changes an existing component's price.
  */
+import { and, eq, inArray } from "drizzle-orm";
 import { db, pool } from "../src/db";
+import { productComponents, products } from "../src/modules/catalog/schema";
+import { subscriptionItems } from "../src/modules/billing/schema";
 import {
   upsertSeedProducts,
   type SeedComponent,
   type SeedProduct,
 } from "../src/modules/catalog/seed";
 
+// SMS pack is Home Services only (MHub DESIGN §15.2) — dental tiers never get it.
 function addons(withSmsPack: boolean): SeedComponent[] {
   return [
     {
@@ -51,7 +55,7 @@ function marketingProduct(opts: {
 }): SeedProduct {
   const verticalName = opts.vertical === "hs" ? "Home Services" : "Dental";
   const tierName = opts.tier[0].toUpperCase() + opts.tier.slice(1);
-  const withSmsPack = opts.tier !== "foundation";
+  const withSmsPack = opts.vertical === "hs" && opts.tier !== "foundation";
   return {
     slug: `marketing-${opts.vertical}-${opts.tier}`,
     name: `${verticalName} Marketing — ${tierName}`,
@@ -164,9 +168,44 @@ const MARKETING_CATALOG: SeedProduct[] = [
   }),
 ];
 
+/**
+ * An earlier revision of this seed put SMS pack on the dental tiers too;
+ * MHub DESIGN §15.2 says Home Services only. The generic upsert never
+ * removes rows, so this pass deletes the stray dental SMS components —
+ * or deactivates them if a subscription ever bought one.
+ */
+async function removeDentalSmsPack(): Promise<void> {
+  const dentalSlugs = MARKETING_CATALOG.filter((p) => p.slug.startsWith("marketing-dental-")).map(
+    (p) => p.slug,
+  );
+  const strays = await db
+    .select({ id: productComponents.id, slug: products.slug })
+    .from(productComponents)
+    .innerJoin(products, eq(productComponents.productId, products.id))
+    .where(and(inArray(products.slug, dentalSlugs), eq(productComponents.name, "SMS pack")));
+  for (const stray of strays) {
+    const [purchased] = await db
+      .select({ id: subscriptionItems.id })
+      .from(subscriptionItems)
+      .where(eq(subscriptionItems.componentId, stray.id))
+      .limit(1);
+    if (purchased) {
+      await db
+        .update(productComponents)
+        .set({ isActive: false })
+        .where(eq(productComponents.id, stray.id));
+      console.log(`Deactivated purchased SMS pack on ${stray.slug} (item history kept).`);
+    } else {
+      await db.delete(productComponents).where(eq(productComponents.id, stray.id));
+      console.log(`Removed SMS pack from ${stray.slug}.`);
+    }
+  }
+}
+
 async function main() {
   // sortOrderBase keeps marketing products after the core catalog's 0-based ordering.
   const res = await upsertSeedProducts(db, MARKETING_CATALOG, { sortOrderBase: 100 });
+  await removeDentalSmsPack();
   console.log(
     `Marketing catalog: ${res.products} products reconciled, ${res.componentsAdded} components added.`,
   );
