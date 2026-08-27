@@ -48,3 +48,18 @@ Hub picked a behavior MHub should be aware of.
    no org rename surface today; the event fires if/when orgs are updated via
    Better Auth's organization endpoints (hooked), and the plumbing is ready
    for a rename feature.
+
+## Resolutions (contract, confirmed by both sides)
+
+- **`portal_url` is generic and permanently stable** (resolved 2026-08-26,
+  mirrored in MHub's resolutions log): the handshake returns
+  `{MHUB_BASE_URL}/portal` for every tenant — the portal resolves the tenant
+  from the Hub session (multi-org users get a workspace switcher). MHub
+  commits to never requiring per-tenant URLs; Hub displays the stored value
+  verbatim indefinitely and no backfill of `subscription_provisioning`
+  rows will ever be needed.
+- **Phase 2 receiver semantics** (verified in the 2026-08-26 E2E, driven by
+  `scripts/e2e-mhub.ts`): 2xx bodies are `{"status":"processed"|"ignored"|
+  "duplicate"}`; unknown event names and unknown orgs ACK as ignored (never
+  4xx); a replayed `X-Plaidware-Delivery` uuid returns duplicate without
+  reprocessing; 5xx means retry; provision is fully idempotent.
