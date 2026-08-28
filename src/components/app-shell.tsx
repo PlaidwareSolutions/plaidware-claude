@@ -55,6 +55,7 @@ const TENANT_NAV: NavItem[] = [
 const OPS_NAV: NavItem[] = [
   { href: "/ops", label: "Command Center", icon: LayoutDashboard },
   { href: "/ops/tenants", label: "Tenants", icon: Building2 },
+  { href: "/ops/subscriptions", label: "Subscriptions", icon: Receipt },
   { href: "/ops/products", label: "Products", icon: Package },
   { href: "/ops/incidents", label: "Incidents", icon: Siren },
   { href: "/ops/inbox", label: "Inbox", icon: MessageSquare },

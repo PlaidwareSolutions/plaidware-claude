@@ -53,6 +53,9 @@ export function mapStripeInvoiceStatus(
 }
 
 /** A subscription row still holding the one-per-product slot (PRD §4.4). */
+/** Statuses whose recurring amount counts toward MRR (billing is actually flowing). */
+export const MRR_STATUSES: LocalSubscriptionStatus[] = ["active", "trialing", "past_due"];
+
 export const LIVE_SUBSCRIPTION_STATUSES: LocalSubscriptionStatus[] = [
   "incomplete",
   "trialing",

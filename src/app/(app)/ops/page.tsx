@@ -34,16 +34,16 @@ export default async function OpsHomePage() {
     { n: 2, name: "Provisioning", value: `${quiet.length} gaps`, detail: "Quiet or unconfigured reporters", href: "/ops/incidents" },
     { n: 3, name: "Access & roles", value: `${users.length} accounts`, detail: `${tenants.length} tenant workspaces`, href: "/ops/users" },
     { n: 4, name: "Monitoring", value: `${incidents.length} incidents`, detail: incidents[0] ? `${incidents[0].productName} is ${incidents[0].status}` : "All systems healthy", href: "/ops/incidents" },
-    { n: 5, name: "Billing", value: formatCents(billing.pastDueCents), detail: `${billing.failedInvoices} failed invoices · ${billing.suspendedSubscriptions} suspended`, href: "/ops/tenants" },
+    { n: 5, name: "Billing", value: formatCents(billing.pastDueCents), detail: `${billing.failedInvoices} failed invoices · ${billing.suspendedSubscriptions} suspended`, href: "/ops/subscriptions" },
     { n: 6, name: "Automations", value: "8 jobs", detail: "Probes, dunning, sweeps, digests — on schedule", href: "/ops/incidents" },
   ];
 
   const tiles = [
-    { label: "MRR", value: formatCents(billing.mrrCents), href: "/ops/tenants" },
+    { label: "MRR", value: formatCents(billing.mrrCents), href: "/ops/subscriptions" },
     { label: "Past-due AR", value: formatCents(billing.pastDueCents), href: "/ops/tenants" },
-    { label: "Live subscriptions", value: billing.liveSubscriptions, href: "/ops/tenants" },
-    { label: "Trials", value: billing.trialing, href: "/ops/tenants" },
-    { label: "Suspended", value: billing.suspendedSubscriptions, href: "/ops/tenants" },
+    { label: "Live subscriptions", value: billing.liveSubscriptions, href: "/ops/subscriptions" },
+    { label: "Trials", value: billing.trialing, href: "/ops/subscriptions" },
+    { label: "Suspended", value: billing.suspendedSubscriptions, href: "/ops/subscriptions" },
     { label: "Failed invoices", value: billing.failedInvoices, href: "/ops/tenants" },
     { label: "Tenants", value: tenants.length, href: "/ops/tenants" },
     { label: "Products", value: products.length, href: "/ops/products" },
