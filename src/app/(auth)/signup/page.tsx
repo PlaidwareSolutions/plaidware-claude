@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { resolveRedirect } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +12,10 @@ import { Label } from "@/components/ui/label";
 function SignupForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const redirect = params.get("redirect") ?? "/dashboard";
+  // Sanitized: same-app paths, or https *.plaidware.com (MHub hand-off).
+  // Rides the verification email as callbackURL; the server additionally
+  // checks it against trustedOrigins.
+  const redirect = resolveRedirect(params.get("redirect")).url;
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",

@@ -25,6 +25,10 @@ export const auth = betterAuth({
     ...(env.COOKIE_DOMAIN && {
       crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN },
     }),
+    // Staging and production both set Domain=.plaidware.com cookies; a
+    // per-env name prefix keeps one environment's sign-in from clobbering
+    // the other's session in the same browser.
+    ...(env.COOKIE_PREFIX && { cookiePrefix: env.COOKIE_PREFIX }),
   },
 
   emailAndPassword: {

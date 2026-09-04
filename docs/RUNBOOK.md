@@ -10,6 +10,16 @@ concepts — only products whose slug starts with `marketing-`. Surfaces:
 - **Session introspection**: MHub forwards the user's cookie to
   `GET /api/auth/get-session`. Requires `COOKIE_DOMAIN=.plaidware.com` in the
   deployed env so the session cookie spans subdomains (unset locally).
+  The cookie NAME is per-environment (`COOKIE_PREFIX`, default `better-auth`):
+  prod `__Secure-better-auth.session_token`, staging
+  `__Secure-plaidware-staging.session_token` — distinct names so one env's
+  sign-in can't clobber the other's session on the shared cookie domain.
+  MHub's hub-mode "Sign out" clears the cookie by name via its
+  `HUB_SESSION_COOKIE` env var — any rename here must be mirrored there.
+  Cross-app sign-in hand-off: `{hub}/login?redirect=<url-encoded target>`;
+  targets are sanitized (`src/lib/safe-redirect.ts`) to same-app paths or
+  https `*.plaidware.com`, and magic-link/signup `callbackURL`s are further
+  checked against `TRUSTED_ORIGINS` (must include the MHub origin).
 - **Lifecycle webhooks** (Hub → MHub): `src/modules/webhooks_out/` writes an
   outbox row per event; the worker's `webhooks.deliver-due` job (every minute)
   POSTs to `MHUB_LIFECYCLE_URL` signed with `MHUB_WEBHOOK_SECRET`

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Check } from "lucide-react";
 import { getProductBySlug } from "@/modules/catalog/queries";
 import { formatCents } from "@/lib/money";
+import { hubUrl } from "@/lib/urls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,7 +86,7 @@ export default async function ProductPage({
               </div>
             ))}
             <Button asChild className="mt-2">
-              <a href={`https://hub.plaidware.com/checkout?product=${product.slug}`}>Get started</a>
+              <a href={hubUrl(`/checkout?product=${product.slug}`)}>Get started</a>
             </Button>
             <p className="text-center text-xs text-muted-foreground">
               Secure checkout · cancel anytime

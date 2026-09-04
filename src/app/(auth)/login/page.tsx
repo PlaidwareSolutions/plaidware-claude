@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { resolveRedirect } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +12,9 @@ import { Label } from "@/components/ui/label";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const redirect = params.get("redirect") ?? "/dashboard";
+  // Sanitized: same-app paths, or https *.plaidware.com (MHub hand-off).
+  const dest = resolveRedirect(params.get("redirect"));
+  const redirect = dest.url;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"password" | "magic-link">("password");
@@ -48,6 +51,11 @@ function LoginForm() {
         return;
       }
       setError(error.message ?? "Sign in failed");
+      return;
+    }
+    if (dest.external) {
+      // router.push is for in-app routes; cross-subdomain needs a full navigation.
+      window.location.assign(redirect);
       return;
     }
     router.push(redirect);

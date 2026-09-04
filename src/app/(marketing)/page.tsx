@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { hubUrl } from "@/lib/urls";
 import {
   Activity,
   CreditCard,
@@ -132,7 +133,7 @@ export default async function HomePage() {
           </p>
           <div className="flex gap-3">
             <Button asChild>
-              <a href="https://hub.plaidware.com/signup">Get started</a>
+              <a href={hubUrl("/signup")}>Get started</a>
             </Button>
             <Button asChild variant="outline">
               <Link href="/contact">Talk to us</Link>

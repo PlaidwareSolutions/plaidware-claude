@@ -25,6 +25,12 @@ const schema = z.object({
   PROMOS_ENABLED: z.string().optional(),
   /** Share the session cookie across subdomains (e.g. ".plaidware.com"). Unset in local dev. */
   COOKIE_DOMAIN: z.string().startsWith(".").optional(),
+  /**
+   * Per-environment cookie name prefix (default "better-auth"). Staging sets
+   * "plaidware-staging": with COOKIE_DOMAIN=.plaidware.com both envs' cookies
+   * ride the same domain, and identical names would clobber each other.
+   */
+  COOKIE_PREFIX: z.string().min(1).optional(),
   /** MHub integration (marketing.plaidware.com). All optional: without them, lifecycle deliveries queue and fail-retry. */
   MHUB_BASE_URL: z.string().startsWith("http").optional(),
   MHUB_LIFECYCLE_URL: z.string().startsWith("http").optional(),

@@ -14,10 +14,11 @@ const HUB = "https://hub.plaidware.com";
 const MARKETING_PATHS = new Set(["/", "/platform", "/contact", "/privacy", "/terms"]);
 const isMarketingPath = (p: string) => MARKETING_PATHS.has(p) || p.startsWith("/products");
 
+const SESSION_COOKIE = `${process.env.COOKIE_PREFIX ?? "better-auth"}.session_token`;
+
 function hasSessionCookie(req: NextRequest): boolean {
   return Boolean(
-    req.cookies.get("__Secure-better-auth.session_token") ??
-      req.cookies.get("better-auth.session_token"),
+    req.cookies.get(`__Secure-${SESSION_COOKIE}`) ?? req.cookies.get(SESSION_COOKIE),
   );
 }
 
