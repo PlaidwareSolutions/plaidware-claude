@@ -6,7 +6,7 @@ export default function PrivacyPage() {
   return (
     <div className="prose-sm mx-auto w-full max-w-3xl px-4 py-16">
       <h1 className="text-3xl font-bold text-heading">Privacy Policy</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Last updated: August 2026</p>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated: September 2026</p>
       <div className="mt-8 flex flex-col gap-6 text-sm leading-relaxed text-foreground">
         <section>
           <h2 className="mb-2 text-lg font-semibold text-heading">What we collect</h2>
@@ -34,6 +34,26 @@ export default function PrivacyPage() {
             (hosting), Cloudflare (network), and Google PageSpeed Insights
             (website performance audits). Each receives only the data needed to
             perform its function.
+          </p>
+        </section>
+        <section>
+          <h2 className="mb-2 text-lg font-semibold text-heading">SMS / Text Messaging</h2>
+          <p>
+            Where you provide a phone number to us or to a business we serve
+            (for example by calling, booking an appointment, or corresponding),
+            we may send transactional text messages such as missed-call
+            notifications and post-appointment follow-ups. Consent to receive
+            text messages is not a condition of any purchase.{" "}
+            <strong>
+              We do not sell mobile phone numbers, and text messaging
+              originator opt-in data and consent are not shared with third
+              parties or affiliates for marketing or promotional purposes.
+            </strong>{" "}
+            Questions:{" "}
+            <a className="text-primary hover:underline" href="mailto:solutions@plaidware.com">
+              solutions@plaidware.com
+            </a>
+            .
           </p>
         </section>
         <section>
