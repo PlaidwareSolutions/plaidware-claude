@@ -145,7 +145,7 @@ export function OnboardClientWizard({ products }: { products: ProductDto[] }) {
         <UserPlus className="size-4" /> Onboard client
       </Button>
       <Dialog open={open} onOpenChange={(o) => !o && reset()}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className={`max-h-[90vh] overflow-y-auto ${result ? "sm:max-w-xl" : "sm:max-w-lg"}`}>
           {result ? (
             <>
               <DialogHeader>
@@ -155,13 +155,20 @@ export function OnboardClientWizard({ products }: { products: ProductDto[] }) {
                   expires in 14 days and dies after use.
                 </DialogDescription>
               </DialogHeader>
-              <div className="flex items-center gap-2 rounded-md border bg-secondary/40 p-2">
-                <Link2 className="size-4 shrink-0 text-primary" />
-                <code className="flex-1 truncate text-xs">{result}</code>
+              <div className="flex items-center gap-2">
+                <div className="flex flex-1 items-center gap-2 rounded-md border bg-secondary/40 pl-2">
+                  <Link2 className="size-4 shrink-0 text-primary" />
+                  <Input
+                    readOnly
+                    value={result}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="h-9 flex-1 border-0 bg-transparent px-0 font-mono text-xs shadow-none focus-visible:border-0 focus-visible:ring-0"
+                  />
+                </div>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="gap-1"
+                  className="shrink-0 gap-1"
                   onClick={() => {
                     navigator.clipboard.writeText(result);
                     toast.success("Link copied");
