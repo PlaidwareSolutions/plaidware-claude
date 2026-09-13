@@ -59,7 +59,16 @@ describe("alert math", () => {
     );
     expect(alerts.map((a) => a.category)).toEqual(["performance", "accessibility"]);
     expect(alerts[0].severity).toBe(50);
+    expect(alerts[0].reasons).toEqual(["drop", "low"]);
     expect(alerts[1].severity).toBe(25);
+    expect(alerts[1].reasons).toEqual(["drop"]);
+  });
+
+  it("an improved-but-low score alerts as 'low', not 'drop'", () => {
+    const alerts = computeAlerts({ performance: 49 }, { performance: 38 });
+    expect(alerts).toEqual([
+      { category: "performance", current: 49, baseline: 38, severity: 1, reasons: ["low"] },
+    ]);
   });
 
   it("snooze breakthrough requires +10 severity", () => {

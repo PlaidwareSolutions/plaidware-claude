@@ -4,6 +4,7 @@ import { env } from "../../env";
 import { emailShell, sendEmail } from "../../lib/email";
 import { products } from "../catalog/schema";
 import { subscriptions } from "../billing/schema";
+import { organization } from "../auth/schema";
 import { subscriptionProvisioning } from "../provisioning/schema";
 import { seoAudits, seoSnoozes } from "./schema";
 import {
@@ -21,11 +22,13 @@ async function seoTargets() {
     .select({
       subscriptionId: subscriptions.id,
       tenantId: subscriptions.tenantId,
+      tenantName: organization.name,
       domainUrl: subscriptionProvisioning.domainUrl,
     })
     .from(subscriptions)
     .innerJoin(products, eq(subscriptions.productId, products.id))
     .innerJoin(subscriptionProvisioning, eq(subscriptionProvisioning.subscriptionId, subscriptions.id))
+    .innerJoin(organization, eq(organization.id, subscriptions.tenantId))
     .where(
       and(
         eq(products.slug, "company-website"),
@@ -86,7 +89,13 @@ const CAT_FIELDS: Record<Category, "performance" | "seo" | "accessibility" | "be
 export async function runSeoAlertDigest(now = new Date()): Promise<number> {
   if (!env.OPS_EMAIL) return 0;
   const targets = await seoTargets();
-  type Row = { tenantId: string; strategy: string; alerts: { category: string; current: number; baseline: number | null; severity: number }[] };
+  type Row = {
+    tenantId: string;
+    tenantName: string;
+    domainUrl: string | null;
+    strategy: string;
+    alerts: { category: string; current: number; baseline: number | null; severity: number; reasons: string[] }[];
+  };
   const rows: Row[] = [];
 
   for (const t of targets) {
@@ -119,22 +128,29 @@ export async function runSeoAlertDigest(now = new Date()): Promise<number> {
       if (snooze && snooze.snoozedUntil > now && !breaksThroughSnooze(worst, snooze.severityAtSnooze)) {
         continue;
       }
-      rows.push({ tenantId: t.tenantId, strategy, alerts });
+      rows.push({ tenantId: t.tenantId, tenantName: t.tenantName, domainUrl: t.domainUrl, strategy, alerts });
     }
   }
 
   if (rows.length > 0) {
+    // "below 50" is a floor alert, not a regression — a score can improve and
+    // still alert. Label each finding so the email reads correctly either way.
+    const reasonLabel = (reasons: string[]) =>
+      reasons.map((x) => (x === "drop" ? "dropped ≥20" : "below 50")).join(", ");
     await sendEmail({
       to: env.OPS_EMAIL,
       subject: `[Plaidware ops] ${rows.length} SEO alert${rows.length === 1 ? "" : "s"}`,
       html: emailShell(
-        "SEO regressions detected",
+        "SEO alerts",
         rows
           .map(
             (r) =>
-              `<p><strong>${r.strategy}</strong> — ` +
+              `<p><strong>${r.tenantName}</strong>${r.domainUrl ? ` (${r.domainUrl})` : ""} — <strong>${r.strategy}</strong> — ` +
               r.alerts
-                .map((a) => `${a.category}: ${a.current}${a.baseline != null ? ` (was ${a.baseline})` : ""}`)
+                .map(
+                  (a) =>
+                    `${a.category}: ${a.current}${a.baseline != null ? ` (was ${a.baseline})` : ""} [${reasonLabel(a.reasons)}]`,
+                )
                 .join(" · ") +
               `</p>`,
           )

@@ -72,7 +72,16 @@ export async function fetchPageSpeed(
 export const CATEGORIES = ["performance", "seo", "accessibility", "bestPractices"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
-export type CategoryAlert = { category: Category; current: number; baseline: number | null; severity: number };
+/** Why an alert fired: "drop" = fell ≥20 vs baseline, "low" = score under 50. */
+export type AlertReason = "drop" | "low";
+
+export type CategoryAlert = {
+  category: Category;
+  current: number;
+  baseline: number | null;
+  severity: number;
+  reasons: AlertReason[];
+};
 
 export function categorySeverity(current: number, baseline: number | null): number {
   const drop = baseline != null ? baseline - current : 0;
@@ -91,7 +100,12 @@ export function computeAlerts(
     if (cur == null) continue;
     const base = baseline[c] ?? null;
     const severity = categorySeverity(cur, base);
-    if (severity > 0) out.push({ category: c, current: cur, baseline: base, severity });
+    if (severity > 0) {
+      const reasons: AlertReason[] = [];
+      if (base != null && base - cur >= 20) reasons.push("drop");
+      if (cur < 50) reasons.push("low");
+      out.push({ category: c, current: cur, baseline: base, severity, reasons });
+    }
   }
   return out.sort((a, b) => b.severity - a.severity);
 }
