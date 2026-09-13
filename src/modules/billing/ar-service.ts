@@ -9,7 +9,7 @@ import { member, organization, user } from "../auth/schema";
 import { invoices, subscriptions } from "./schema";
 import { billingPolicy, dunningStates, payments } from "./ar-schema";
 import { daysPastDue, decideDunningAction, isCovered } from "./dunning-logic";
-import { ensureTenantStripeCustomer } from "./service";
+import { createBillingPortalSession, ensureTenantStripeCustomer } from "./service";
 import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 
 // ---------------------------------------------------------------------------
@@ -535,4 +535,66 @@ export async function runDunningSweep(now = new Date()): Promise<{
     }
   }
   return { reminded, suspended: suspendedCount, opened };
+}
+
+// ---------------------------------------------------------------------------
+// Ops → Billing: collection-mode fixes for subscriptions that don't auto-collect
+// ---------------------------------------------------------------------------
+
+/**
+ * Flip a Stripe subscription from emailed invoices to charging the card on
+ * file. Refuses when the customer has no default payment method — that's what
+ * `sendCardSetupLink` is for. A card saved on the subscription but not yet the
+ * customer default is promoted first, mirroring the first-paid-invoice path.
+ */
+export async function switchSubscriptionToAutoCharge(subscriptionId: string): Promise<void> {
+  const stripe = getStripe();
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.id, subscriptionId),
+  });
+  if (!sub?.stripeSubscriptionId) throw new Error("This subscription isn't billed through Stripe");
+  const org = await db.query.organization.findFirst({
+    where: eq(organization.id, sub.tenantId),
+  });
+  if (!org?.stripeCustomerId) throw new Error("This client has no Stripe billing profile yet");
+
+  const customer = (await stripe.customers.retrieve(org.stripeCustomerId)) as Stripe.Customer;
+  let pm = customer.invoice_settings?.default_payment_method ?? null;
+  if (!pm) {
+    const ss = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    pm = ss.default_payment_method ?? null;
+    if (pm) {
+      await stripe.customers.update(org.stripeCustomerId, {
+        invoice_settings: { default_payment_method: typeof pm === "string" ? pm : pm.id },
+      });
+    }
+  }
+  if (!pm) throw new Error("No card on file — send the client a card setup link first");
+
+  await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+    collection_method: "charge_automatically",
+  });
+}
+
+/**
+ * Email the client's billing contacts a Stripe-hosted link to add or update
+ * their card, and hand the same link back so ops can paste it into a chat.
+ */
+export async function sendCardSetupLink(tenantId: string): Promise<{ url: string; sentTo: string | null }> {
+  const url = await createBillingPortalSession(tenantId, `${env.APP_BASE_URL}/billing`);
+  const contacts = await tenantBillingContacts(tenantId);
+  const to = contacts[0] ?? null;
+  if (to) {
+    void sendEmail({
+      to,
+      subject: "Add a payment method to your Plaidware account",
+      html: emailShell(
+        "Add a payment method",
+        `<p>To keep your services renewing automatically, add a card to your Plaidware billing profile. The link below opens a secure page hosted by Stripe.</p>` +
+          emailButton(url, "Add payment method") +
+          `<p style="color:#8b93b2;font-size:13px">If you've already added a card, you can ignore this message.</p>`,
+      ),
+    });
+  }
+  return { url, sentTo: to };
 }

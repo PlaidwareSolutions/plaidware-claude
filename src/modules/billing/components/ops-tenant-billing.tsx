@@ -6,32 +6,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowLeft, ExternalLink, FilePlus2, HandCoins } from "lucide-react";
 import type { SubscriptionDto } from "../queries";
-import {
-  createManualInvoiceAction,
-  recordOfflinePaymentAction,
-  setHostingFeeAction,
-  toggleDunningPauseAction,
-} from "../ar-actions";
-import { formatCents, toCents } from "@/lib/money";
+import { toggleDunningPauseAction } from "../ar-actions";
+import { formatCents } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -40,6 +19,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  HostingFeeDialog,
+  NewInvoiceDialog,
+  RecordPaymentDialog,
+  type HostingTarget,
+  type InvoiceTarget,
+  type TenantTarget,
+} from "./ops-billing-dialogs";
 
 type InvoiceRow = {
   id: string;
@@ -84,94 +71,9 @@ export function OpsTenantBilling({
   invoices: InvoiceRow[];
 }) {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [invoiceOpen, setInvoiceOpen] = useState(false);
-  const [lines, setLines] = useState([{ name: "", amount: "" }]);
-  const [daysUntilDue, setDaysUntilDue] = useState("14");
-  const [collect, setCollect] = useState<"send" | "auto">("send");
-  const [memo, setMemo] = useState("");
-  const [payFor, setPayFor] = useState<InvoiceRow | null>(null);
-  const [payForm, setPayForm] = useState({ amount: "", method: "check", reference: "" });
-  const [hostingFor, setHostingFor] = useState<SubscriptionDto | null>(null);
-  const [hostingForm, setHostingForm] = useState({ amount: "", startMonth: "" });
-
-  async function createInvoice() {
-    setBusy(true);
-    try {
-      const lineItems = lines
-        .filter((l) => l.name && l.amount)
-        .map((l) => ({ name: l.name, amountCents: toCents(l.amount) }));
-      const res = await createManualInvoiceAction({
-        tenantId: tenant.id,
-        lineItems,
-        daysUntilDue: parseInt(daysUntilDue, 10),
-        memo: memo || undefined,
-        collect,
-      });
-      if (res.ok) {
-        toast.success(
-          collect === "auto"
-            ? "Invoice created — charging the card on file"
-            : "Invoice created — Stripe emailed the payment link",
-        );
-        setInvoiceOpen(false);
-        setLines([{ name: "", amount: "" }]);
-        setMemo("");
-        router.refresh();
-      } else toast.error(res.error);
-    } catch {
-      toast.error("Check the line-item amounts");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function recordPayment() {
-    if (!payFor) return;
-    setBusy(true);
-    try {
-      const res = await recordOfflinePaymentAction({
-        invoiceId: payFor.id,
-        amountCents: toCents(payForm.amount),
-        method: payForm.method as "check" | "zelle" | "wire" | "other",
-        reference: payForm.reference || undefined,
-      });
-      if (res.ok) {
-        toast.success(
-          res.settled ? "Payment recorded — invoice settled" : "Partial payment recorded",
-        );
-        setPayFor(null);
-        setPayForm({ amount: "", method: "check", reference: "" });
-        router.refresh();
-      } else toast.error(res.error);
-    } catch {
-      toast.error("Enter a valid amount");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveHosting() {
-    if (!hostingFor) return;
-    setBusy(true);
-    try {
-      const cents = hostingForm.amount ? toCents(hostingForm.amount) : 0;
-      const res = await setHostingFeeAction({
-        subscriptionId: hostingFor.id,
-        monthlyHostingCents: cents,
-        startMonth: hostingForm.startMonth || null,
-      });
-      if (res.ok) {
-        toast.success(cents ? "Hosting fee configured" : "Hosting fee removed");
-        setHostingFor(null);
-        router.refresh();
-      } else toast.error(res.error);
-    } catch {
-      toast.error("Enter a valid amount");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const [invoiceFor, setInvoiceFor] = useState<TenantTarget | null>(null);
+  const [payFor, setPayFor] = useState<InvoiceTarget | null>(null);
+  const [hostingFor, setHostingFor] = useState<HostingTarget | null>(null);
 
   const pastDue = invoices.filter(
     (i) => (i.status === "open" && i.dueDate && new Date(i.dueDate) < new Date()) || i.status === "failed",
@@ -190,7 +92,7 @@ export function OpsTenantBilling({
             {tenant.slug} · {tenant.memberCount} members
           </span>
           <div className="flex-1" />
-          <Button className="gap-2" onClick={() => setInvoiceOpen(true)}>
+          <Button className="gap-2" onClick={() => setInvoiceFor({ id: tenant.id, name: tenant.name })}>
             <FilePlus2 className="size-4" /> New invoice
           </Button>
         </div>
@@ -222,10 +124,7 @@ export function OpsTenantBilling({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  setHostingFor(s);
-                  setHostingForm({ amount: "", startMonth: new Date().toISOString().slice(0, 7) });
-                }}
+                onClick={() => setHostingFor({ id: s.id, productName: s.productName })}
               >
                 Hosting fee…
               </Button>
@@ -309,14 +208,14 @@ export function OpsTenantBilling({
                           variant="ghost"
                           size="sm"
                           className="gap-1"
-                          onClick={() => {
-                            setPayFor(inv);
-                            setPayForm({
-                              amount: ((inv.amountDueCents - inv.amountPaidCents) / 100).toFixed(2),
-                              method: "check",
-                              reference: "",
-                            });
-                          }}
+                          onClick={() =>
+                            setPayFor({
+                              id: inv.id,
+                              invoiceNumber: inv.invoiceNumber,
+                              amountDueCents: inv.amountDueCents,
+                              amountPaidCents: inv.amountPaidCents,
+                            })
+                          }
                         >
                           <HandCoins className="size-4" /> Record
                         </Button>
@@ -345,135 +244,9 @@ export function OpsTenantBilling({
         </div>
       </div>
 
-      {/* New manual invoice */}
-      <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>New invoice for {tenant.name}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-[1fr_120px] gap-2">
-                <Input
-                  placeholder="Line item description"
-                  value={l.name}
-                  onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-                />
-                <Input
-                  placeholder="500.00"
-                  value={l.amount}
-                  onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))}
-                />
-              </div>
-            ))}
-            <Button variant="outline" size="sm" className="w-fit" onClick={() => setLines([...lines, { name: "", amount: "" }])}>
-              Add line
-            </Button>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Days until due</Label>
-                <Input value={daysUntilDue} onChange={(e) => setDaysUntilDue(e.target.value)} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Memo (optional)</Label>
-                <Input value={memo} onChange={(e) => setMemo(e.target.value)} />
-              </div>
-            </div>
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-1.5">
-                <input type="radio" checked={collect === "send"} onChange={() => setCollect("send")} />
-                Email payment link
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input type="radio" checked={collect === "auto"} onChange={() => setCollect("auto")} />
-                Charge card on file now
-              </label>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Auto-charge falls back to the emailed link when no card is on
-              file. Offline payments can be recorded against either.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button onClick={createInvoice} disabled={busy || !lines.some((l) => l.name && l.amount)}>
-              {busy ? "Creating…" : "Create & send"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Record offline payment */}
-      <Dialog open={!!payFor} onOpenChange={(o) => !o && setPayFor(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Record payment — {payFor?.invoiceNumber}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Amount (USD)</Label>
-                <Input value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Method</Label>
-                <Select value={payForm.method} onValueChange={(v) => setPayForm({ ...payForm, method: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="check">Check</SelectItem>
-                    <SelectItem value="zelle">Zelle</SelectItem>
-                    <SelectItem value="wire">Wire</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label>Reference (check #, confirmation…)</Label>
-              <Input value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })} />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Partial amounts are fine — the invoice settles when payments cover
-              the total, and any suspension lifts automatically.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button onClick={recordPayment} disabled={busy || !payForm.amount}>
-              {busy ? "Recording…" : "Record payment"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Hosting fee */}
-      <Dialog open={!!hostingFor} onOpenChange={(o) => !o && setHostingFor(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Hosting fee — {hostingFor?.productName}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Monthly fee (USD, 0 to remove)</Label>
-                <Input placeholder="79.00" value={hostingForm.amount} onChange={(e) => setHostingForm({ ...hostingForm, amount: e.target.value })} />
-              </div>
-              <div className="grid gap-2">
-                <Label>First billed month</Label>
-                <Input type="month" value={hostingForm.startMonth} onChange={(e) => setHostingForm({ ...hostingForm, startMonth: e.target.value })} />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Invoiced through Stripe on the 1st for the previous month —
-              auto-charged when a card is on file, otherwise a hosted payment
-              link is emailed.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button onClick={saveHosting} disabled={busy}>
-              {busy ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <NewInvoiceDialog key={invoiceFor?.id ?? "none"} target={invoiceFor} onOpenChange={(o) => !o && setInvoiceFor(null)} />
+      <RecordPaymentDialog key={payFor?.id ?? "none"} target={payFor} onOpenChange={(o) => !o && setPayFor(null)} />
+      <HostingFeeDialog key={hostingFor?.id ?? "none"} target={hostingFor} onOpenChange={(o) => !o && setHostingFor(null)} />
     </div>
   );
 }

@@ -1,8 +1,11 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import type Stripe from "stripe";
 import { db } from "../../db";
+import { getStripe, stripeConfigured } from "../../lib/stripe";
 import { organization } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
 import { subscriptionProvisioning } from "../provisioning/schema";
+import { dunningStates, payments } from "./ar-schema";
 import { invoices, subscriptionItems, subscriptions } from "./schema";
 import { isRecurringKind, itemMrrCents, LIVE_SUBSCRIPTION_STATUSES, MRR_STATUSES } from "./mappers";
 
@@ -259,4 +262,186 @@ export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
       canceledAt: s.canceledAt?.toISOString() ?? null,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Ops → Billing: every invoice, and live Stripe collection status per subscription
+// ---------------------------------------------------------------------------
+
+export type OpsInvoiceDto = {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  subscriptionId: string | null;
+  invoiceNumber: string;
+  kind: string;
+  status: string;
+  amountDueCents: number;
+  amountPaidCents: number;
+  hostedInvoiceUrl: string | null;
+  dueDate: string | null;
+  paidAt: string | null;
+  createdAt: string;
+  /** Open (unresolved) dunning case, if any. */
+  dunning: { id: string; remindersSent: number; suspendedAt: string | null; paused: boolean } | null;
+  payments: { id: string; amountCents: number; method: string; reference: string | null; receivedAt: string }[];
+};
+
+export async function listAllInvoicesOps(limit = 250): Promise<OpsInvoiceDto[]> {
+  const rows = await db
+    .select({
+      id: invoices.id,
+      tenantId: invoices.tenantId,
+      tenantName: organization.name,
+      subscriptionId: invoices.subscriptionId,
+      invoiceNumber: invoices.invoiceNumber,
+      kind: invoices.kind,
+      status: invoices.status,
+      amountDueCents: invoices.amountDueCents,
+      amountPaidCents: invoices.amountPaidCents,
+      hostedInvoiceUrl: invoices.hostedInvoiceUrl,
+      dueDate: invoices.dueDate,
+      paidAt: invoices.paidAt,
+      createdAt: invoices.createdAt,
+    })
+    .from(invoices)
+    .innerJoin(organization, eq(invoices.tenantId, organization.id))
+    .orderBy(desc(invoices.createdAt))
+    .limit(limit);
+  if (rows.length === 0) return [];
+
+  const ids = rows.map((r) => r.id);
+  const [cases, pays] = await Promise.all([
+    db.query.dunningStates.findMany({
+      where: and(inArray(dunningStates.invoiceId, ids), isNull(dunningStates.resolvedAt)),
+    }),
+    db.query.payments.findMany({ where: inArray(payments.invoiceId, ids) }),
+  ]);
+
+  return rows.map((r) => {
+    const c = cases.find((x) => x.invoiceId === r.id);
+    return {
+      ...r,
+      dueDate: r.dueDate?.toISOString() ?? null,
+      paidAt: r.paidAt?.toISOString() ?? null,
+      createdAt: r.createdAt.toISOString(),
+      dunning: c
+        ? {
+            id: c.id,
+            remindersSent: c.remindersSent,
+            suspendedAt: c.suspendedAt?.toISOString() ?? null,
+            paused: c.paused,
+          }
+        : null,
+      payments: pays
+        .filter((p) => p.invoiceId === r.id)
+        .map((p) => ({
+          id: p.id,
+          amountCents: p.amountCents,
+          method: p.method,
+          reference: p.reference,
+          receivedAt: p.receivedAt.toISOString(),
+        })),
+    };
+  });
+}
+
+/** What Stripe will actually do at the next renewal — read live, never cached. */
+export type SubscriptionAutomation = {
+  subscriptionId: string;
+  tenantId: string;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  stripeStatus: string | null;
+  collectionMethod: "charge_automatically" | "send_invoice" | null;
+  cardOnFile: boolean;
+  /** Recurring amounts as Stripe has them, split by interval. */
+  monthlyCents: number;
+  yearlyCents: number;
+  /** Earliest item renewal = the next invoice/charge date. */
+  nextChargeAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  /** Set when Stripe couldn't be read; the row falls back to local data. */
+  error: string | null;
+};
+
+export async function getBillingAutomationStatus(): Promise<SubscriptionAutomation[]> {
+  const live = await db
+    .select({
+      id: subscriptions.id,
+      tenantId: subscriptions.tenantId,
+      stripeSubscriptionId: subscriptions.stripeSubscriptionId,
+      currentPeriodEnd: subscriptions.currentPeriodEnd,
+      stripeCustomerId: organization.stripeCustomerId,
+    })
+    .from(subscriptions)
+    .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
+    .where(inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES));
+
+  const base = (s: (typeof live)[number], error: string | null): SubscriptionAutomation => ({
+    subscriptionId: s.id,
+    tenantId: s.tenantId,
+    stripeCustomerId: s.stripeCustomerId,
+    stripeSubscriptionId: s.stripeSubscriptionId,
+    stripeStatus: null,
+    collectionMethod: null,
+    cardOnFile: false,
+    monthlyCents: 0,
+    yearlyCents: 0,
+    nextChargeAt: s.currentPeriodEnd?.toISOString() ?? null,
+    cancelAtPeriodEnd: false,
+    error,
+  });
+  if (live.length === 0) return [];
+  if (!stripeConfigured()) return live.map((s) => base(s, "Stripe is not configured"));
+
+  const stripe = getStripe();
+  // One customer lookup per tenant, shared across its subscriptions.
+  const customerCard = new Map<string, Promise<boolean>>();
+  const cardOnFile = (customerId: string) => {
+    let p = customerCard.get(customerId);
+    if (!p) {
+      p = stripe.customers
+        .retrieve(customerId)
+        .then((c) => Boolean((c as Stripe.Customer).invoice_settings?.default_payment_method))
+        .catch(() => false);
+      customerCard.set(customerId, p);
+    }
+    return p;
+  };
+
+  return Promise.all(
+    live.map(async (s) => {
+      if (!s.stripeSubscriptionId) return base(s, "Not billed through Stripe");
+      try {
+        const [ss, customerHasCard] = await Promise.all([
+          stripe.subscriptions.retrieve(s.stripeSubscriptionId, { expand: ["items.data.price"] }),
+          s.stripeCustomerId ? cardOnFile(s.stripeCustomerId) : Promise.resolve(false),
+        ]);
+        let monthlyCents = 0;
+        let yearlyCents = 0;
+        const periodEnds: number[] = [];
+        for (const it of ss.items.data) {
+          const amt = (it.price.unit_amount ?? 0) * (it.quantity ?? 1);
+          if (it.price.recurring?.interval === "month") monthlyCents += amt;
+          else if (it.price.recurring?.interval === "year") yearlyCents += amt;
+          if (it.current_period_end) periodEnds.push(it.current_period_end);
+        }
+        return {
+          ...base(s, null),
+          stripeStatus: ss.status,
+          collectionMethod: ss.collection_method,
+          cardOnFile: customerHasCard || Boolean(ss.default_payment_method),
+          monthlyCents,
+          yearlyCents,
+          nextChargeAt: periodEnds.length
+            ? new Date(Math.min(...periodEnds) * 1000).toISOString()
+            : (s.currentPeriodEnd?.toISOString() ?? null),
+          cancelAtPeriodEnd: ss.cancel_at_period_end,
+        };
+      } catch (e) {
+        return base(s, e instanceof Error ? e.message : "Stripe lookup failed");
+      }
+    }),
+  );
 }

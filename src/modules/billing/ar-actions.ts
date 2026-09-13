@@ -12,8 +12,18 @@ import {
   generateHostingInvoices,
   recordOfflinePayment,
   runDunningSweep,
+  sendCardSetupLink,
   setHostingFee,
+  switchSubscriptionToAutoCharge,
 } from "./ar-service";
+import { cancelSubscription } from "./service";
+
+/** Every ops surface that renders billing state. */
+const BILLING_PATHS = ["/ops/billing", "/ops/subscriptions", "/ops/tenants", "/ops"] as const;
+function revalidateBilling(tenantId?: string) {
+  for (const p of BILLING_PATHS) revalidatePath(p);
+  if (tenantId) revalidatePath(`/ops/tenants/${tenantId}`);
+}
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 const fail = (e: unknown): ActionResult => ({
@@ -42,7 +52,7 @@ export async function createManualInvoiceAction(
       ...p,
       contact: { email: session.user.email, name: session.user.name },
     });
-    revalidatePath(`/ops/tenants/${p.tenantId}`);
+    revalidateBilling(p.tenantId);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -73,7 +83,7 @@ export async function recordOfflinePaymentAction(
       recordedByUserId: session.user.id,
       note: p.note,
     });
-    revalidatePath("/ops/tenants");
+    revalidateBilling();
     return { ok: true, settled: r.settled };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Recording failed" };
@@ -100,7 +110,7 @@ export async function setHostingFeeAction(
       p.monthlyHostingCents === 0 ? null : p.monthlyHostingCents,
       p.startMonth,
     );
-    revalidatePath("/ops/tenants");
+    revalidateBilling();
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -114,7 +124,7 @@ export async function toggleDunningPauseAction(
   try {
     await requireOps();
     await db.update(dunningStates).set({ paused }).where(eq(dunningStates.id, dunningStateId));
-    revalidatePath("/ops/tenants");
+    revalidateBilling();
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -127,7 +137,7 @@ export async function runDunningSweepAction(): Promise<
   try {
     await requireOps();
     const r = await runDunningSweep();
-    revalidatePath("/ops");
+    revalidateBilling();
     return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Sweep failed" };
@@ -189,9 +199,53 @@ export async function generateHostingInvoicesAction(month?: string): Promise<
   try {
     await requireOps();
     const r = await generateHostingInvoices(month);
-    revalidatePath("/ops/tenants");
+    revalidateBilling();
     return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Generation failed" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ops → Billing board
+// ---------------------------------------------------------------------------
+
+/** Ops-side cancel (immediate, via Stripe when linked). */
+export async function opsCancelSubscriptionAction(subscriptionId: string): Promise<ActionResult> {
+  try {
+    await requireOps();
+    z.string().uuid().parse(subscriptionId);
+    await cancelSubscription(subscriptionId);
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Emailed invoices → charge the card on file at each renewal. */
+export async function switchToAutoChargeAction(subscriptionId: string): Promise<ActionResult> {
+  try {
+    await requireOps();
+    z.string().uuid().parse(subscriptionId);
+    await switchSubscriptionToAutoCharge(subscriptionId);
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Email the client a Stripe link to add a card; returns the link to copy too. */
+export async function sendCardSetupLinkAction(
+  tenantId: string,
+): Promise<{ ok: true; url: string; sentTo: string | null } | { ok: false; error: string }> {
+  try {
+    await requireOps();
+    z.string().min(1).parse(tenantId);
+    const r = await sendCardSetupLink(tenantId);
+    return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not create the link" };
   }
 }

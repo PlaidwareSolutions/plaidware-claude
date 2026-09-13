@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db";
-import { invitation, member, organization, user } from "../auth/schema";
+import { invitation, member, organization, session, user } from "../auth/schema";
 
 export type TenantSummary = {
   id: string;
@@ -31,8 +31,13 @@ export type MemberRow = {
   userId: string;
   name: string;
   email: string;
+  phone: string;
   role: string;
+  platformRole: string;
+  emailVerified: boolean;
   joinedAt: Date;
+  /** Most recent session activity; null = never signed in. */
+  lastSeenAt: Date | null;
 };
 
 export async function listMembers(tenantId: string): Promise<MemberRow[]> {
@@ -42,14 +47,33 @@ export async function listMembers(tenantId: string): Promise<MemberRow[]> {
       userId: member.userId,
       name: user.name,
       email: user.email,
+      phone: user.phone,
       role: member.role,
+      platformRole: user.platformRole,
+      emailVerified: user.emailVerified,
       joinedAt: member.createdAt,
     })
     .from(member)
     .innerJoin(user, eq(member.userId, user.id))
     .where(eq(member.organizationId, tenantId))
     .orderBy(member.createdAt);
-  return rows;
+  if (rows.length === 0) return [];
+
+  const seen = await db
+    .select({
+      userId: session.userId,
+      lastSeenAt: sql<Date>`max(${session.updatedAt})`,
+    })
+    .from(session)
+    .where(inArray(session.userId, rows.map((r) => r.userId)))
+    .groupBy(session.userId);
+  const lastSeen = new Map(seen.map((s) => [s.userId, s.lastSeenAt]));
+
+  return rows.map((r) => ({
+    ...r,
+    platformRole: r.platformRole ?? "customer",
+    lastSeenAt: lastSeen.get(r.userId) ?? null,
+  }));
 }
 
 export type InviteRow = {
@@ -85,6 +109,7 @@ export type OpsTenantRow = {
   status: string;
   memberCount: number;
   createdAt: Date;
+  stripeCustomerId: string | null;
 };
 
 export async function listAllTenants(): Promise<OpsTenantRow[]> {
@@ -105,7 +130,30 @@ export async function listAllTenants(): Promise<OpsTenantRow[]> {
     status: o.status ?? "active",
     memberCount: counts.get(o.id) ?? 0,
     createdAt: o.createdAt,
+    stripeCustomerId: o.stripeCustomerId,
   }));
+}
+
+/** tenantId → owner email (first owner by join date; falls back to any member). */
+export async function listTenantOwnerEmails(): Promise<Record<string, string>> {
+  const rows = await db
+    .select({ organizationId: member.organizationId, email: user.email, role: member.role, joinedAt: member.createdAt })
+    .from(member)
+    .innerJoin(user, eq(member.userId, user.id))
+    .orderBy(member.createdAt);
+  // Rows arrive oldest-first: the first owner wins; any member is the fallback.
+  const out: Record<string, string> = {};
+  const hasOwner = new Set<string>();
+  for (const r of rows) {
+    if (hasOwner.has(r.organizationId)) continue;
+    if (r.role === "owner") {
+      out[r.organizationId] = r.email;
+      hasOwner.add(r.organizationId);
+    } else if (!out[r.organizationId]) {
+      out[r.organizationId] = r.email;
+    }
+  }
+  return out;
 }
 
 export async function getTenant(tenantId: string) {

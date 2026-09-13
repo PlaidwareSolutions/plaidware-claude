@@ -1,0 +1,65 @@
+import { redirect } from "next/navigation";
+import { getSession, isOps } from "@/policy";
+import { env } from "@/env";
+import { stripeConfigured } from "@/lib/stripe";
+import { listAllTenants, listTenantOwnerEmails } from "@/modules/tenancy/queries";
+import {
+  getBillingAutomationStatus,
+  getPlatformBillingStats,
+  listAllInvoicesOps,
+  listAllSubscriptionsOps,
+} from "@/modules/billing/queries";
+import { BILLING_SCHEDULE, nextDailyRunUtc, nextMonthlyRunUtc } from "@/modules/billing/schedule";
+import { OpsBillingBoard } from "@/modules/billing/components/ops-billing-board";
+
+export const metadata = { title: "Billing" };
+export const dynamic = "force-dynamic";
+
+export default async function OpsBillingPage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (!isOps(session)) redirect("/dashboard");
+
+  const [tenants, owners, subscriptions, invoices, stats, automation] = await Promise.all([
+    listAllTenants(),
+    listTenantOwnerEmails(),
+    listAllSubscriptionsOps(),
+    listAllInvoicesOps(),
+    getPlatformBillingStats(),
+    getBillingAutomationStatus(), // live Stripe reads — never cached
+  ]);
+
+  const now = new Date();
+  return (
+    <OpsBillingBoard
+      generatedAt={now.toISOString()}
+      config={{
+        stripe: stripeConfigured(),
+        webhook: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+        email: Boolean(env.RESEND_API_KEY),
+      }}
+      stats={stats}
+      tenants={tenants.map((t) => ({
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        status: t.status,
+        createdAt: t.createdAt.toISOString(),
+        memberCount: t.memberCount,
+        stripeCustomerId: t.stripeCustomerId,
+        ownerEmail: owners[t.id] ?? null,
+      }))}
+      subscriptions={subscriptions}
+      automation={automation}
+      invoices={invoices}
+      schedule={{
+        dunningNextUtc: nextDailyRunUtc(BILLING_SCHEDULE.dunningSweep.hourUtc, now).toISOString(),
+        hostingNextUtc: nextMonthlyRunUtc(
+          BILLING_SCHEDULE.hostingInvoices.dayOfMonth,
+          BILLING_SCHEDULE.hostingInvoices.hourUtc,
+          now,
+        ).toISOString(),
+      }}
+    />
+  );
+}
