@@ -7,6 +7,7 @@ import {
   completeSetupPassword,
   createClientSetup,
   getSetupByToken,
+  regenerateSetupLink,
   revokeSetup,
   runFinalize,
   type FinalizeState,
@@ -90,5 +91,19 @@ export async function revokeSetupAction(inviteId: string): Promise<{ ok: boolean
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Revoke failed" };
+  }
+}
+
+export async function regenerateSetupLinkAction(
+  inviteId: string,
+): Promise<{ ok: true; link: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireOps();
+    z.string().uuid().parse(inviteId);
+    const { link } = await regenerateSetupLink(inviteId, session.user.id);
+    revalidatePath("/ops/tenants");
+    return { ok: true, link };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not regenerate link" };
   }
 }

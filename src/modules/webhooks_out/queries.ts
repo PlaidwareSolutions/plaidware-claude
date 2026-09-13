@@ -1,4 +1,4 @@
-import { desc, inArray } from "drizzle-orm";
+import { desc, inArray, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { webhookDeliveries } from "./schema";
 
@@ -52,4 +52,39 @@ export async function listRecentDeliveries(limit = 100): Promise<WebhookDelivery
     .orderBy(desc(webhookDeliveries.createdAt))
     .limit(limit);
   return rows.map(toDto);
+}
+
+export type TenantDeliveryHealth = {
+  recent: WebhookDeliveryDto[];
+  total: number;
+  dead: number;
+  pending: number;
+};
+
+/**
+ * MHub webhook deliveries for one tenant. Subscription-scoped events join on
+ * subscriptionId; org-level events (organization.updated / membership.changed)
+ * carry a null subscriptionId and are matched via payload.hub_org_id instead.
+ */
+export async function tenantDeliveryHealth(
+  subIds: string[],
+  orgId: string,
+  limit = 20,
+): Promise<TenantDeliveryHealth> {
+  const match = or(
+    subIds.length ? inArray(webhookDeliveries.subscriptionId, subIds) : undefined,
+    sql`${webhookDeliveries.payload}->>'hub_org_id' = ${orgId}`,
+  );
+  const rows = await db
+    .select()
+    .from(webhookDeliveries)
+    .where(match)
+    .orderBy(desc(webhookDeliveries.createdAt))
+    .limit(limit);
+  return {
+    recent: rows.map(toDto),
+    total: rows.length,
+    dead: rows.filter((r) => r.status === "dead" || r.status === "disabled").length,
+    pending: rows.filter((r) => r.status === "pending").length,
+  };
 }

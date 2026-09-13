@@ -555,3 +555,39 @@ export async function revokeSetup(inviteId: string): Promise<void> {
     .set({ status: "revoked" })
     .where(eq(onboardingInvites.id, inviteId));
 }
+
+/**
+ * Rotate the token on an existing invite and return a fresh /welcome link —
+ * for when the original link was lost, expired, or revoked. Reuses the invite's
+ * locked products/pricing/client, so ops never has to re-enter anything.
+ * Refuses once the client has already completed setup.
+ */
+export async function regenerateSetupLink(
+  inviteId: string,
+  actorUserId: string,
+): Promise<{ link: string }> {
+  const invite = await db.query.onboardingInvites.findFirst({
+    where: eq(onboardingInvites.id, inviteId),
+  });
+  if (!invite) throw new Error("Setup link not found");
+  if (invite.status === "accepted") throw new Error("This client has already completed setup");
+
+  const raw = randomBytes(24).toString("hex");
+  await db
+    .update(onboardingInvites)
+    .set({
+      tokenHash: sha256(raw),
+      status: "pending",
+      expiresAt: new Date(Date.now() + INVITE_DAYS * 86_400_000),
+    })
+    .where(eq(onboardingInvites.id, inviteId));
+
+  await writeAudit({
+    tenantId: invite.tenantId,
+    actorUserId,
+    kind: "client_setup_created",
+    payload: { regenerated: true, inviteId },
+  });
+
+  return { link: `${env.APP_BASE_URL}/welcome/${raw}` };
+}
