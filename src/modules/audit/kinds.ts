@@ -19,6 +19,7 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   client_setup_completed: { label: "Client completed setup", group: "setup" },
   client_setup_revoked: { label: "Setup link revoked", group: "setup" },
   client_setup_expired: { label: "Setup link expired", group: "setup" },
+  setup_pricing_released: { label: "Setup-link prices released", group: "setup" },
   price_override_set: { label: "Custom price set", group: "billing" },
   price_override_cleared: { label: "Custom price cleared", group: "billing" },
   hosting_fee_set: { label: "Hosting fee set", group: "billing" },
@@ -96,6 +97,10 @@ export function describeAudit(
       return str(payload.email);
     case "client_setup_created":
       return payload.regenerated ? "link regenerated" : str(payload.email);
+    case "setup_pricing_released": {
+      const n = Array.isArray(payload.components) ? payload.components.length : 0;
+      return `${n} negotiated price${n === 1 ? "" : "s"} applied to this setup only — later purchases use list price`;
+    }
     case "credential_added":
     case "credential_updated":
     case "credential_deleted":

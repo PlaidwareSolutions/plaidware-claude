@@ -237,18 +237,19 @@ export async function setHostingFee(
 }
 
 /**
- * Per-tenant negotiated price (billing v2). Null clears back to list. Applies
- * to future checkouts and add-ons; existing subscriptions keep their snapshots.
+ * Per-tenant negotiated price (billing v2). Null clears back to list; an
+ * explicit 0 is a real price (a waived build fee). Applies to future checkouts
+ * and add-ons; existing subscriptions keep their snapshots.
  */
 export async function setTenantPriceOverride(opts: {
   tenantId: string;
   componentId: string;
   amountCents: number | null;
   actorUserId: string;
-  /** Tag rows minted from a setup link so they die with a revoked/expired invite. */
+  /** Tag rows minted from a setup link so they die with a revoked/expired/completed invite. */
   sourceInviteId?: string | null;
 }): Promise<void> {
-  if (opts.amountCents == null || opts.amountCents === 0) {
+  if (opts.amountCents == null) {
     await db
       .delete(tenantPriceOverrides)
       .where(
@@ -280,7 +281,7 @@ export async function setTenantPriceOverride(opts: {
   await writeAudit({
     tenantId: opts.tenantId,
     actorUserId: opts.actorUserId,
-    kind: opts.amountCents ? "price_override_set" : "price_override_cleared",
+    kind: opts.amountCents != null ? "price_override_set" : "price_override_cleared",
     payload: {
       componentId: opts.componentId,
       amountCents: opts.amountCents,

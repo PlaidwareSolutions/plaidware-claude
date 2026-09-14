@@ -583,6 +583,21 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
           .map((s) => s.id),
       },
     });
+    // The negotiated prices were for this onboarding only. Every subscription
+    // has snapshotted them by now, so the tenant goes back to list price for
+    // anything it buys later — ops sets Custom pricing deliberately if not.
+    const released = await db
+      .delete(tenantPriceOverrides)
+      .where(eq(tenantPriceOverrides.sourceInviteId, invite.id))
+      .returning({ componentId: tenantPriceOverrides.componentId, amountCents: tenantPriceOverrides.amountCents });
+    if (released.length) {
+      await writeAudit({
+        tenantId: invite.tenantId,
+        actorUserId: invite.userId,
+        kind: "setup_pricing_released",
+        payload: { inviteId: invite.id, components: released },
+      });
+    }
   }
   return { state: "complete" };
 }

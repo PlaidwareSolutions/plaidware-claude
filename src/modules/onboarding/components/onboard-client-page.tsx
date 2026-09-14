@@ -234,7 +234,8 @@ export function OnboardClientPage({
                 </li>
               )}
               <li>
-                Custom prices are held on the link and only become the client&apos;s overrides when they pay — nothing to clean up if they never do.
+                Custom prices are held on the link and applied at payment for this onboarding only — the client&apos;s later purchases use list price
+                unless you set standing Custom pricing on their page. Nothing to clean up if they never pay.
               </li>
             </ol>
           </CardContent>
@@ -349,12 +350,12 @@ export function OnboardClientPage({
                     </div>
                     {product && (
                       <div className="grid gap-2">
-                        <Label>Items & prices — edit any price for this client</Label>
+                        <Label>Items & prices — edit any price; it applies to this client&apos;s onboarding only</Label>
                         {product.components.map((c) => {
                           const st = section.items[c.id] ?? { included: false, price: "" };
                           const locked = c.role === "base";
                           let custom = false;
-                          try { custom = st.included && toCents(st.price) !== c.amountCents; } catch { custom = false; }
+                          try { custom = st.included && st.price.trim() !== "" && toCents(st.price) !== c.amountCents; } catch { custom = false; }
                           return (
                             <div key={c.id} className="flex items-center gap-2 rounded-md border p-2">
                               <Checkbox checked={st.included} disabled={locked} onCheckedChange={(v) => updateSection(i, { items: { ...section.items, [c.id]: { ...st, included: Boolean(v) } } })} />
@@ -368,7 +369,16 @@ export function OnboardClientPage({
                               </div>
                               <div className="flex items-center gap-1">
                                 <span className="text-xs text-muted-foreground">$</span>
-                                <Input className="h-8 w-24 text-right text-sm" value={st.price} disabled={!st.included} onChange={(e) => updateSection(i, { items: { ...section.items, [c.id]: { ...st, price: e.target.value } } })} />
+                                <Input
+                                  className="h-8 w-24 text-right text-sm"
+                                  value={st.price}
+                                  onChange={(e) =>
+                                    updateSection(i, {
+                                      // Typing a price for an unticked item includes it — nobody prices what they're not selling.
+                                      items: { ...section.items, [c.id]: { included: st.included || locked || e.target.value.trim() !== "", price: e.target.value } },
+                                    })
+                                  }
+                                />
                                 <span className="w-14 text-[11px] text-muted-foreground">{cadence(c)}</span>
                               </div>
                             </div>

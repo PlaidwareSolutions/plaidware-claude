@@ -122,6 +122,11 @@ export function OpsCustomPricing({
                   custom {formatCents(row.overrideCents)}{row.intervalLabel}
                 </span>
               )}
+              {row.fromSetupLink && (
+                <Badge variant="outline" className="ml-2 text-[10px]" title="Held for a setup link in progress; released once that setup completes">
+                  setup link
+                </Badge>
+              )}
             </div>
             <Input
               className="h-8 w-28 text-right text-xs tabular-nums"
@@ -147,7 +152,7 @@ export function OpsCustomPricing({
     <Section
       title="Custom pricing"
       icon={BadgeDollarSign}
-      description="Used at the client's next checkout or add-on purchase; existing subscriptions keep their locked-in prices. Clear a field to return to list."
+      description="Standing prices for this client's future checkouts and add-ons; existing subscriptions keep their locked-in prices. Prices from a setup link apply to that onboarding only. Clear a field to return to list."
     >
       <div className="flex flex-col gap-4">
         {subscribedGroups.length === 0 && (

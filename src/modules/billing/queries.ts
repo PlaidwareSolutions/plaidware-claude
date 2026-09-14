@@ -510,6 +510,8 @@ export type PricingRow = {
   listCents: number;
   intervalLabel: string;
   overrideCents: number | null;
+  /** Set while the price is held for a setup link — it is released when that setup completes. */
+  fromSetupLink: boolean;
 };
 
 /** Every catalog component with this client's override (if any) beside the list price. */
@@ -527,6 +529,7 @@ export async function listTenantPricingRows(tenantId: string): Promise<PricingRo
       listCents: c.amountCents,
       intervalLabel: intervalLabel(c),
       overrideCents: overrides.find((o) => o.componentId === c.id)?.amountCents ?? null,
+      fromSetupLink: Boolean(overrides.find((o) => o.componentId === c.id)?.sourceInviteId),
     })),
   );
 }
