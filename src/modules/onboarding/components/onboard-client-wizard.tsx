@@ -31,17 +31,33 @@ type Section = {
 
 const emptySection = (): Section => ({ productId: "", domainUrl: "", items: {} });
 
-export function OnboardClientWizard({ products }: { products: ProductDto[] }) {
+export type WizardInitial = { clientName?: string; clientEmail?: string; tenantName?: string };
+
+export function OnboardClientWizard({
+  products,
+  initial,
+  trigger,
+  onCreated,
+}: {
+  products: ProductDto[];
+  /** Prefill (e.g. from a lead); applied every time the wizard opens. */
+  initial?: WizardInitial;
+  /** Custom opener; defaults to the "Onboard client" button. */
+  trigger?: (open: () => void) => React.ReactNode;
+  /** Fires once a setup link exists (the lead can be marked contacted, etc.). */
+  onCreated?: (r: { tenantId: string; link: string }) => void;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    clientName: "",
-    clientEmail: "",
-    tenantName: "",
+  const blank = () => ({
+    clientName: initial?.clientName ?? "",
+    clientEmail: initial?.clientEmail ?? "",
+    tenantName: initial?.tenantName ?? "",
     sendEmailToClient: true,
   });
+  const [form, setForm] = useState(blank);
   const [sections, setSections] = useState<Section[]>([emptySection()]);
 
   const productOf = (s: Section) => products.find((p) => p.id === s.productId) ?? null;
@@ -102,6 +118,7 @@ export function OnboardClientWizard({ products }: { products: ProductDto[] }) {
         toast.success(
           form.sendEmailToClient ? "Setup created — link emailed to the client" : "Setup created",
         );
+        onCreated?.({ tenantId: res.tenantId, link: res.link });
         router.refresh();
       } else toast.error(res.error);
     } catch {
@@ -114,8 +131,13 @@ export function OnboardClientWizard({ products }: { products: ProductDto[] }) {
   function reset() {
     setOpen(false);
     setResult(null);
-    setForm({ clientName: "", clientEmail: "", tenantName: "", sendEmailToClient: true });
+    setForm(blank());
     setSections([emptySection()]);
+  }
+
+  function openWizard() {
+    setForm(blank());
+    setOpen(true);
   }
 
   const totalToday = sections.reduce((sum, s) => {
@@ -141,9 +163,13 @@ export function OnboardClientWizard({ products }: { products: ProductDto[] }) {
 
   return (
     <>
-      <Button className="gap-2" variant="outline" onClick={() => setOpen(true)}>
-        <UserPlus className="size-4" /> Onboard client
-      </Button>
+      {trigger ? (
+        trigger(openWizard)
+      ) : (
+        <Button className="gap-2" onClick={openWizard}>
+          <UserPlus className="size-4" /> Onboard client
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={(o) => !o && reset()}>
         <DialogContent className={`max-h-[90vh] overflow-y-auto ${result ? "sm:max-w-xl" : "sm:max-w-lg"}`}>
           {result ? (

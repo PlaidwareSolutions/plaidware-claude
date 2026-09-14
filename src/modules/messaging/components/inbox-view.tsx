@@ -1,12 +1,17 @@
 "use client";
 
-import { OPS, TENANT } from "@/lib/routes";
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { MessageSquare, Plus, Send } from "lucide-react";
 import type { ThreadRow } from "../service";
 import { closeThreadAction, createThreadAction, replyAction } from "../actions";
+import { OPS, TENANT, withQuery } from "@/lib/routes";
+import { formatDateTime } from "@/lib/dates";
+import { FilterChip } from "@/components/filter-chip";
+import { StatusBadge } from "@/components/status-badge";
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,18 +31,22 @@ export type MessageDto = {
 export function InboxView({
   scope,
   tenantId,
+  filter = null,
   threads,
   activeThread,
   activeMessages,
 }: {
   scope: "tenant" | "ops";
   tenantId: string | null;
+  /** Ops only: the list is scoped to one client (?tenant=). */
+  filter?: { tenantId: string; tenantName: string } | null;
   threads: ThreadRow[];
   activeThread: ThreadRow | null;
   activeMessages: MessageDto[];
 }) {
   const router = useRouter();
   const base = scope === "ops" ? OPS.inbox : TENANT.inbox;
+  const threadHref = (id: string) => withQuery(base, { thread: id, tenant: filter?.tenantId });
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
@@ -77,17 +86,29 @@ export function InboxView({
             </Button>
           </div>
         )}
+        {filter && (
+          <div>
+            <FilterChip label={`Client: ${filter.tenantName}`} clearHref={base} />
+          </div>
+        )}
         <div className="flex max-h-[70vh] flex-col gap-1 overflow-y-auto">
           {threads.length === 0 && (
-            <div className="rounded-md border bg-card py-10 text-center text-sm text-muted-foreground">
-              <MessageSquare className="mx-auto mb-2 size-6 opacity-40" />
-              No conversations yet.
-            </div>
+            <EmptyState
+              icon={MessageSquare}
+              title="No conversations yet"
+              description={
+                scope === "ops"
+                  ? filter
+                    ? "This client hasn't started a conversation."
+                    : "Client messages land here."
+                  : "Start a conversation and Plaidware support replies here."
+              }
+            />
           )}
           {threads.map((t) => (
             <button
               key={t.id}
-              onClick={() => router.push(`${base}?thread=${t.id}`)}
+              onClick={() => router.push(threadHref(t.id))}
               className={`rounded-md border p-3 text-left transition-colors hover:bg-accent/50 ${activeThread?.id === t.id ? "border-primary/50 bg-accent/40" : "bg-card"}`}
             >
               <div className="flex items-center justify-between gap-2">
@@ -100,7 +121,7 @@ export function InboxView({
               </div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
                 {t.status === "closed" && "closed · "}
-                {new Date(t.lastMessageAt).toLocaleString()}
+                {formatDateTime(t.lastMessageAt)}
               </div>
             </button>
           ))}
@@ -117,8 +138,15 @@ export function InboxView({
             <div className="flex items-center justify-between border-b p-3">
               <div>
                 <div className="text-sm font-semibold text-heading">{activeThread.subject}</div>
-                <div className="text-xs text-muted-foreground">
-                  {scope === "ops" ? activeThread.tenantName : "Plaidware support"} · {activeThread.status}
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {scope === "ops" ? (
+                    <Link href={OPS.client(activeThread.tenantId)} className="font-medium text-heading hover:text-primary">
+                      {activeThread.tenantName}
+                    </Link>
+                  ) : (
+                    "Plaidware support"
+                  )}
+                  <StatusBadge kind="thread" status={activeThread.status} className="text-[10px]" />
                 </div>
               </div>
               {scope === "ops" && activeThread.status === "open" && (
@@ -142,7 +170,7 @@ export function InboxView({
                   <div key={m.id} className={`max-w-[80%] rounded-lg border p-3 text-sm ${mine ? "self-end bg-primary/10" : "self-start bg-secondary/50"}`}>
                     <div className="mb-1 text-[10px] text-muted-foreground">
                       {m.senderName ?? (m.senderRole === "ops" ? "Plaidware ops" : "Customer")} ·{" "}
-                      {new Date(m.createdAt).toLocaleString()}
+                      {formatDateTime(m.createdAt)}
                     </div>
                     <p className="whitespace-pre-wrap">{m.body}</p>
                   </div>

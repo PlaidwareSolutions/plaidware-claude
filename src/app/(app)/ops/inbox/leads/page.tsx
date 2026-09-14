@@ -1,5 +1,6 @@
 import { requireOpsPage } from "@/policy";
 import { listContactSubmissions } from "@/modules/contact/queries";
+import { listActiveProducts } from "@/modules/catalog/queries";
 import { ContactInbox } from "@/modules/contact/components/contact-inbox";
 
 export const metadata = { title: "Leads · Inbox" };
@@ -8,9 +9,10 @@ export const dynamic = "force-dynamic";
 export default async function ContactInboxPage() {
   await requireOpsPage();
 
-  const submissions = await listContactSubmissions();
+  const [submissions, products] = await Promise.all([listContactSubmissions(), listActiveProducts()]);
   return (
     <ContactInbox
+      products={products}
       submissions={submissions.map((s) => ({
         id: s.id,
         name: s.name,
