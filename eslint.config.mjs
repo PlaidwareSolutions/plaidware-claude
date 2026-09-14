@@ -13,6 +13,46 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // Page-system conventions (see the redesign plan): one way to confirm,
+  // one way to format a date, one place that knows a route.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        { name: "confirm", message: "Use useConfirm() from @/components/confirm-dialog." },
+        { name: "alert", message: "Use toast from sonner." },
+        { name: "prompt", message: "Use useConfirm() with a `field` from @/components/confirm-dialog." },
+      ],
+      "no-restricted-properties": [
+        "error",
+        { object: "window", property: "confirm", message: "Use useConfirm() from @/components/confirm-dialog." },
+        { object: "window", property: "alert", message: "Use toast from sonner." },
+        { object: "window", property: "prompt", message: "Use useConfirm() with a `field`." },
+        { property: "toLocaleDateString", message: "Use formatDate()/formatDay() from @/lib/dates (fixed display TZ, no hydration drift)." },
+        { property: "toLocaleTimeString", message: "Use formatDateTime() from @/lib/dates." },
+        { property: "toLocaleString", message: "Use formatDateTime() from @/lib/dates (or formatCents for money)." },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/^\\/ops(\\/|$)/]",
+          message: "Route literals live in src/lib/routes.ts — use OPS.*.",
+        },
+        {
+          selector: "TemplateElement[value.raw=/^\\/ops\\//]",
+          message: "Route literals live in src/lib/routes.ts — use OPS.*.",
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/lib/routes.ts", "src/lib/dates.ts", "src/app/robots.ts"],
+    rules: {
+      "no-restricted-syntax": "off",
+      "no-restricted-properties": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

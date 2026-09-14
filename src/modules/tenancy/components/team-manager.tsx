@@ -11,6 +11,8 @@ import {
   transferOwnershipAction,
   updateMemberRoleAction,
 } from "../actions";
+import { formatDate } from "@/lib/dates";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +62,7 @@ export function TeamManager({
   selfUserId: string;
 }) {
   const [, startTransition] = useTransition();
+  const confirm = useConfirm();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<(typeof ASSIGNABLE_ROLES)[number]>("member");
@@ -196,7 +199,7 @@ export function TeamManager({
                   )}
                 </TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
-                  {m.joinedAt.toLocaleDateString()}
+                  {formatDate(m.joinedAt)}
                 </TableCell>
                 {canManage && (
                   <TableCell>
@@ -206,10 +209,13 @@ export function TeamManager({
                           variant="ghost"
                           size="icon"
                           title="Transfer ownership"
-                          onClick={() => {
-                            if (confirm(`Make ${m.name} the owner of ${tenantName}? You become an admin.`)) {
-                              run(() => transferOwnershipAction(tenantId, m.userId), `${m.name} is now the owner`);
-                            }
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: `Make ${m.name} the owner of ${tenantName}?`,
+                              description: "You become an admin. Only the new owner can transfer ownership back.",
+                              confirmLabel: "Transfer ownership",
+                            });
+                            if (ok) run(() => transferOwnershipAction(tenantId, m.userId), `${m.name} is now the owner`);
                           }}
                         >
                           <Crown className="size-4" />
@@ -220,10 +226,14 @@ export function TeamManager({
                           variant="ghost"
                           size="icon"
                           title="Remove member"
-                          onClick={() => {
-                            if (confirm(`Remove ${m.name} from ${tenantName}?`)) {
-                              run(() => removeMemberAction(tenantId, m.memberId), `${m.name} removed`);
-                            }
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: `Remove ${m.name} from ${tenantName}?`,
+                              description: "They lose access immediately; you can invite them again later.",
+                              confirmLabel: "Remove",
+                              destructive: true,
+                            });
+                            if (ok) run(() => removeMemberAction(tenantId, m.memberId), `${m.name} removed`);
                           }}
                         >
                           <Trash2 className="size-4 text-destructive" />
@@ -249,7 +259,7 @@ export function TeamManager({
                     <TableCell>
                       <div className="font-medium text-heading">{inv.email}</div>
                       <div className="text-xs text-muted-foreground">
-                        {inv.role} · expires {inv.expiresAt.toLocaleDateString()}
+                        {inv.role} · expires {formatDate(inv.expiresAt)}
                         {inv.inviterName ? ` · invited by ${inv.inviterName}` : ""}
                       </div>
                     </TableCell>

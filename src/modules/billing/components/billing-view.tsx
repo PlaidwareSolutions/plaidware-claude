@@ -10,6 +10,8 @@ import { intervalLabel } from "../mappers";
 import { setDomainAction } from "@/modules/provisioning/actions";
 import { Input } from "@/components/ui/input";
 import { formatCents } from "@/lib/money";
+import { formatDate } from "@/lib/dates";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,6 +100,7 @@ export function BillingView({
   invoices: InvoiceDto[];
   addonOptions?: Record<string, AddonOption[]>;
 }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const totalMonthly = subscriptions.reduce((s, x) => s + x.monthlyCents, 0);
 
@@ -110,7 +113,14 @@ export function BillingView({
   }
 
   async function cancel(sub: SubscriptionDto) {
-    if (!confirm(`Cancel ${sub.productName}? Recurring charges stop; one-time work already delivered is not refunded.`)) return;
+    const ok = await confirm({
+      title: `Cancel ${sub.productName}?`,
+      description: "Recurring charges stop immediately. One-time work already delivered is not refunded.",
+      confirmLabel: "Cancel subscription",
+      cancelLabel: "Keep it",
+      destructive: true,
+    });
+    if (!ok) return;
     const res = await cancelSubscriptionAction(tenantId, sub.id);
     if (res.ok) toast.success(`${sub.productName} canceled`);
     else toast.error(res.error ?? "Cancel failed");
@@ -159,10 +169,10 @@ export function BillingView({
               </CardTitle>
               <div className="text-sm text-muted-foreground">
                 {sub.status === "trialing" && sub.trialEndsAt
-                  ? `Trial ends ${new Date(sub.trialEndsAt).toLocaleDateString()}`
+                  ? `Trial ends ${formatDate(sub.trialEndsAt)}`
                   : sub.currentPeriodEnd
-                    ? `Renews ${new Date(sub.currentPeriodEnd).toLocaleDateString()}`
-                    : `Since ${new Date(sub.subscribedAt).toLocaleDateString()}`}
+                    ? `Renews ${formatDate(sub.currentPeriodEnd)}`
+                    : `Since ${formatDate(sub.subscribedAt)}`}
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -222,7 +232,7 @@ export function BillingView({
                     <TableCell className="font-mono text-xs">{inv.invoiceNumber}</TableCell>
                     <TableCell>{statusBadge(inv.status)}</TableCell>
                     <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
-                      {new Date(inv.createdAt).toLocaleDateString()}
+                      {formatDate(inv.createdAt)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatCents(inv.amountDueCents)}

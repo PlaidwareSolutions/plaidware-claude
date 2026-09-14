@@ -4,6 +4,7 @@ import { db } from "../../db";
 import { getStripe } from "../../lib/stripe";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
 import { formatCents } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 import { env } from "../../env";
 import { member, organization, user } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
@@ -949,7 +950,7 @@ export async function sendUpcomingRenewalReminder(invoice: Stripe.Invoice): Prom
     subject: `Upcoming ${product?.name ?? "subscription"} renewal — ${formatCents(invoice.amount_due)}`,
     html: emailShell(
       "Your renewal is coming up",
-      `<p>Your ${product?.name ?? "Plaidware"} subscription renews${dueTs ? ` on ${new Date(dueTs * 1000).toLocaleDateString()}` : " soon"}. Your card on file will be charged automatically — nothing to do.</p><ul>${lines}</ul><p><strong>Total: ${formatCents(invoice.amount_due)}</strong></p>` +
+      `<p>Your ${product?.name ?? "Plaidware"} subscription renews${dueTs ? ` on ${formatDate(dueTs * 1000)}` : " soon"}. Your card on file will be charged automatically — nothing to do.</p><ul>${lines}</ul><p><strong>Total: ${formatCents(invoice.amount_due)}</strong></p>` +
         emailButton(`${env.APP_BASE_URL}/billing`, "View billing"),
     ),
   });

@@ -62,10 +62,7 @@ export default async function OpsClientDetailPage({
     .filter((i) => i.status === "open" || i.status === "failed")
     .reduce((sum, i) => sum + i.amountDueCents - i.amountPaidCents, 0);
   const lifetimeCents = invoices.reduce((sum, i) => sum + i.amountPaidCents, 0);
-  const now = Date.now();
-  const pastDueCount = invoices.filter(
-    (i) => i.status === "failed" || (i.status === "open" && i.dueDate != null && new Date(i.dueDate).getTime() < now),
-  ).length;
+  const pastDueCount = invoices.filter((i) => i.pastDue).length;
   const dnsProblems = provisioning.filter((p) =>
     ["unconfigured", "failing", "no_domain"].includes(p.state),
   ).length;

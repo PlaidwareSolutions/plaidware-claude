@@ -4,6 +4,7 @@ import { db } from "../../db";
 import { getStripe } from "../../lib/stripe";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
 import { formatCents } from "../../lib/money";
+import { formatDate } from "../../lib/dates";
 import { env } from "../../env";
 import { member, organization, user } from "../auth/schema";
 import { invoices, subscriptions } from "./schema";
@@ -149,7 +150,7 @@ export async function sendPreDueReminders(now = new Date()): Promise<number> {
         subject: `Payment due soon — invoice ${inv.invoiceNumber}`,
         html: emailShell(
           "Payment due soon",
-          `<p>Invoice ${inv.invoiceNumber} for ${formatCents(inv.amountDueCents - inv.amountPaidCents)} is due on ${inv.dueDate!.toLocaleDateString()}.</p>` +
+          `<p>Invoice ${inv.invoiceNumber} for ${formatCents(inv.amountDueCents - inv.amountPaidCents)} is due on ${formatDate(inv.dueDate)}.</p>` +
             (inv.hostedInvoiceUrl
               ? emailButton(inv.hostedInvoiceUrl, "Pay now")
               : emailButton(`${env.APP_BASE_URL}/billing`, "View billing")),

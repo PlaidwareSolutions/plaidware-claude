@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Activity, KeyRound, RefreshCw } from "lucide-react";
 import { rotateIngestKeyAction } from "../actions";
 import type { KpiTile } from "../service";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,11 +41,20 @@ export function MonitoringView({
   ingestUrl: string;
   cards: CardData[];
 }) {
+  const confirm = useConfirm();
   const [freshKeys, setFreshKeys] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
   async function rotate(card: CardData) {
-    if (card.keyPrefix && !confirm("Rotating revokes the current key immediately. Your reporter must be updated with the new one. Continue?")) return;
+    if (card.keyPrefix) {
+      const ok = await confirm({
+        title: "Rotate the ingest key?",
+        description: "The current key stops working immediately. Update your reporter with the new one before its next run.",
+        confirmLabel: "Rotate key",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     setBusy(card.subscriptionId);
     const res = await rotateIngestKeyAction(tenantId, card.subscriptionId);
     setBusy(null);

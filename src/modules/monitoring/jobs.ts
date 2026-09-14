@@ -1,4 +1,5 @@
 import type { PgBoss } from "pg-boss";
+import { formatDateTime } from "../../lib/dates";
 import { env } from "../../env";
 import { emailShell, sendEmail } from "../../lib/email";
 import { findQuietReporters, pruneTimeSeries, runUptimeProbe } from "./service";
@@ -33,7 +34,7 @@ export async function registerMonitoringJobs(boss: PgBoss): Promise<string[]> {
           quiet
             .map(
               (q) =>
-                `<li><strong>${q.productName}</strong> — last seen ${q.lastSeen ? new Date(q.lastSeen).toLocaleString() : "never"} (threshold ${q.thresholdMinutes} min)</li>`,
+                `<li><strong>${q.productName}</strong> — last seen ${q.lastSeen ? formatDateTime(q.lastSeen) : "never"} (threshold ${q.thresholdMinutes} min)</li>`,
             )
             .join("") +
           `</ul>`,

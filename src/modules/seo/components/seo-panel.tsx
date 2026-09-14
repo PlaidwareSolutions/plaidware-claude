@@ -7,7 +7,7 @@ import { Gauge } from "lucide-react";
 import type { SeoPanelData } from "../service";
 import { cwvVerdict } from "../pagespeed";
 import { runSeoRecheckAction, snoozeSeoAction } from "../actions";
-import { Badge } from "@/components/ui/badge";
+import { formatDateTime } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkline } from "@/components/sparkline";
@@ -139,7 +139,7 @@ export function SeoPanel({
               })}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>Last audit {panel.fetchedAt ? new Date(panel.fetchedAt).toLocaleString() : "—"}</span>
+              <span>Last audit {formatDateTime(panel.fetchedAt)}</span>
               {opsControls && (
                 <span className="flex items-center gap-1">
                   Snooze alerts:
