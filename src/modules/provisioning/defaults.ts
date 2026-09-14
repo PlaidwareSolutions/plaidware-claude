@@ -1,5 +1,3 @@
-import { env } from "../../env";
-
 export type DnsDefaults = { expectedCname: string | null; expectedAIps: string | null };
 
 /**
@@ -9,9 +7,11 @@ export type DnsDefaults = { expectedCname: string | null; expectedAIps: string |
  */
 export function resolveDnsDefaults(
   product?: { defaultExpectedCname?: string | null; defaultExpectedAIps?: string | null } | null,
+  // Read from process.env directly (not src/env) so this stays importable in
+  // pure tests; both vars are optional strings and need no validation.
   fallback: { cname?: string | null; aIps?: string | null } = {
-    cname: env.PROVISIONING_DEFAULT_CNAME,
-    aIps: env.PROVISIONING_DEFAULT_A_IPS,
+    cname: process.env.PROVISIONING_DEFAULT_CNAME,
+    aIps: process.env.PROVISIONING_DEFAULT_A_IPS,
   },
 ): DnsDefaults {
   const clean = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
