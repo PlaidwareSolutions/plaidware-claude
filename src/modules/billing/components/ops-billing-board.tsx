@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -28,10 +26,19 @@ import {
   toggleDunningPauseAction,
 } from "../ar-actions";
 import { formatCents } from "@/lib/money";
-import { OPS } from "@/lib/routes";
+import { formatDay, formatUtcHour } from "@/lib/dates";
+import { downloadCsv, toCsv } from "@/lib/csv";
+import { OPS, stripeCustomerUrl, stripeSubscriptionUrl } from "@/lib/routes";
+import { collectionKey } from "@/lib/status-variants";
+import { useAction } from "@/lib/use-action";
+import { useConfirm } from "@/components/confirm-dialog";
+import { Section } from "@/components/section";
+import { StatTile } from "@/components/stat-tile";
+import { StatusBadge } from "@/components/status-badge";
+import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,7 +77,7 @@ export type BillingTenantRow = {
 
 export type BillingBoardProps = {
   generatedAt: string;
-  config: { stripe: boolean; webhook: boolean; email: boolean };
+  config: { stripe: boolean; webhook: boolean; email: boolean; testMode: boolean };
   stats: {
     mrrCents: number;
     pastDueCents: number;
@@ -87,51 +94,9 @@ export type BillingBoardProps = {
 };
 
 const CLOSED = new Set(["canceled", "expired"]);
-const STRIPE = "https://dashboard.stripe.com";
-
-const fmtDay = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
-const fmtUtc = (iso: string) => {
-  const d = new Date(iso);
-  return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${String(d.getUTCHours()).padStart(2, "0")}:00 UTC`;
-};
-const csvCell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-
-function subStatusBadge(status: string) {
-  const variant =
-    status === "active" ? ("secondary" as const)
-    : status === "trialing" || status === "incomplete" ? ("outline" as const)
-    : ("destructive" as const);
-  return <Badge variant={variant}>{status.replace("_", " ")}</Badge>;
-}
-
-function invoiceBadge(status: string) {
-  const variant =
-    status === "paid" ? ("secondary" as const)
-    : status === "open" || status === "draft" || status === "void" ? ("outline" as const)
-    : ("destructive" as const);
-  return <Badge variant={variant}>{status}</Badge>;
-}
-
-/** How the next renewal will actually collect, from Stripe's point of view. */
-function collectionBadge(a: SubscriptionAutomation | undefined) {
-  if (!a || a.error) {
-    return <Badge variant="outline" title={a?.error ?? undefined}>unknown</Badge>;
-  }
-  if (a.collectionMethod === "charge_automatically" && a.cardOnFile) {
-    return <Badge variant="secondary">auto-charge</Badge>;
-  }
-  if (a.collectionMethod === "charge_automatically") {
-    return <Badge variant="destructive">auto-charge · no card</Badge>;
-  }
-  return a.cardOnFile
-    ? <Badge variant="outline">emailed invoice · card on file</Badge>
-    : <Badge variant="destructive">emailed invoice · no card</Badge>;
-}
-
 export function OpsBillingBoard(p: BillingBoardProps) {
-  const router = useRouter();
-  const [pending, setPending] = useState<string | null>(null);
+  const { run, pending, isPending } = useAction();
+  const confirm = useConfirm();
   const [invoiceFor, setInvoiceFor] = useState<TenantTarget | null>(null);
   const [payFor, setPayFor] = useState<InvoiceTarget | null>(null);
   const [hostingFor, setHostingFor] = useState<HostingTarget | null>(null);
@@ -192,62 +157,38 @@ export function OpsBillingBoard(p: BillingBoardProps) {
     return out.sort((x, y) => x.at.localeCompare(y.at));
   })();
 
-  async function run(key: string, fn: () => Promise<{ ok: boolean; error?: string } | { ok: true } | { ok: false; error: string }>, okMsg: string | ((r: unknown) => string)) {
-    setPending(key);
-    try {
-      const res = await fn();
-      if (res.ok) {
-        toast.success(typeof okMsg === "function" ? okMsg(res) : okMsg);
-        router.refresh();
-      } else toast.error("error" in res ? res.error : "Something went wrong");
-    } finally {
-      setPending(null);
-    }
-  }
-
   async function sendCardLink(t: { id: string; name: string }) {
-    setPending(`card:${t.id}`);
-    try {
-      const res = await sendCardSetupLinkAction(t.id);
-      if (res.ok) {
-        await navigator.clipboard.writeText(res.url).catch(() => {});
-        toast.success(
-          res.sentTo ? `Card setup link emailed to ${res.sentTo} — also copied` : "Card setup link copied (no billing contact to email)",
-        );
-      } else toast.error(res.error);
-    } finally {
-      setPending(null);
-    }
+    const res = await run(() => sendCardSetupLinkAction(t.id), {
+      key: `card:${t.id}`,
+      refresh: false,
+      success: (r) =>
+        r.sentTo
+          ? `Card setup link emailed to ${r.sentTo} — also copied`
+          : "Card setup link copied (no billing contact to email)",
+    });
+    if (res?.ok) await navigator.clipboard.writeText(res.url).catch(() => {});
   }
 
   function exportCsv() {
     const header = ["Client", "Owner email", "Product", "Subscription status", "Monthly (USD)", "Collection", "Card on file", "Next charge", "Collected (USD)"];
-    const lines: string[] = [];
+    const rows: (string | number | null)[][] = [];
     for (const t of p.tenants) {
       const subs = p.subscriptions.filter((s) => s.tenantId === t.id);
       const collected = ((collectedByTenant.get(t.id) ?? 0) / 100).toFixed(2);
       if (subs.length === 0) {
-        lines.push([t.name, t.ownerEmail ?? "", "", "none", "", "", "", "", collected].map(csvCell).join(","));
+        rows.push([t.name, t.ownerEmail, "", "none", "", "", "", "", collected]);
         continue;
       }
       for (const s of subs) {
         const a = autoById.get(s.id);
-        lines.push(
-          [
-            t.name, t.ownerEmail ?? "", s.productName, s.status, (s.monthlyCents / 100).toFixed(2),
-            a?.collectionMethod ?? "", a ? (a.cardOnFile ? "yes" : "no") : "",
-            (a?.nextChargeAt ?? s.currentPeriodEnd)?.slice(0, 10) ?? "", collected,
-          ].map(csvCell).join(","),
-        );
+        rows.push([
+          t.name, t.ownerEmail, s.productName, s.status, (s.monthlyCents / 100).toFixed(2),
+          a?.collectionMethod ?? "", a ? (a.cardOnFile ? "yes" : "no") : "",
+          (a?.nextChargeAt ?? s.currentPeriodEnd)?.slice(0, 10) ?? "", collected,
+        ]);
       }
     }
-    const blob = new Blob([[header.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `billing-${p.generatedAt.slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(`billing-${p.generatedAt.slice(0, 10)}.csv`, toCsv(header, rows));
   }
 
   const verdicts = [
@@ -285,30 +226,40 @@ export function OpsBillingBoard(p: BillingBoardProps) {
           <Button
             variant="outline"
             className="gap-2"
-            disabled={pending !== null}
-            onClick={() => {
-              if (!window.confirm("Run the reminder & dunning sweep now? Past-due clients get reminders; 14+ days overdue get suspended.")) return;
-              void run("sweep", runDunningSweepAction, (r) => {
-                const x = r as { reminded: number; suspended: number; opened: number };
-                return `Sweep done — ${x.opened} opened, ${x.reminded} reminded, ${x.suspended} suspended`;
+            disabled={pending}
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Run the reminder & dunning sweep now?",
+                description: "Past-due clients get reminders; anything 14+ days overdue is suspended. The same sweep runs daily on its own.",
+                confirmLabel: "Run sweep",
+              });
+              if (!ok) return;
+              void run(runDunningSweepAction, {
+                key: "sweep",
+                success: (r) => `Sweep done — ${r.opened} opened, ${r.reminded} reminded, ${r.suspended} suspended`,
               });
             }}
           >
-            <PlayCircle className="size-4" /> {pending === "sweep" ? "Running…" : "Run dunning sweep"}
+            <PlayCircle className="size-4" /> {isPending("sweep") ? "Running…" : "Run dunning sweep"}
           </Button>
           <Button
             variant="outline"
             className="gap-2"
-            disabled={pending !== null}
-            onClick={() => {
-              if (!window.confirm("Generate last month's hosting-fee invoices now? Skips any already created.")) return;
-              void run("hosting", () => generateHostingInvoicesAction(), (r) => {
-                const x = r as { created: number; skipped: number };
-                return `Hosting invoices — ${x.created} created, ${x.skipped} skipped`;
+            disabled={pending}
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Generate last month's hosting-fee invoices now?",
+                description: "Creates a standalone invoice per subscription with a hosting fee set; any already created are skipped.",
+                confirmLabel: "Generate",
+              });
+              if (!ok) return;
+              void run(() => generateHostingInvoicesAction(), {
+                key: "hosting",
+                success: (r) => `Hosting invoices — ${r.created} created, ${r.skipped} skipped`,
               });
             }}
           >
-            <Receipt className="size-4" /> {pending === "hosting" ? "Generating…" : "Generate hosting invoices"}
+            <Receipt className="size-4" /> {isPending("hosting") ? "Generating…" : "Generate hosting invoices"}
           </Button>
           <Button variant="outline" className="gap-2" onClick={exportCsv}>
             <Download className="size-4" /> Export CSV
@@ -317,28 +268,25 @@ export function OpsBillingBoard(p: BillingBoardProps) {
 
       {/* Summary */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {[
-          { label: "Clients", value: String(p.tenants.length), sub: `${tenantsWithProduct} with a live product` },
-          { label: "MRR", value: formatCents(p.stats.mrrCents), sub: `${p.stats.liveSubscriptions} live · ${p.stats.trialing} trialing` },
-          { label: "Collected to date", value: formatCents(collectedCents), sub: `${p.invoices.filter((i) => i.status === "paid").length} paid invoices` },
-          { label: "Past-due AR", value: formatCents(p.stats.pastDueCents), sub: `${p.stats.failedInvoices} failed · ${p.stats.suspendedSubscriptions} suspended` },
-          { label: "Won't auto-collect", value: `${formatCents(atRiskCents)}/mo`, sub: `${atRisk.length} subscription${atRisk.length === 1 ? "" : "s"} need a card` },
-        ].map((t) => (
-          <Card key={t.label}>
-            <CardHeader>
-              <CardDescription>{t.label}</CardDescription>
-              <CardTitle className="text-2xl tabular-nums">{t.value}</CardTitle>
-              <p className="text-xs text-muted-foreground">{t.sub}</p>
-            </CardHeader>
-          </Card>
-        ))}
+        <StatTile label="Clients" value={p.tenants.length} sub={`${tenantsWithProduct} with a live product`} href={OPS.clients} />
+        <StatTile label="MRR" value={formatCents(p.stats.mrrCents)} sub={`${p.stats.liveSubscriptions} live · ${p.stats.trialing} trialing`} href={OPS.subscriptions} />
+        <StatTile label="Collected to date" value={formatCents(collectedCents)} sub={`${p.invoices.filter((i) => i.status === "paid").length} paid invoices`} />
+        <StatTile
+          label="Past-due AR"
+          value={formatCents(p.stats.pastDueCents)}
+          sub={`${p.stats.failedInvoices} failed · ${p.stats.suspendedSubscriptions} suspended`}
+          tone={p.stats.pastDueCents > 0 ? "warning" : "default"}
+        />
+        <StatTile
+          label="Won't auto-collect"
+          value={`${formatCents(atRiskCents)}/mo`}
+          sub={`${atRisk.length} subscription${atRisk.length === 1 ? "" : "s"} need a card`}
+          tone={atRisk.length > 0 ? "danger" : "success"}
+        />
       </div>
 
       {/* Automation health */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Billing automation
-        </h2>
+      <Section title="Billing automation">
         <div className="grid gap-4 md:grid-cols-3">
           {verdicts.map((v) => (
             <Card key={v.title}>
@@ -358,14 +306,11 @@ export function OpsBillingBoard(p: BillingBoardProps) {
             </Card>
           ))}
         </div>
-      </section>
+      </Section>
 
       {/* Clients & products */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Clients & products
-        </h2>
-        <div className="rounded-lg border bg-card">
+      <Section title="Clients & products" count={p.tenants.length}>
+        <DataTableShell>
           <Table>
             <TableHeader>
               <TableRow>
@@ -380,6 +325,9 @@ export function OpsBillingBoard(p: BillingBoardProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {p.tenants.length === 0 && (
+                <TableEmpty colSpan={8} icon={Receipt} title="No clients yet" description="Onboard a client to see their products and collection status here." />
+              )}
               {p.tenants.map((t) => {
                 const subs = p.subscriptions
                   .filter((s) => s.tenantId === t.id)
@@ -408,7 +356,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                       <TableCell>
                         {s ? (
                           <>
-                            <div>{s.productName}</div>
+                            <Link href={OPS.product(s.productId)} className="hover:text-primary">{s.productName}</Link>
                             {s.addons.length > 0 && (
                               <div className="text-xs text-muted-foreground">{s.addons.join(", ")}</div>
                             )}
@@ -418,7 +366,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                         )}
                       </TableCell>
                       <TableCell>
-                        {s ? subStatusBadge(s.status) : <Badge variant="outline">not set up</Badge>}
+                        {s ? <StatusBadge kind="subscription" status={s.status} /> : <Badge variant="outline">not set up</Badge>}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {s && s.monthlyCents > 0 ? `${formatCents(s.monthlyCents)}/mo` : "—"}
@@ -427,10 +375,14 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                         )}
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
-                        {s && live ? collectionBadge(a) : <span className="text-muted-foreground">—</span>}
+                        {s && live ? (
+                          <StatusBadge kind="collection" status={collectionKey(a)} />
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
-                        {s && live ? fmtDay(a?.nextChargeAt ?? s.currentPeriodEnd) : "—"}
+                        {s && live ? formatDay(a?.nextChargeAt ?? s.currentPeriodEnd) : "—"}
                       </TableCell>
                       <TableCell className="hidden text-right tabular-nums sm:table-cell">
                         {i === 0 ? formatCents(collectedByTenant.get(t.id) ?? 0) : ""}
@@ -445,7 +397,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>{t.name}</DropdownMenuLabel>
                             <DropdownMenuItem asChild>
-                              <Link href={OPS.client(t.id)}>Open tenant</Link>
+                              <Link href={OPS.client(t.id)}>Open client</Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => setInvoiceFor({ id: t.id, name: t.name })}>
                               <FilePlus2 className="size-4" /> New invoice
@@ -459,7 +411,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                                 </DropdownMenuItem>
                                 {a && !a.error && a.collectionMethod === "send_invoice" && a.cardOnFile && (
                                   <DropdownMenuItem
-                                    onSelect={() => void run(`auto:${s.id}`, () => switchToAutoChargeAction(s.id), "Renewals will now charge the card on file")}
+                                    onSelect={() => void run(() => switchToAutoChargeAction(s.id), { key: `auto:${s.id}`, success: "Renewals will now charge the card on file" })}
                                   >
                                     <CreditCard className="size-4" /> Switch to auto-charge
                                   </DropdownMenuItem>
@@ -471,7 +423,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                                 )}
                                 {a?.stripeSubscriptionId && (
                                   <DropdownMenuItem asChild>
-                                    <a href={`${STRIPE}/subscriptions/${a.stripeSubscriptionId}`} target="_blank" rel="noreferrer">
+                                    <a href={stripeSubscriptionUrl(a.stripeSubscriptionId, p.config.testMode)} target="_blank" rel="noreferrer">
                                       <ExternalLink className="size-4" /> Subscription in Stripe
                                     </a>
                                   </DropdownMenuItem>
@@ -479,9 +431,15 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   variant="destructive"
-                                  onSelect={() => {
-                                    if (!window.confirm(`Cancel ${t.name}'s ${s.productName} subscription now? This stops billing immediately.`)) return;
-                                    void run(`cancel:${s.id}`, () => opsCancelSubscriptionAction(s.id), "Subscription canceled");
+                                  onSelect={async () => {
+                                    const ok = await confirm({
+                                      title: `Cancel ${t.name}'s ${s.productName} subscription?`,
+                                      description: "Billing stops immediately in Stripe and the Hub. One-time work already delivered is not refunded.",
+                                      confirmLabel: "Cancel subscription",
+                                      destructive: true,
+                                    });
+                                    if (!ok) return;
+                                    void run(() => opsCancelSubscriptionAction(s.id), { key: `cancel:${s.id}`, success: "Subscription canceled" });
                                   }}
                                 >
                                   <XCircle className="size-4" /> Cancel subscription…
@@ -492,7 +450,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem asChild>
-                                  <a href={`${STRIPE}/customers/${t.stripeCustomerId}`} target="_blank" rel="noreferrer">
+                                  <a href={stripeCustomerUrl(t.stripeCustomerId, p.config.testMode)} target="_blank" rel="noreferrer">
                                     <ExternalLink className="size-4" /> Customer in Stripe
                                   </a>
                                 </DropdownMenuItem>
@@ -507,20 +465,17 @@ export function OpsBillingBoard(p: BillingBoardProps) {
               })}
             </TableBody>
           </Table>
-        </div>
-      </section>
+        </DataTableShell>
+      </Section>
 
       {/* Upcoming */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          What happens next
-        </h2>
+      <Section title="What happens next" count={events.length}>
         <Card>
           <CardContent className="divide-y pt-2">
             {events.map((e, i) => (
               <div key={i} className="grid grid-cols-[7.5rem_1fr_auto] items-start gap-4 py-3">
                 <div className="text-sm font-medium tabular-nums text-heading">
-                  {e.amountCents != null ? fmtDay(e.at) : fmtUtc(e.at)}
+                  {e.amountCents != null ? formatDay(e.at) : formatUtcHour(e.at)}
                 </div>
                 <div>
                   <div className="text-sm font-medium text-heading">
@@ -538,14 +493,11 @@ export function OpsBillingBoard(p: BillingBoardProps) {
             )}
           </CardContent>
         </Card>
-      </section>
+      </Section>
 
       {/* Payment history */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Payment history
-        </h2>
-        <div className="rounded-lg border bg-card">
+      <Section title="Payment history" count={p.invoices.length}>
+        <DataTableShell>
           <Table>
             <TableHeader>
               <TableRow>
@@ -560,12 +512,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
             </TableHeader>
             <TableBody>
               {p.invoices.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
-                    <Receipt className="mx-auto mb-2 size-8 opacity-40" />
-                    No invoices yet.
-                  </TableCell>
-                </TableRow>
+                <TableEmpty colSpan={7} icon={Receipt} title="No invoices yet" description="Stripe invoices sync here automatically; manual invoices appear the moment they're created." />
               )}
               {p.invoices.map((inv) => (
                 <TableRow key={inv.id}>
@@ -574,17 +521,17 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                     <div className="mt-0.5 flex flex-wrap gap-1">
                       <Badge variant="outline" className="text-[10px]">{inv.kind}</Badge>
                       {inv.dunning && !inv.dunning.suspendedAt && (
-                        <Badge variant="destructive" className="text-[10px]">dunning · {inv.dunning.remindersSent} reminders</Badge>
+                        <StatusBadge kind="dunning" status="reminding" label={`dunning · ${inv.dunning.remindersSent} reminder${inv.dunning.remindersSent === 1 ? "" : "s"}`} className="text-[10px]" />
                       )}
-                      {inv.dunning?.suspendedAt && <Badge variant="destructive" className="text-[10px]">suspended</Badge>}
-                      {inv.dunning?.paused && <Badge variant="outline" className="text-[10px]">dunning paused</Badge>}
+                      {inv.dunning?.suspendedAt && <StatusBadge kind="dunning" status="suspended" className="text-[10px]" />}
+                      {inv.dunning?.paused && <StatusBadge kind="dunning" status="paused" label="dunning paused" className="text-[10px]" />}
                     </div>
                     {inv.payments.length > 0 && (
                       <div className="mt-1 text-[11px] text-muted-foreground">
                         {inv.payments.map((pay) => (
                           <div key={pay.id}>
                             {formatCents(pay.amountCents)} · {pay.method.replace("_", " ")}
-                            {pay.reference ? ` · ${pay.reference}` : ""} · {fmtDay(pay.receivedAt)}
+                            {pay.reference ? ` · ${pay.reference}` : ""} · {formatDay(pay.receivedAt)}
                           </div>
                         ))}
                       </div>
@@ -592,10 +539,10 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                   </TableCell>
                   <TableCell>
                     <Link href={OPS.client(inv.tenantId)} className="hover:text-primary">{inv.tenantName}</Link>
-                    <div className="text-xs text-muted-foreground">{fmtDay(inv.createdAt)}</div>
+                    <div className="text-xs text-muted-foreground">{formatDay(inv.createdAt)}</div>
                   </TableCell>
-                  <TableCell>{invoiceBadge(inv.status)}</TableCell>
-                  <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">{fmtDay(inv.dueDate)}</TableCell>
+                  <TableCell><StatusBadge kind="invoice" status={inv.status} /></TableCell>
+                  <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">{formatDay(inv.dueDate)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatCents(inv.amountDueCents)}</TableCell>
                   <TableCell className="hidden text-right tabular-nums md:table-cell">
                     {inv.amountPaidCents > 0 ? (
@@ -607,9 +554,11 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       {inv.hostedInvoiceUrl && (
-                        <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer" className="p-1 text-primary" title="Hosted invoice">
-                          <ExternalLink className="size-4" />
-                        </a>
+                        <Button asChild variant="ghost" size="icon" title="Hosted invoice">
+                          <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer">
+                            <ExternalLink className="size-4" />
+                          </a>
+                        </Button>
                       )}
                       {!["paid", "void"].includes(inv.status) && (
                         <Button
@@ -632,14 +581,14 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled={pending !== null}
-                          onClick={() =>
-                            void run(
-                              `dun:${inv.id}`,
-                              () => toggleDunningPauseAction(inv.dunning!.id, !inv.dunning!.paused),
-                              inv.dunning!.paused ? "Dunning resumed" : "Dunning paused",
-                            )
-                          }
+                          disabled={isPending(`dun:${inv.id}`)}
+                          onClick={() => {
+                            const d = inv.dunning!;
+                            void run(() => toggleDunningPauseAction(d.id, !d.paused), {
+                              key: `dun:${inv.id}`,
+                              success: d.paused ? "Dunning resumed" : "Dunning paused",
+                            });
+                          }}
                         >
                           {inv.dunning.paused ? "Resume" : "Pause"}
                         </Button>
@@ -650,8 +599,8 @@ export function OpsBillingBoard(p: BillingBoardProps) {
               ))}
             </TableBody>
           </Table>
-        </div>
-      </section>
+        </DataTableShell>
+      </Section>
 
       <NewInvoiceDialog key={invoiceFor?.id ?? "none"} target={invoiceFor} onOpenChange={(o) => !o && setInvoiceFor(null)} />
       <RecordPaymentDialog key={payFor?.id ?? "none"} target={payFor} onOpenChange={(o) => !o && setPayFor(null)} />

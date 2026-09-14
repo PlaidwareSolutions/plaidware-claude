@@ -5,9 +5,20 @@ import { OpsSubscriptions } from "@/modules/billing/components/ops-subscriptions
 export const metadata = { title: "Subscriptions · Billing" };
 export const dynamic = "force-dynamic";
 
-export default async function OpsSubscriptionsPage() {
+export default async function OpsSubscriptionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; status?: string; product?: string }>;
+}) {
   await requireOpsPage();
 
-  const rows = await listAllSubscriptionsOps();
-  return <OpsSubscriptions rows={rows} />;
+  const [{ q, status, product }, rows] = await Promise.all([searchParams, listAllSubscriptionsOps()]);
+  return (
+    <OpsSubscriptions
+      rows={rows}
+      initialQuery={q ?? ""}
+      initialStatus={status ?? "live"}
+      initialProduct={product ?? "all"}
+    />
+  );
 }

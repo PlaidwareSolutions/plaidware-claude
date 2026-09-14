@@ -1,6 +1,6 @@
 import { requireOpsPage } from "@/policy";
 import { env } from "@/env";
-import { stripeConfigured } from "@/lib/stripe";
+import { stripeConfigured, stripeTestMode } from "@/lib/stripe";
 import { listAllTenants, listTenantOwnerEmails } from "@/modules/tenancy/queries";
 import {
   getBillingAutomationStatus,
@@ -34,6 +34,7 @@ export default async function OpsBillingPage() {
         stripe: stripeConfigured(),
         webhook: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
         email: Boolean(env.RESEND_API_KEY),
+        testMode: stripeTestMode(),
       }}
       stats={stats}
       tenants={tenants.map((t) => ({

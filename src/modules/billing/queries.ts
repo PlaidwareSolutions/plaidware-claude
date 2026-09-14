@@ -286,6 +286,8 @@ export type OpsInvoiceDto = {
   dueDate: string | null;
   paidAt: string | null;
   createdAt: string;
+  /** Failed, or open and past its due date — computed once here so views stay pure. */
+  pastDue: boolean;
   /** Open (unresolved) dunning case, if any. */
   dunning: { id: string; remindersSent: number; suspendedAt: string | null; paused: boolean } | null;
   payments: { id: string; amountCents: number; method: string; reference: string | null; receivedAt: string }[];
@@ -326,10 +328,12 @@ export async function listAllInvoicesOps(
     db.query.payments.findMany({ where: inArray(payments.invoiceId, ids) }),
   ]);
 
+  const now = new Date();
   return rows.map((r) => {
     const c = cases.find((x) => x.invoiceId === r.id);
     return {
       ...r,
+      pastDue: r.status === "failed" || (r.status === "open" && r.dueDate != null && r.dueDate < now),
       dueDate: r.dueDate?.toISOString() ?? null,
       paidAt: r.paidAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
