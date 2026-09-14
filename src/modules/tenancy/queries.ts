@@ -171,21 +171,21 @@ export type PlatformUserRow = {
   platformRole: string;
   emailVerified: boolean;
   createdAt: Date;
-  tenants: string[];
+  tenants: { id: string; name: string }[];
 };
 
 export async function listPlatformUsers(): Promise<PlatformUserRow[]> {
   const users = await db.query.user.findMany({ orderBy: [desc(user.createdAt)] });
   const memberships = users.length
     ? await db
-        .select({ userId: member.userId, orgName: organization.name })
+        .select({ userId: member.userId, orgId: organization.id, orgName: organization.name })
         .from(member)
         .innerJoin(organization, eq(member.organizationId, organization.id))
         .where(inArray(member.userId, users.map((u) => u.id)))
     : [];
-  const byUser = new Map<string, string[]>();
+  const byUser = new Map<string, { id: string; name: string }[]>();
   for (const m of memberships) {
-    byUser.set(m.userId, [...(byUser.get(m.userId) ?? []), m.orgName]);
+    byUser.set(m.userId, [...(byUser.get(m.userId) ?? []), { id: m.orgId, name: m.orgName }]);
   }
   return users.map((u) => ({
     id: u.id,

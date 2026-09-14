@@ -10,6 +10,7 @@ export type PromoRow = {
   kind: string;
   valueLabel: string;
   durationLabel: string;
+  productId: string | null;
   productName: string | null;
   isActive: boolean;
   isPublic: boolean;
@@ -51,6 +52,7 @@ export async function listPromos(): Promise<PromoRow[]> {
         : r.duration === "repeating"
           ? `${r.durationMonths} months`
           : "once",
+    productId: r.productId ?? null,
     productName: r.productId ? (prodName.get(r.productId) ?? null) : null,
     isActive: r.isActive,
     isPublic: r.isPublic,

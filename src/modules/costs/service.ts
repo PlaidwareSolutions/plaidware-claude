@@ -168,7 +168,7 @@ export async function listHostedAppsWithCosts(month: string) {
       costSource: (manual ?? mine[0])?.source ?? null,
       products: links
         .filter((l) => l.hostedAppId === a.id && !l.subscriptionId)
-        .map((l) => pname.get(l.productId) ?? "?"),
+        .map((l) => ({ id: l.productId, name: pname.get(l.productId) ?? "?" })),
     };
   });
 }

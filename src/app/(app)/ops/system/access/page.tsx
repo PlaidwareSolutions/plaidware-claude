@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { requireOpsPage } from "@/policy";
 import { listPlatformUsers } from "@/modules/tenancy/queries";
+import { OPS } from "@/lib/routes";
 import { formatDate } from "@/lib/dates";
 import { StatusBadge } from "@/components/status-badge";
 import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
@@ -47,7 +49,14 @@ export default async function OpsAccessPage() {
                 <StatusBadge kind="verification" status={u.emailVerified ? "verified" : "pending"} />
               </TableCell>
               <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
-                {u.tenants.join(", ") || "—"}
+                {u.tenants.length === 0
+                  ? "—"
+                  : u.tenants.map((t, i) => (
+                      <span key={t.id}>
+                        {i > 0 && ", "}
+                        <Link href={OPS.client(t.id)} className="hover:text-primary">{t.name}</Link>
+                      </span>
+                    ))}
               </TableCell>
               <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
                 {formatDate(u.createdAt)}

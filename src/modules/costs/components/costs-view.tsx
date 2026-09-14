@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, RefreshCw, Server } from "lucide-react";
@@ -11,6 +12,10 @@ import {
   upsertManualCostAction,
 } from "../actions";
 import { formatCents } from "@/lib/money";
+import { formatMonth } from "@/lib/dates";
+import { OPS } from "@/lib/routes";
+import { Section } from "@/components/section";
+import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,16 +32,15 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 
+type Option = { id: string; name: string };
 type AppRow = {
   id: string; provider: string; externalRef: string; label: string;
-  costCents: number | null; costSource: string | null; products: string[];
+  costCents: number | null; costSource: string | null; products: Option[];
 };
 type MarginRow = {
   productId: string; productName: string;
   revenueCents: number; costCents: number | null; marginPct: number | null;
 };
-type Option = { id: string; name: string };
-
 export function CostsView({
   month, apps, margins, products,
 }: {
@@ -81,7 +85,7 @@ export function CostsView({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          {month} — synced daily from Railway; manual entries override.
+          {formatMonth(month)} — synced daily from Railway; manual entries override.
         </p>
         <div className="flex gap-2">
           <Button variant="outline" className="gap-1" onClick={sync} disabled={busy}>
@@ -93,9 +97,8 @@ export function CostsView({
         </div>
       </div>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Margin by product — {month}</CardTitle></CardHeader>
-        <CardContent>
+      <Section title="Margin by product" description={formatMonth(month)}>
+        <DataTableShell>
           <Table>
             <TableHeader>
               <TableRow>
@@ -106,9 +109,16 @@ export function CostsView({
               </TableRow>
             </TableHeader>
             <TableBody>
+              {margins.length === 0 && (
+                <TableEmpty colSpan={4} title="No active products" />
+              )}
               {margins.map((m) => (
                 <TableRow key={m.productId}>
-                  <TableCell className="font-medium text-heading">{m.productName}</TableCell>
+                  <TableCell>
+                    <Link href={OPS.product(m.productId)} className="font-medium text-heading hover:text-primary">
+                      {m.productName}
+                    </Link>
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{formatCents(m.revenueCents)}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {m.costCents != null ? formatCents(m.costCents) : "—"}
@@ -120,27 +130,28 @@ export function CostsView({
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+        </DataTableShell>
+      </Section>
 
-      <div className="rounded-lg border bg-card">
+      <Section title="Hosted apps" count={apps.length}>
+      <DataTableShell>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>App</TableHead>
               <TableHead className="hidden md:table-cell">Products</TableHead>
-              <TableHead className="text-right">Cost ({month})</TableHead>
+              <TableHead className="text-right">Cost ({formatMonth(month)})</TableHead>
               <TableHead className="w-40" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {apps.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
-                  <Server className="mx-auto mb-2 size-8 opacity-40" />
-                  Register your Railway services to start attributing cost.
-                </TableCell>
-              </TableRow>
+              <TableEmpty
+                colSpan={4}
+                icon={Server}
+                title="No hosted apps registered"
+                description="Register your Railway services to start attributing cost to products."
+              />
             )}
             {apps.map((a) => (
               <TableRow key={a.id}>
@@ -149,7 +160,14 @@ export function CostsView({
                   <div className="font-mono text-[10px] text-muted-foreground">{a.provider} · {a.externalRef}</div>
                 </TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
-                  {a.products.join(", ") || "—"}
+                  {a.products.length === 0
+                    ? "—"
+                    : a.products.map((p, i) => (
+                        <span key={p.id}>
+                          {i > 0 && ", "}
+                          <Link href={OPS.product(p.id)} className="hover:text-primary">{p.name}</Link>
+                        </span>
+                      ))}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {a.costCents != null ? formatCents(a.costCents) : "—"}
@@ -165,7 +183,8 @@ export function CostsView({
             ))}
           </TableBody>
         </Table>
-      </div>
+      </DataTableShell>
+      </Section>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>
@@ -213,7 +232,7 @@ export function CostsView({
           <DialogHeader><DialogTitle>Link {linkFor?.label} to products</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-2">
             {products.map((p) => {
-              const linked = linkFor?.products.includes(p.name) ?? false;
+              const linked = linkFor?.products.some((x) => x.id === p.id) ?? false;
               return (
                 <label key={p.id} className="flex items-center gap-2 text-sm">
                   <Checkbox
@@ -224,7 +243,7 @@ export function CostsView({
                       if (res.ok) {
                         setLinkFor({
                           ...linkFor,
-                          products: v ? [...linkFor.products, p.name] : linkFor.products.filter((x) => x !== p.name),
+                          products: v ? [...linkFor.products, p] : linkFor.products.filter((x) => x.id !== p.id),
                         });
                         router.refresh();
                       } else toast.error(res.error);
@@ -240,7 +259,7 @@ export function CostsView({
 
       <Dialog open={!!manualFor} onOpenChange={(o) => !o && setManualFor(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Manual cost — {manualFor?.label} ({month})</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Manual cost — {manualFor?.label} ({formatMonth(month)})</DialogTitle></DialogHeader>
           <div className="grid gap-2">
             <Label>Amount (USD)</Label>
             <Input value={manualAmount} onChange={(e) => setManualAmount(e.target.value)} placeholder="42.50" />

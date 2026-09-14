@@ -1,5 +1,8 @@
-import { desc, inArray, or, sql } from "drizzle-orm";
+import { desc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "../../db";
+import { organization } from "../auth/schema";
+import { subscriptions } from "../billing/schema";
+import { products } from "../catalog/schema";
 import { webhookDeliveries } from "./schema";
 
 export type WebhookDeliveryDto = {
@@ -12,12 +15,59 @@ export type WebhookDeliveryDto = {
   lastError: string | null;
   deliveryId: string;
   subscriptionId: string | null;
+  /** Resolved via the subscription, or payload.hub_org_id for org-level events. */
+  tenantId: string | null;
+  tenantName: string | null;
+  productId: string | null;
+  productName: string | null;
   nextAttemptAt: string;
   deliveredAt: string | null;
   createdAt: string;
 };
 
-function toDto(r: typeof webhookDeliveries.$inferSelect): WebhookDeliveryDto {
+type Ctx = {
+  bySub: Map<string, { tenantId: string; tenantName: string; productId: string; productName: string }>;
+  orgName: Map<string, string>;
+};
+
+/** Client/product for each delivery — subscription events via the join, org events via payload. */
+async function loadContext(rows: (typeof webhookDeliveries.$inferSelect)[]): Promise<Ctx> {
+  const subIds = [...new Set(rows.map((r) => r.subscriptionId).filter((x): x is string => !!x))];
+  const orgIds = [
+    ...new Set(
+      rows
+        .map((r) => (typeof r.payload.hub_org_id === "string" ? r.payload.hub_org_id : null))
+        .filter((x): x is string => !!x),
+    ),
+  ];
+  const [subs, orgs] = await Promise.all([
+    subIds.length
+      ? db
+          .select({
+            id: subscriptions.id,
+            tenantId: subscriptions.tenantId,
+            tenantName: organization.name,
+            productId: subscriptions.productId,
+            productName: products.name,
+          })
+          .from(subscriptions)
+          .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
+          .innerJoin(products, eq(subscriptions.productId, products.id))
+          .where(inArray(subscriptions.id, subIds))
+      : Promise.resolve([]),
+    orgIds.length
+      ? db.query.organization.findMany({ where: inArray(organization.id, orgIds), columns: { id: true, name: true } })
+      : Promise.resolve([]),
+  ]);
+  return {
+    bySub: new Map(subs.map((s) => [s.id, s])),
+    orgName: new Map(orgs.map((o) => [o.id, o.name])),
+  };
+}
+
+function toDto(r: typeof webhookDeliveries.$inferSelect, ctx?: Ctx): WebhookDeliveryDto {
+  const sub = r.subscriptionId ? ctx?.bySub.get(r.subscriptionId) : undefined;
+  const orgId = typeof r.payload.hub_org_id === "string" ? r.payload.hub_org_id : null;
   return {
     id: r.id,
     kind: r.kind,
@@ -28,6 +78,10 @@ function toDto(r: typeof webhookDeliveries.$inferSelect): WebhookDeliveryDto {
     lastError: r.lastError,
     deliveryId: r.deliveryId,
     subscriptionId: r.subscriptionId,
+    tenantId: sub?.tenantId ?? orgId,
+    tenantName: sub?.tenantName ?? (orgId ? (ctx?.orgName.get(orgId) ?? null) : null),
+    productId: sub?.productId ?? null,
+    productName: sub?.productName ?? null,
     nextAttemptAt: r.nextAttemptAt.toISOString(),
     deliveredAt: r.deliveredAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
@@ -42,7 +96,8 @@ export async function listDeadDeliveries(limit = 100): Promise<WebhookDeliveryDt
     .where(inArray(webhookDeliveries.status, ["dead", "disabled"]))
     .orderBy(desc(webhookDeliveries.updatedAt))
     .limit(limit);
-  return rows.map(toDto);
+  const ctx = await loadContext(rows);
+  return rows.map((r) => toDto(r, ctx));
 }
 
 export async function listRecentDeliveries(limit = 100): Promise<WebhookDeliveryDto[]> {
@@ -51,7 +106,8 @@ export async function listRecentDeliveries(limit = 100): Promise<WebhookDelivery
     .from(webhookDeliveries)
     .orderBy(desc(webhookDeliveries.createdAt))
     .limit(limit);
-  return rows.map(toDto);
+  const ctx = await loadContext(rows);
+  return rows.map((r) => toDto(r, ctx));
 }
 
 export type TenantDeliveryHealth = {
@@ -82,7 +138,7 @@ export async function tenantDeliveryHealth(
     .orderBy(desc(webhookDeliveries.createdAt))
     .limit(limit);
   return {
-    recent: rows.map(toDto),
+    recent: rows.map((r) => toDto(r)),
     total: rows.length,
     dead: rows.filter((r) => r.status === "dead" || r.status === "disabled").length,
     pending: rows.filter((r) => r.status === "pending").length,

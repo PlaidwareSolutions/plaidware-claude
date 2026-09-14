@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, Ticket } from "lucide-react";
@@ -9,10 +10,13 @@ import {
   archivePromoAction,
   createPromoAction,
   runOrphanSweepAction,
-  syncPromoAction,
   togglePromoAssignmentAction,
 } from "../actions";
 import { formatCents, toCents } from "@/lib/money";
+import { formatDate } from "@/lib/dates";
+import { OPS } from "@/lib/routes";
+import { StatusBadge } from "@/components/status-badge";
+import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -142,7 +146,7 @@ export function PromoManager({
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card">
+      <DataTableShell>
         <Table>
           <TableHeader>
             <TableRow>
@@ -156,22 +160,18 @@ export function PromoManager({
           </TableHeader>
           <TableBody>
             {promos.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                  <Ticket className="mx-auto mb-2 size-8 opacity-40" />
-                  No promos yet.
-                </TableCell>
-              </TableRow>
+              <TableEmpty colSpan={6} icon={Ticket} title="No promos yet" description="Create a code to discount a checkout, or an auto-applied offer." />
             )}
             {promos.map((p) => (
               <TableRow key={p.id} className={p.isActive ? "" : "opacity-50"}>
                 <TableCell>
                   <div className="font-mono text-sm font-semibold text-heading">{p.code}</div>
                   <div className="mt-0.5 flex flex-wrap gap-1">
-                    {!p.isActive && <Badge variant="destructive" className="text-[10px]">archived</Badge>}
+                    {!p.isActive && <StatusBadge kind="promo" status="archived" className="text-[10px]" />}
                     {p.autoApply && <Badge className="text-[10px]">auto</Badge>}
-                    {!p.isPublic && <Badge variant="outline" className="text-[10px]">private · {p.assignedTenantIds.length} tenants</Badge>}
+                    {!p.isPublic && <Badge variant="outline" className="text-[10px]">private · {p.assignedTenantIds.length} client{p.assignedTenantIds.length === 1 ? "" : "s"}</Badge>}
                     {!p.synced && p.isActive && <Badge variant="outline" className="text-[10px]">mints at checkout</Badge>}
+                    {p.redeemBy && <Badge variant="outline" className="text-[10px]">until {formatDate(p.redeemBy)}</Badge>}
                   </div>
                 </TableCell>
                 <TableCell className="text-sm">
@@ -179,7 +179,11 @@ export function PromoManager({
                   <div className="text-xs text-muted-foreground">{p.durationLabel}</div>
                 </TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
-                  {p.productName ?? "All products"}
+                  {p.productId ? (
+                    <Link href={OPS.product(p.productId)} className="hover:text-primary">{p.productName}</Link>
+                  ) : (
+                    "All products"
+                  )}
                 </TableCell>
                 <TableCell className="hidden tabular-nums sm:table-cell">
                   {p.timesRedeemed}
@@ -210,7 +214,7 @@ export function PromoManager({
             ))}
           </TableBody>
         </Table>
-      </div>
+      </DataTableShell>
 
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -346,7 +350,7 @@ export function PromoManager({
               );
             })}
             {tenants.length === 0 && (
-              <p className="text-sm text-muted-foreground">No tenants yet.</p>
+              <p className="text-sm text-muted-foreground">No clients yet.</p>
             )}
           </div>
         </DialogContent>
