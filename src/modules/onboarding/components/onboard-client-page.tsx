@@ -69,7 +69,7 @@ export function OnboardClientPage({
   const [tenantName, setTenantName] = useState(initial?.tenantName ?? "");
   const [sections, setSections] = useState<Section[]>([{ productId: "", domainUrl: "", items: {} }]);
   const [sendEmail, setSendEmail] = useState(true);
-  const [result, setResult] = useState<{ link: string; tenantId: string } | null>(null);
+  const [result, setResult] = useState<{ link: string; tenantId: string; superseded: number } | null>(null);
 
   const productOf = (s: Section) => products.find((p) => p.id === s.productId) ?? null;
   const ready = sections.filter((s) => productOf(s));
@@ -170,8 +170,14 @@ export function OnboardClientPage({
         toast.error(res.error);
         return;
       }
-      setResult({ link: res.link, tenantId: res.tenantId });
-      toast.success(sendEmail ? "Setup created — link emailed to the client" : "Setup created");
+      setResult({ link: res.link, tenantId: res.tenantId, superseded: res.superseded });
+      toast.success(
+        res.superseded
+          ? `Setup created — ${res.superseded} older pending link${res.superseded === 1 ? "" : "s"} for the same product revoked`
+          : sendEmail
+            ? "Setup created — link emailed to the client"
+            : "Setup created",
+      );
       if (leadId) void setContactStatusAction(leadId, "contacted");
       router.refresh();
     } catch {
@@ -219,6 +225,12 @@ export function OnboardClientPage({
                 <li>
                   Once live, the domain{domainsToVerify === 1 ? "" : "s"} get a verification token automatically — send the client the DNS records from the{" "}
                   <Link href={OPS.clientTab(result.tenantId, "provisioning")} className="text-primary hover:underline">Provisioning tab</Link> and press Verify.
+                </li>
+              )}
+              {result.superseded > 0 && (
+                <li>
+                  {result.superseded === 1 ? "An older pending link" : `${result.superseded} older pending links`} for the same product{" "}
+                  {result.superseded === 1 ? "was" : "were"} revoked — only this one works now.
                 </li>
               )}
               <li>

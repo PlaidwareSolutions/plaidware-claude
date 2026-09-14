@@ -51,7 +51,7 @@ export async function createClientSetup(opts: {
   }[];
   sendEmailToClient: boolean;
   actorUserId: string;
-}): Promise<{ link: string; inviteId: string; tenantId: string }> {
+}): Promise<{ link: string; inviteId: string; tenantId: string; superseded: number }> {
   const email = opts.clientEmail.trim().toLowerCase();
   if (opts.products.length === 0) throw new Error("Pick at least one product");
   const productIds = opts.products.map((p) => p.productId);
@@ -135,6 +135,29 @@ export async function createClientSetup(opts: {
     })
     .returning();
 
+  // One open setup link per client and product: an older pending link that
+  // covers any of these products is superseded, so the client never holds two
+  // live tokens for the same purchase and the Clients list never shows twins.
+  const openOthers = await db.query.onboardingInvites.findMany({
+    where: and(eq(onboardingInvites.tenantId, tenantId), eq(onboardingInvites.status, "pending")),
+  });
+  const supersededIds = openOthers
+    .filter((o) => o.id !== invite.id && o.products.some((e) => productIds.includes(e.productId)))
+    .map((o) => o.id);
+  if (supersededIds.length) {
+    await db
+      .update(onboardingInvites)
+      .set({ status: "revoked" })
+      .where(inArray(onboardingInvites.id, supersededIds));
+    await db.delete(tenantPriceOverrides).where(inArray(tenantPriceOverrides.sourceInviteId, supersededIds));
+    await writeAudit({
+      tenantId,
+      actorUserId: opts.actorUserId,
+      kind: "client_setup_revoked",
+      payload: { inviteIds: supersededIds, supersededBy: invite.id },
+    });
+  }
+
   await writeAudit({
     tenantId,
     actorUserId: opts.actorUserId,
@@ -142,6 +165,7 @@ export async function createClientSetup(opts: {
     payload: {
       products: opts.products.map((p) => ({ productId: p.productId, items: p.items.length })),
       email,
+      superseded: supersededIds.length,
     },
   });
 
@@ -151,7 +175,7 @@ export async function createClientSetup(opts: {
     await sendSetupLinkEmail(invite.id, link);
   }
 
-  return { link, inviteId: invite.id, tenantId };
+  return { link, inviteId: invite.id, tenantId, superseded: supersededIds.length };
 }
 
 /** The "your setup is ready" email — used at creation and when ops resends a fresh link. */

@@ -53,13 +53,13 @@ const createSchema = z.object({
 
 export async function createClientSetupAction(
   input: z.infer<typeof createSchema>,
-): Promise<{ ok: true; link: string; tenantId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; link: string; tenantId: string; superseded: number } | { ok: false; error: string }> {
   try {
     const session = await requireOps();
     const p = createSchema.parse(input);
     const r = await createClientSetup({ ...p, actorUserId: session.user.id });
     revalidateClientViews();
-    return { ok: true, link: r.link, tenantId: r.tenantId };
+    return { ok: true, link: r.link, tenantId: r.tenantId, superseded: r.superseded };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Setup creation failed" };
   }
