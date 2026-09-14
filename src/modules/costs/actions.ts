@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { OPS } from "@/lib/routes";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { requireOps } from "../../policy";
@@ -64,6 +64,36 @@ export async function toggleAppProductLinkAction(
           ),
         );
     }
+    revalidatePath(OPS.costs);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Dedicate an app to one subscription (its cost lands on that client) or
+ * clear the dedication back to product-scoped sharing.
+ */
+export async function setAppSubscriptionLinkAction(
+  hostedAppId: string,
+  productId: string,
+  subscriptionId: string | null,
+): Promise<R> {
+  try {
+    await requireOps();
+    z.string().uuid().parse(hostedAppId);
+    z.string().uuid().parse(productId);
+    if (subscriptionId) z.string().uuid().parse(subscriptionId);
+    await db.transaction(async (tx) => {
+      // One dedication per app: clear any existing subscription link first.
+      await tx
+        .delete(productHostedApps)
+        .where(and(eq(productHostedApps.hostedAppId, hostedAppId), isNotNull(productHostedApps.subscriptionId)));
+      if (subscriptionId) {
+        await tx.insert(productHostedApps).values({ hostedAppId, productId, subscriptionId });
+      }
+    });
     revalidatePath(OPS.costs);
     return { ok: true };
   } catch (e) {

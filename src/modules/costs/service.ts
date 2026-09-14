@@ -1,8 +1,11 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
 import { env } from "../../env";
+import { organization } from "../auth/schema";
 import { products } from "../catalog/schema";
 import { invoices, subscriptions } from "../billing/schema";
+import { MRR_STATUSES } from "../billing/mappers";
+import { attributeTenantCosts, type TenantAttribution } from "./attribution";
 import { appCostSamples, hostedApps, productHostedApps } from "./schema";
 
 /** Railway usage-based pricing (published rates, editable in one place). */
@@ -101,11 +104,13 @@ export type ProductMargin = {
   marginPct: number | null;
 };
 
-/** Margin per product for a month: paid invoices − attributed app costs (PRD §4.11). */
+/** Margin per product for a month: paid invoices − attributed app costs (PRD §4.11).
+ *  Product-scoped links count whole; an app dedicated to one subscription counts
+ *  toward that subscription's product. */
 export async function marginByProduct(month: string): Promise<ProductMargin[]> {
   const [allProducts, links] = await Promise.all([
     db.query.products.findMany({ where: eq(products.isActive, true), orderBy: [products.sortOrder] }),
-    db.query.productHostedApps.findMany({ where: isNull(productHostedApps.subscriptionId) }),
+    db.query.productHostedApps.findMany(),
   ]);
   const [y, m] = month.split("-").map(Number);
   const start = new Date(Date.UTC(y, m - 1, 1));
@@ -124,7 +129,15 @@ export async function marginByProduct(month: string): Promise<ProductMargin[]> {
           i.subscriptionId && subProduct.get(i.subscriptionId) === p.id,
       )
       .reduce((s, i) => s + i.amountDueCents, 0);
-    const appIds = links.filter((l) => l.productId === p.id).map((l) => l.hostedAppId);
+    const appIds = [
+      ...new Set(
+        links
+          .filter((l) =>
+            l.subscriptionId ? subProduct.get(l.subscriptionId) === p.id : l.productId === p.id,
+          )
+          .map((l) => l.hostedAppId),
+      ),
+    ];
     let costCents: number | null = null;
     if (appIds.length) {
       const costs = await Promise.all(appIds.map((a) => appMonthlyCostCents(a, month)));
@@ -145,7 +158,20 @@ export async function marginByProduct(month: string): Promise<ProductMargin[]> {
   return out;
 }
 
-export async function listHostedAppsWithCosts(month: string) {
+export type HostedAppRow = {
+  id: string;
+  provider: string;
+  externalRef: string;
+  label: string;
+  costCents: number | null;
+  costSource: string | null;
+  /** Product-scoped links: the app is shared by every subscriber of these products. */
+  products: { id: string; name: string }[];
+  /** Dedicated link: this app runs one client's subscription. */
+  dedicated: { subscriptionId: string; tenantId: string; tenantName: string; productId: string; productName: string } | null;
+};
+
+export async function listHostedAppsWithCosts(month: string): Promise<HostedAppRow[]> {
   const apps = await db.query.hostedApps.findMany({ orderBy: [hostedApps.label] });
   if (apps.length === 0) return [];
   const [samples, links, prods] = await Promise.all([
@@ -156,9 +182,19 @@ export async function listHostedAppsWithCosts(month: string) {
     db.query.products.findMany({ columns: { id: true, name: true } }),
   ]);
   const pname = new Map(prods.map((p) => [p.id, p.name]));
+  const dedicatedIds = links.map((l) => l.subscriptionId).filter((x): x is string => !!x);
+  const dedicatedSubs = dedicatedIds.length
+    ? await db
+        .select({ id: subscriptions.id, tenantId: subscriptions.tenantId, tenantName: organization.name, productId: subscriptions.productId })
+        .from(subscriptions)
+        .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
+        .where(inArray(subscriptions.id, dedicatedIds))
+    : [];
   return apps.map((a) => {
     const mine = samples.filter((s) => s.hostedAppId === a.id);
     const manual = mine.find((s) => s.source === "manual");
+    const ded = links.find((l) => l.hostedAppId === a.id && l.subscriptionId);
+    const dsub = ded ? dedicatedSubs.find((s) => s.id === ded.subscriptionId) : undefined;
     return {
       id: a.id,
       provider: a.provider,
@@ -169,6 +205,81 @@ export async function listHostedAppsWithCosts(month: string) {
       products: links
         .filter((l) => l.hostedAppId === a.id && !l.subscriptionId)
         .map((l) => ({ id: l.productId, name: pname.get(l.productId) ?? "?" })),
+      dedicated: dsub
+        ? { subscriptionId: dsub.id, tenantId: dsub.tenantId, tenantName: dsub.tenantName, productId: dsub.productId, productName: pname.get(dsub.productId) ?? "?" }
+        : null,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Per-client attribution (PRD §4.11): what each client's products cost to run
+// ---------------------------------------------------------------------------
+
+async function attributionFor(month: string): Promise<Map<string, TenantAttribution>> {
+  const [apps, links, subs] = await Promise.all([
+    db.query.hostedApps.findMany(),
+    db.query.productHostedApps.findMany(),
+    db.query.subscriptions.findMany({
+      where: inArray(subscriptions.status, MRR_STATUSES),
+      columns: { id: true, tenantId: true, productId: true },
+    }),
+  ]);
+  const costs = await Promise.all(apps.map(async (a) => ({ id: a.id, label: a.label, costCents: await appMonthlyCostCents(a.id, month) })));
+  return attributeTenantCosts({ apps: costs, links, subscriptions: subs });
+}
+
+export type TenantCostRow = {
+  tenantId: string;
+  tenantName: string;
+  costCents: number;
+  revenueCents: number;
+  marginPct: number | null;
+  apps: TenantAttribution["apps"];
+};
+
+/** Every client with attributed hosting cost and paid revenue for the month. */
+export async function costsByTenant(month: string): Promise<TenantCostRow[]> {
+  const [attr, orgs] = await Promise.all([
+    attributionFor(month),
+    db.query.organization.findMany({ columns: { id: true, name: true } }),
+  ]);
+  const [y, m] = month.split("-").map(Number);
+  const start = new Date(Date.UTC(y, m - 1, 1));
+  const end = new Date(Date.UTC(y, m, 1));
+  const paid = await db.query.invoices.findMany({ where: eq(invoices.status, "paid") });
+  const revenue = new Map<string, number>();
+  for (const i of paid) {
+    if (!i.paidAt || i.paidAt < start || i.paidAt >= end) continue;
+    revenue.set(i.tenantId, (revenue.get(i.tenantId) ?? 0) + i.amountDueCents);
+  }
+  const ids = new Set([...attr.keys(), ...revenue.keys()]);
+  return [...ids]
+    .map((tenantId) => {
+      const a = attr.get(tenantId);
+      const costCents = a?.costCents ?? 0;
+      const revenueCents = revenue.get(tenantId) ?? 0;
+      return {
+        tenantId,
+        tenantName: orgs.find((o) => o.id === tenantId)?.name ?? "Unknown",
+        costCents,
+        revenueCents,
+        marginPct: revenueCents > 0 && a ? Math.round(((revenueCents - costCents) / revenueCents) * 100) : null,
+        apps: a?.apps ?? [],
+      };
+    })
+    .sort((x, y2) => y2.costCents - x.costCents || y2.revenueCents - x.revenueCents);
+}
+
+/** One client's attributed hosting cost for the month (client Overview tile). */
+export async function tenantCostBreakdown(tenantId: string, month: string): Promise<TenantAttribution | null> {
+  return (await attributionFor(month)).get(tenantId) ?? null;
+}
+
+/** Sum of every app's known cost for the month, for the board strip. */
+export async function totalCostCents(month: string): Promise<number | null> {
+  const apps = await db.query.hostedApps.findMany({ columns: { id: true } });
+  const costs = await Promise.all(apps.map((a) => appMonthlyCostCents(a.id, month)));
+  const known = costs.filter((c): c is number => c != null);
+  return known.length ? known.reduce((s, c) => s + c, 0) : null;
 }

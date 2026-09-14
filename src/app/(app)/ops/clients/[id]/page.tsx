@@ -13,6 +13,7 @@ import { listTenantProvisioning } from "@/modules/provisioning/queries";
 import { findQuietReporters, getActiveIncidents } from "@/modules/monitoring/service";
 import { listTenantSetupInvites } from "@/modules/onboarding/queries";
 import { tenantDeliveryHealth } from "@/modules/webhooks_out/queries";
+import { currentMonth, tenantCostBreakdown } from "@/modules/costs/service";
 import { buildAttentionItems } from "@/modules/tenancy/client-attention";
 import { SetupLinksCard } from "@/modules/onboarding/components/setup-links-card";
 import { formatCents } from "@/lib/money";
@@ -52,9 +53,10 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
       getActiveIncidents({ tenantId: id }),
       findQuietReporters(new Date(), { tenantId: id }),
     ]);
-  const [provisioning, deliveries] = await Promise.all([
+  const [provisioning, deliveries, hosting] = await Promise.all([
     listTenantProvisioning(subscriptions),
     tenantDeliveryHealth(subscriptions.map((s) => s.id), id, 50),
+    tenantCostBreakdown(id, currentMonth()).catch(() => null),
   ]);
 
   const summary = summarizeClientBilling({ subscriptions, invoices, automation });
@@ -105,7 +107,16 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
           tone={incidents.length ? "danger" : siteProblems || quiet.length ? "warning" : provisioning.length ? "success" : "default"}
           href={OPS.clientTab(id, incidents.length || quiet.length ? "monitoring" : "provisioning")}
         />
-        <StatTile label="People" value={members.length} sub={client.ownerEmail ?? "no owner"} href={OPS.clientTab(id, "people")} />
+        <StatTile
+          label="Hosting cost MTD"
+          value={hosting ? formatCents(hosting.costCents) : "—"}
+          sub={
+            hosting
+              ? `${hosting.apps.length} app${hosting.apps.length === 1 ? "" : "s"} · ${summary.mrrCents > 0 ? `${Math.round(((summary.mrrCents - hosting.costCents) / summary.mrrCents) * 100)}% of MRR kept` : "no MRR"}`
+              : "no attributed apps"
+          }
+          href={OPS.costs}
+        />
       </div>
 
       <Section title="Needs attention" icon={AlertTriangle} count={attention.length}>
