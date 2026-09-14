@@ -56,11 +56,32 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   read-only partner feed (/api/partners/subscriptions, hashed `partner_keys`),
   cross-subdomain session cookie (COOKIE_DOMAIN), magic-link login.
   Env: MHUB_BASE_URL / MHUB_LIFECYCLE_URL / MHUB_WEBHOOK_SECRET.
-  Ops: dead letters at /ops/webhooks. Details: docs/RUNBOOK.md;
+  Ops: dead letters at /ops/system/webhooks. Details: docs/RUNBOOK.md;
   contract deviations: docs/INTEGRATION-DEVIATIONS.md.
 - Marketing plan level change = cancel the old `marketing-*` subscription,
   checkout the new product; the provisioning handshake hits the existing
   MHub tenant and MHub reactivates/relevels it.
+
+## UI page system (redesign, 2026-09)
+
+- Ops IA is client-centric: `/ops/clients/[id]` (layout + tabs
+  Overview|billing|provisioning|monitoring|people|activity), `/ops/clients/new`
+  (onboarding stepper), boards at `/ops/billing`, `/ops/products/[id]` (tabs),
+  `/ops/monitoring`, `/ops/inbox`, `/ops/system/*`. Old paths redirect in
+  next.config.ts.
+- ESLint-enforced conventions: routes only via `src/lib/routes.ts`
+  (`OPS.*`, `TENANT.*`, `withQuery`); dates only via `src/lib/dates.ts`
+  (fixed `NEXT_PUBLIC_DISPLAY_TZ`); confirmations only via `useConfirm()`;
+  status pills only via `<StatusBadge kind status/>` (`src/lib/status-variants.ts`);
+  mutations in client code via `useAction()`; one `<PageHeader>` per route,
+  `<Section>`, `<StatTile>`, `<DataTableShell>`/`<TableEmpty>`, `<EmptyState>`.
+  Pages call module `queries.ts` only — no raw `db.query` in page.tsx.
+- Semantics: workspace status gates members via `policy.requireMembership`
+  (suspended = read + billing; inactive = read); subscription holds carry
+  `suspension_source` ('dunning' lifts on payment, 'manual' only by ops) and
+  survive Stripe syncs; setup-link prices are held on the invite and become
+  `tenant_price_overrides` (tagged `source_invite_id`) only when the client
+  pays — revoke/expiry deletes them.
 
 ## Deployment (Railway project "plaidware-hub")
 

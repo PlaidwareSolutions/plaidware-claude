@@ -1,30 +1,34 @@
 import { redirect } from "next/navigation";
-import { getSession, roleHasCapability } from "@/policy";
+import { getSession, isOps, roleHasCapability, tenantStatusAllows, tenantStatusMessage } from "@/policy";
+import { AUTH, TENANT } from "@/lib/routes";
 import { getUserTenants } from "@/modules/tenancy/queries";
 import {
+  listAddonOptions,
   listTenantInvoices,
   listTenantSubscriptions,
 } from "@/modules/billing/queries";
-import { getTenantOverrides } from "@/modules/billing/service";
-import { listActiveProducts } from "@/modules/catalog/queries";
 import { BillingView } from "@/modules/billing/components/billing-view";
+import { EmptyState } from "@/components/empty-state";
 
 export const metadata = { title: "Billing" };
 export const dynamic = "force-dynamic";
 
 export default async function BillingPage() {
   const session = await getSession();
-  if (!session) redirect("/login");
+  if (!session) redirect(AUTH.login);
 
   const tenants = await getUserTenants(session.user.id);
   const active =
     tenants.find((t) => t.id === session.session.activeOrganizationId) ?? tenants[0];
-  if (!active) redirect("/dashboard");
-  if (!roleHasCapability(active.role, "billing") && session.user.platformRole !== "ops_admin") {
+  if (!active) redirect(TENANT.dashboard);
+  const ops = isOps(session);
+  if (!roleHasCapability(active.role, "billing") && !ops) {
     return (
-      <p className="mx-auto max-w-md pt-16 text-center text-sm text-muted-foreground">
-        Billing is visible to workspace owners, admins, and billing members.
-      </p>
+      <EmptyState
+        className="mx-auto mt-16 max-w-md"
+        title="Billing is for owners, admins, and billing members"
+        description="Ask a workspace owner to change your role if you need to see invoices."
+      />
     );
   }
 
@@ -32,39 +36,16 @@ export default async function BillingPage() {
     listTenantSubscriptions(active.id),
     listTenantInvoices(active.id),
   ]);
-
   // Add-on options per live subscription, with tenant pricing applied (v2).
-  const products = await listActiveProducts();
-  const allComponentIds = products.flatMap((p) => p.components.map((c) => c.id));
-  const overrides = await getTenantOverrides(active.id, allComponentIds);
-  const addonOptions = Object.fromEntries(
-    subscriptions
-      .filter((s) => !["canceled", "expired"].includes(s.status))
-      .map((s) => {
-        const product = products.find((p) => p.id === s.productId);
-        const activeItems = new Set(
-          s.items.filter((i) => ["active", "pending"].includes(i.status)).map((i) => i.name),
-        );
-        return [
-          s.id,
-          (product?.components ?? [])
-            .filter((c) => c.role !== "base" && !activeItems.has(c.name))
-            .map((c) => ({
-              id: c.id,
-              name: c.name,
-              kind: c.kind,
-              interval: c.interval,
-              intervalCount: c.intervalCount,
-              amountCents: overrides.get(c.id)?.amountCents ?? c.amountCents,
-            })),
-        ];
-      }),
-  );
+  const addonOptions = await listAddonOptions(active.id, subscriptions);
 
+  // A suspended workspace can still pay (billing) but not change anything (write).
+  const statusAllowsWrite = ops || tenantStatusAllows(active.status, "write");
   return (
     <BillingView
       tenantId={active.id}
-      canWrite={roleHasCapability(active.role, "write")}
+      canWrite={(ops || roleHasCapability(active.role, "write")) && statusAllowsWrite}
+      readOnlyReason={statusAllowsWrite ? null : tenantStatusMessage(active.status)}
       subscriptions={subscriptions}
       invoices={invoices}
       addonOptions={addonOptions}

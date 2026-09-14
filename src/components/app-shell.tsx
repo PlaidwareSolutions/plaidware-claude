@@ -37,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { TenantStatusBanner } from "@/components/tenant-status-banner";
 
 const TENANT_NAV: NavItem[] = [
   { href: TENANT.dashboard, label: "Home", icon: Home, exact: true },
@@ -233,7 +234,10 @@ export function AppShell({
           </DropdownMenu>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6">{children}</main>
+        <main className="flex-1 p-4 sm:p-6">
+          {!inOps && active && <TenantStatusBanner status={active.status} />}
+          {children}
+        </main>
       </div>
     </div>
   );

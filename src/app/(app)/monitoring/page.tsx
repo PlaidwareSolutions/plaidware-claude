@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession, isOps } from "@/policy";
+import { getSession, isOps, tenantStatusAllows } from "@/policy";
 import { AUTH, TENANT } from "@/lib/routes";
 import { getUserTenants } from "@/modules/tenancy/queries";
 import { listTenantSubscriptions } from "@/modules/billing/queries";
@@ -35,18 +35,13 @@ export default async function MonitoringPage() {
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
       <MonitoringView
         tenantId={active.id}
-        canWrite={["owner", "admin"].includes(active.role) || isOpsUser}
+        canWrite={(["owner", "admin"].includes(active.role) || isOpsUser) && (isOpsUser || tenantStatusAllows(active.status, "write"))}
         ingestUrl={`${env.APP_BASE_URL}/api/metrics/ingest`}
         cards={cards}
       />
       {seoPanels.map(({ sub, panels }) => (
-        <SeoPanel
-          key={sub.id}
-          productName={sub.productName}
-          subscriptionId={sub.id}
-          panels={panels}
-          opsControls={isOpsUser}
-        />
+        // Ops controls (run now / snooze) live on the ops client page and Monitoring board.
+        <SeoPanel key={sub.id} productName={sub.productName} subscriptionId={sub.id} panels={panels} opsControls={false} />
       ))}
     </div>
   );

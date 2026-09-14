@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getSession, roleHasCapability } from "@/policy";
+import { getSession, isOps, roleHasCapability, tenantStatusAllows, tenantStatusMessage } from "@/policy";
+import { AUTH, TENANT } from "@/lib/routes";
 import {
   getUserTenants,
   listMembers,
@@ -9,20 +10,22 @@ import { TeamManager } from "@/modules/tenancy/components/team-manager";
 
 export default async function TeamPage() {
   const session = await getSession();
-  if (!session) redirect("/login");
+  if (!session) redirect(AUTH.login);
 
   const tenants = await getUserTenants(session.user.id);
   const active =
     tenants.find((t) => t.id === session.session.activeOrganizationId) ?? tenants[0];
-  if (!active) redirect("/dashboard");
+  if (!active) redirect(TENANT.dashboard);
 
   const [members, invites] = await Promise.all([
     listMembers(active.id),
     listPendingInvites(active.id),
   ]);
 
-  const canManage = roleHasCapability(active.role, "team");
-  const isOwner = active.role === "owner";
+  const ops = isOps(session);
+  const statusAllows = ops || tenantStatusAllows(active.status, "team");
+  const canManage = (ops || roleHasCapability(active.role, "team")) && statusAllows;
+  const isOwner = active.role === "owner" || ops;
 
   return (
     <TeamManager
@@ -31,6 +34,7 @@ export default async function TeamPage() {
       members={members}
       invites={invites}
       canManage={canManage}
+      readOnlyReason={statusAllows ? null : tenantStatusMessage(active.status)}
       isOwner={isOwner}
       selfUserId={session.user.id}
     />

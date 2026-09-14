@@ -3,18 +3,33 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ExternalLink, Receipt } from "lucide-react";
-import type { InvoiceDto, SubscriptionDto } from "../queries";
+import { CreditCard, ExternalLink, Package, Receipt } from "lucide-react";
+import type { AddonOption, InvoiceDto, SubscriptionDto } from "../queries";
 import { billingPortalAction, cancelSubscriptionAction, changeSubscriptionItemsAction } from "../actions";
-import { intervalLabel } from "../mappers";
+import { intervalLabel, isRecurringKind } from "../mappers";
 import { setDomainAction } from "@/modules/provisioning/actions";
-import { Input } from "@/components/ui/input";
 import { formatCents } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
+import { useAction } from "@/lib/use-action";
 import { useConfirm } from "@/components/confirm-dialog";
+import { PageHeader } from "@/components/page-header";
+import { Section } from "@/components/section";
+import { StatusBadge } from "@/components/status-badge";
+import { EmptyState } from "@/components/empty-state";
+import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -24,33 +39,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+export type { AddonOption };
+
+const cadence = (c: { kind: string; interval?: string | null; intervalCount?: number | null }) =>
+  isRecurringKind(c.kind) ? intervalLabel(c) : " one-time";
+
 function DomainEditor({ tenantId, sub }: { tenantId: string; sub: SubscriptionDto }) {
+  const { run, isPending } = useAction();
   const [value, setValue] = useState(sub.domainUrl ?? "");
-  const [saving, setSaving] = useState(false);
 
   // marketing-* products: the URL is MHub's portal, written by the
   // provisioning handshake — not customer-editable.
   if (sub.productSlug.startsWith("marketing-")) {
     return sub.domainUrl ? (
-      <a
-        href={sub.domainUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="text-xs text-primary hover:underline"
-      >
+      <a href={sub.domainUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
         Open portal
       </a>
     ) : (
-      <Badge variant="outline">Provisioning pending</Badge>
+      <StatusBadge kind="dns" status="handshake_pending" label="Provisioning pending" />
     );
-  }
-
-  async function save() {
-    setSaving(true);
-    const res = await setDomainAction({ tenantId, subscriptionId: sub.id, domainUrl: value.trim() || null });
-    setSaving(false);
-    if (res.ok) toast.success(value.trim() ? "Live URL saved" : "Live URL cleared");
-    else toast.error(res.error);
   }
 
   return (
@@ -61,54 +68,50 @@ function DomainEditor({ tenantId, sub }: { tenantId: string; sub: SubscriptionDt
         value={value}
         onChange={(e) => setValue(e.target.value)}
       />
-      <Button variant="outline" size="sm" onClick={save} disabled={saving || value === (sub.domainUrl ?? "")}>
-        {saving ? "…" : "Save"}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={isPending(`domain:${sub.id}`) || value.trim() === (sub.domainUrl ?? "")}
+        onClick={() =>
+          void run(() => setDomainAction({ tenantId, subscriptionId: sub.id, domainUrl: value.trim() || null }), {
+            key: `domain:${sub.id}`,
+            success: value.trim() ? "Live URL saved" : "Live URL cleared",
+          })
+        }
+      >
+        {isPending(`domain:${sub.id}`) ? "…" : "Save"}
       </Button>
     </div>
   );
 }
 
-function statusBadge(status: string) {
-  const variant =
-    status === "active" || status === "paid"
-      ? ("secondary" as const)
-      : status === "trialing" || status === "open" || status === "incomplete"
-        ? ("outline" as const)
-        : ("destructive" as const);
-  return <Badge variant={variant}>{status.replace("_", " ")}</Badge>;
-}
-
-export type AddonOption = {
-  id: string;
-  name: string;
-  kind: string;
-  interval: string | null;
-  intervalCount: number;
-  amountCents: number;
-};
-
 export function BillingView({
   tenantId,
   canWrite,
+  readOnlyReason = null,
   subscriptions,
   invoices,
   addonOptions = {},
 }: {
   tenantId: string;
   canWrite: boolean;
+  /** Set when the workspace status blocks changes (suspended/inactive). */
+  readOnlyReason?: string | null;
   subscriptions: SubscriptionDto[];
   invoices: InvoiceDto[];
   addonOptions?: Record<string, AddonOption[]>;
 }) {
   const confirm = useConfirm();
-  const [busy, setBusy] = useState(false);
-  const totalMonthly = subscriptions.reduce((s, x) => s + x.monthlyCents, 0);
+  const { run, isPending } = useAction();
+  const [portalBusy, setPortalBusy] = useState(false);
+  const live = subscriptions.filter((s) => !["canceled", "expired"].includes(s.status));
+  const totalMonthly = live.reduce((s, x) => s + x.monthlyCents, 0);
 
   async function openPortal() {
-    setBusy(true);
+    setPortalBusy(true);
     const res = await billingPortalAction(tenantId);
-    setBusy(false);
-    if (res.ok) window.location.href = res.url;
+    setPortalBusy(false);
+    if (res.ok) window.location.href = res.url; // external Stripe-hosted page
     else toast.error(res.error);
   }
 
@@ -121,142 +124,144 @@ export function BillingView({
       destructive: true,
     });
     if (!ok) return;
-    const res = await cancelSubscriptionAction(tenantId, sub.id);
-    if (res.ok) toast.success(`${sub.productName} canceled`);
-    else toast.error(res.error ?? "Cancel failed");
+    void run(() => cancelSubscriptionAction(tenantId, sub.id), { key: `cancel:${sub.id}`, success: `${sub.productName} canceled` });
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-heading">Billing</h1>
-          <p className="text-sm text-muted-foreground">
-            {totalMonthly > 0
-              ? `Current recurring total: ${formatCents(totalMonthly)}/mo`
-              : "Subscriptions and invoices for this workspace."}
-          </p>
-        </div>
-        <Button variant="outline" onClick={openPortal} disabled={busy}>
-          {busy ? "Opening…" : "Manage payment methods"}
-        </Button>
-      </div>
+    <div className="mx-auto flex max-w-4xl flex-col gap-8">
+      <PageHeader
+        title="Billing"
+        description={
+          readOnlyReason ??
+          (totalMonthly > 0 ? `Current recurring total: ${formatCents(totalMonthly)}/mo` : "Subscriptions and invoices for this workspace.")
+        }
+        actions={
+          <Button variant="outline" onClick={openPortal} disabled={portalBusy} className="gap-1.5">
+            <CreditCard className="size-4" /> {portalBusy ? "Opening…" : "Payment methods"}
+          </Button>
+        }
+      />
 
-      <div className="flex flex-col gap-4">
-        {subscriptions.length === 0 && (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-              <Receipt className="size-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">
-                No subscriptions yet.
-              </p>
-              <Button asChild size="sm">
-                <Link href="/products">Browse the catalog</Link>
-              </Button>
-            </CardContent>
-          </Card>
+      <Section title="Subscriptions" icon={Package} count={live.length}>
+        {subscriptions.length === 0 ? (
+          <EmptyState
+            icon={Package}
+            title="No subscriptions yet"
+            description="Products you subscribe to appear here with their items, renewal date, and live URL."
+            action={
+              canWrite ? (
+                <Button asChild size="sm">
+                  <Link href="/products">Browse the catalog</Link>
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {subscriptions.map((sub) => {
+              const open = !["canceled", "expired"].includes(sub.status);
+              return (
+                <Card key={sub.id} className={`gap-3 py-5 ${open ? "" : "opacity-70"}`}>
+                  <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <span className="size-2.5 rounded-full" style={{ background: sub.productColor ?? "var(--primary)" }} />
+                      {sub.productName}
+                      <StatusBadge kind="subscription" status={sub.status} />
+                    </CardTitle>
+                    <div className="text-sm text-muted-foreground">
+                      {sub.status === "trialing" && sub.trialEndsAt
+                        ? `Trial ends ${formatDate(sub.trialEndsAt)}`
+                        : open && sub.currentPeriodEnd
+                          ? `Renews ${formatDate(sub.currentPeriodEnd)}`
+                          : `Since ${formatDate(sub.subscribedAt)}`}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3">
+                    {sub.status === "suspended" && (
+                      <p className="text-sm text-destructive">
+                        {sub.suspensionSource === "manual"
+                          ? "This subscription is on hold — contact Plaidware."
+                          : "Suspended over an unpaid invoice — it reactivates automatically once the invoice below is paid."}
+                      </p>
+                    )}
+                    <ul className="flex flex-col gap-1 text-sm">
+                      {sub.items.filter((i) => i.status !== "canceled").map((i) => (
+                        <li key={i.id} className="flex justify-between gap-2">
+                          <span className="text-muted-foreground">
+                            {i.name}
+                            {i.status === "paid" && <Badge variant="outline" className="ml-1.5 text-[10px]">paid</Badge>}
+                            {i.status === "pending" && <Badge variant="outline" className="ml-1.5 text-[10px]">awaiting payment</Badge>}
+                          </span>
+                          <span className="tabular-nums">
+                            {formatCents(i.amountCents)}
+                            <span className="text-xs text-muted-foreground">{cadence(i)}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {sub.monthlyHostingCents ? (
+                      <p className="text-xs text-muted-foreground">
+                        Hosting: {formatCents(sub.monthlyHostingCents)}/mo, invoiced on the 1st for the previous month.
+                      </p>
+                    ) : null}
+                    {canWrite && open && (
+                      <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                        <DomainEditor tenantId={tenantId} sub={sub} />
+                        <div className="flex-1" />
+                        {(addonOptions[sub.id]?.length || sub.items.some((i) => i.status === "active")) && (
+                          <ManageAddons tenantId={tenantId} sub={sub} options={addonOptions[sub.id] ?? []} />
+                        )}
+                        <Button variant="ghost" size="sm" className="text-destructive" disabled={isPending(`cancel:${sub.id}`)} onClick={() => void cancel(sub)}>
+                          Cancel subscription
+                        </Button>
+                      </div>
+                    )}
+                    {!canWrite && open && sub.domainUrl && !sub.productSlug.startsWith("marketing-") && (
+                      <p className="text-xs text-muted-foreground">Live URL: {sub.domainUrl}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
         )}
-        {subscriptions.map((sub) => (
-          <Card key={sub.id}>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <span
-                  className="size-2.5 rounded-full"
-                  style={{ background: sub.productColor ?? "var(--primary)" }}
-                />
-                {sub.productName}
-                {statusBadge(sub.status)}
-              </CardTitle>
-              <div className="text-sm text-muted-foreground">
-                {sub.status === "trialing" && sub.trialEndsAt
-                  ? `Trial ends ${formatDate(sub.trialEndsAt)}`
-                  : sub.currentPeriodEnd
-                    ? `Renews ${formatDate(sub.currentPeriodEnd)}`
-                    : `Since ${formatDate(sub.subscribedAt)}`}
-              </div>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <ul className="flex flex-col gap-1 text-sm">
-                {sub.items.map((i) => (
-                  <li key={i.id} className="flex justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      {i.name}
-                      {i.status === "paid" && " · paid"}
-                      {i.status === "pending" && " · awaiting payment"}
-                    </span>
-                    <span className="tabular-nums">
-                      {formatCents(i.amountCents)}
-                      {intervalLabel(i)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              {canWrite && !["canceled", "expired"].includes(sub.status) && (
-                <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-                  <DomainEditor tenantId={tenantId} sub={sub} />
-                  <div className="flex-1" />
-                  {(addonOptions[sub.id]?.length || sub.items.some((i) => i.status === "active")) && (
-                    <ManageAddons
-                      tenantId={tenantId}
-                      sub={sub}
-                      options={addonOptions[sub.id] ?? []}
-                    />
-                  )}
-                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => cancel(sub)}>
-                    Cancel subscription
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      </Section>
 
-      {invoices.length > 0 && (
-        <div>
-          <h2 className="mb-2 text-sm font-semibold text-heading">Invoices</h2>
-          <div className="rounded-lg border bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Invoice</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="hidden sm:table-cell">Date</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="w-16" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoices.map((inv) => (
-                  <TableRow key={inv.id}>
-                    <TableCell className="font-mono text-xs">{inv.invoiceNumber}</TableCell>
-                    <TableCell>{statusBadge(inv.status)}</TableCell>
-                    <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
-                      {formatDate(inv.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCents(inv.amountDueCents)}
-                    </TableCell>
-                    <TableCell>
-                      {inv.hostedInvoiceUrl && (
-                        <a
-                          href={inv.hostedInvoiceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-primary"
-                          title="View invoice"
-                        >
+      <Section title="Invoices" icon={Receipt} count={invoices.length}>
+        <DataTableShell>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Invoice</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="hidden sm:table-cell">Date</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="w-16" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {invoices.length === 0 && <TableEmpty colSpan={5} icon={Receipt} title="No invoices yet" />}
+              {invoices.map((inv) => (
+                <TableRow key={inv.id}>
+                  <TableCell className="font-mono text-xs">{inv.invoiceNumber}</TableCell>
+                  <TableCell><StatusBadge kind="invoice" status={inv.status} /></TableCell>
+                  <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">{formatDate(inv.createdAt)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCents(inv.amountDueCents)}</TableCell>
+                  <TableCell>
+                    {inv.hostedInvoiceUrl && (
+                      <Button asChild variant="ghost" size="icon" title={inv.status === "open" || inv.status === "failed" ? "Pay invoice" : "View invoice"}>
+                        <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer">
                           <ExternalLink className="size-4" />
                         </a>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTableShell>
+      </Section>
     </div>
   );
 }
@@ -270,34 +275,40 @@ function ManageAddons({
   sub: SubscriptionDto;
   options: AddonOption[];
 }) {
+  const { run, pending } = useAction();
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [toAdd, setToAdd] = useState<Set<string>>(new Set());
   const [toRemove, setToRemove] = useState<Set<string>>(new Set());
 
   // Removable = active recurring items beyond the base (base can't be removed).
-  const removable = sub.items.filter(
-    (i) => i.status === "active" && i.interval != null,
-  );
+  const removable = sub.items.filter((i) => i.status === "active" && i.interval != null);
+
+  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, id: string, on: boolean) => {
+    const next = new Set(set);
+    if (on) next.add(id);
+    else next.delete(id);
+    setter(next);
+  };
 
   async function apply() {
-    setBusy(true);
-    const res = await changeSubscriptionItemsAction({
-      tenantId,
-      subscriptionId: sub.id,
-      addComponentIds: [...toAdd],
-      removeItemIds: [...toRemove],
-    });
-    setBusy(false);
-    if (res.ok) {
-      toast.success(
-        `Updated — ${res.added} added, ${res.removed} removed. Prorated charges/credits apply immediately.`,
-      );
+    const res = await run(
+      () =>
+        changeSubscriptionItemsAction({
+          tenantId,
+          subscriptionId: sub.id,
+          addComponentIds: [...toAdd],
+          removeItemIds: [...toRemove],
+        }),
+      {
+        key: "addons",
+        success: (r) => `Updated — ${r.added} added, ${r.removed} removed. Prorated charges or credits apply immediately.`,
+      },
+    );
+    if (res?.ok) {
       setOpen(false);
       setToAdd(new Set());
       setToRemove(new Set());
-      window.location.reload();
-    } else toast.error(res.error);
+    }
   }
 
   return (
@@ -305,79 +316,50 @@ function ManageAddons({
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         Manage add-ons
       </Button>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
-          <div className="w-full max-w-md rounded-xl border bg-card p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="mb-1 text-lg font-semibold text-heading">Manage add-ons</h2>
-            <p className="mb-4 text-xs text-muted-foreground">
-              Recurring changes are prorated immediately; one-time add-ons are
-              charged right away.
-            </p>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Manage add-ons — {sub.productName}</DialogTitle>
+            <DialogDescription>Recurring changes are prorated immediately; one-time add-ons are charged right away.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
             {options.length > 0 && (
-              <div className="mb-4">
-                <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">Available</div>
-                <div className="flex flex-col gap-2">
-                  {options.map((o) => (
-                    <label key={o.id} className="flex items-center justify-between gap-2 text-sm">
-                      <span className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={toAdd.has(o.id)}
-                          onChange={(e) => {
-                            const next = new Set(toAdd);
-                            if (e.target.checked) next.add(o.id);
-                            else next.delete(o.id);
-                            setToAdd(next);
-                          }}
-                        />
-                        {o.name}
-                      </span>
-                      <span className="tabular-nums text-heading">
-                        {formatCents(o.amountCents)}
-                        {o.kind === "one_time" ? " once" : intervalLabel(o)}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Available</div>
+                {options.map((o) => (
+                  <label key={o.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                    <Checkbox checked={toAdd.has(o.id)} onCheckedChange={(v) => toggle(toAdd, setToAdd, o.id, Boolean(v))} />
+                    <span className="flex-1 text-heading">{o.name}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {formatCents(o.amountCents)}<span className="text-xs">{cadence(o)}</span>
+                    </span>
+                  </label>
+                ))}
               </div>
             )}
             {removable.length > 0 && (
-              <div className="mb-4">
-                <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">Current recurring items</div>
-                <div className="flex flex-col gap-2">
-                  {removable.map((i) => (
-                    <label key={i.id} className="flex items-center justify-between gap-2 text-sm">
-                      <span className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={toRemove.has(i.id)}
-                          onChange={(e) => {
-                            const next = new Set(toRemove);
-                            if (e.target.checked) next.add(i.id);
-                            else next.delete(i.id);
-                            setToRemove(next);
-                          }}
-                        />
-                        Remove {i.name}
-                      </span>
-                      <span className="tabular-nums text-muted-foreground">
-                        {formatCents(i.amountCents)}
-                        {intervalLabel(i)}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Current recurring items</div>
+                {removable.map((i) => (
+                  <label key={i.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                    <Checkbox checked={toRemove.has(i.id)} onCheckedChange={(v) => toggle(toRemove, setToRemove, i.id, Boolean(v))} />
+                    <span className="flex-1 text-heading">Remove {i.name}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {formatCents(i.amountCents)}<span className="text-xs">{cadence(i)}</span>
+                    </span>
+                  </label>
+                ))}
               </div>
             )}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Close</Button>
-              <Button size="sm" onClick={apply} disabled={busy || (toAdd.size === 0 && toRemove.size === 0)}>
-                {busy ? "Applying…" : "Apply changes"}
-              </Button>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Close</Button>
+            <Button size="sm" onClick={apply} disabled={pending || (toAdd.size === 0 && toRemove.size === 0)}>
+              {pending ? "Applying…" : "Apply changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

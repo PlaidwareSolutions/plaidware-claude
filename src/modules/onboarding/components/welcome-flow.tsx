@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements } from "@stripe/react-stripe-js";
 import { toast } from "sonner";
@@ -11,6 +12,8 @@ import { completeSetupPasswordAction, finalizeSetupAction, startSetupCheckoutAct
 import { PaymentForm } from "@/modules/billing/components/checkout-flow";
 import { authClient, useSession } from "@/lib/auth-client";
 import { formatCents } from "@/lib/money";
+import { AUTH, TENANT } from "@/lib/routes";
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,6 +35,7 @@ export function WelcomeFlow({
   proposal: SetupProposal;
   publishableKey: string;
 }) {
+  const router = useRouter();
   const { data: session, isPending } = useSession();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -119,33 +123,33 @@ export function WelcomeFlow({
 
   if (proposal.status === "accepted" || phase === "done") {
     return (
-      <div className="flex w-full max-w-md flex-col gap-3 text-center">
-        <CheckCircle2 className="mx-auto size-10 text-success" />
-        <h1 className="text-xl font-semibold text-heading">
-          {phase === "done" ? "You're all set!" : "Setup already completed"}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {phase === "done"
+      <EmptyState
+        tone="success"
+        icon={CheckCircle2}
+        title={phase === "done" ? "You're all set!" : "Setup already completed"}
+        description={
+          phase === "done"
             ? `${productNames} ${proposal.products.length > 1 ? "are" : "is"} active for ${proposal.tenantName}.`
-            : "Your services are active. Sign in anytime to see billing and status."}
-        </p>
-        <Button asChild>
-          <Link href={phase === "done" ? "/dashboard" : "/login"}>
-            {phase === "done" ? "Open your dashboard" : "Sign in"}
-          </Link>
-        </Button>
-      </div>
+            : "Your services are active. Sign in anytime to see billing and status."
+        }
+        action={
+          <Button asChild>
+            <Link href={phase === "done" ? TENANT.dashboard : AUTH.login}>
+              {phase === "done" ? "Open your dashboard" : "Sign in"}
+            </Link>
+          </Button>
+        }
+        className="w-full max-w-md border-0 px-0 py-2"
+      />
     );
   }
   if (proposal.status !== "pending") {
     return (
-      <div className="flex w-full max-w-md flex-col gap-3 text-center">
-        <h1 className="text-xl font-semibold text-heading">Link expired</h1>
-        <p className="text-sm text-muted-foreground">
-          This setup link is no longer active. Ask your Plaidware contact for a
-          fresh one — your configuration is saved.
-        </p>
-      </div>
+      <EmptyState
+        title="Link expired"
+        description="This setup link is no longer active. Ask your Plaidware contact for a fresh one — your configuration is saved."
+        className="w-full max-w-md border-0 px-0 py-2"
+      />
     );
   }
 
@@ -336,7 +340,7 @@ export function WelcomeFlow({
               variant="outline"
               onClick={async () => {
                 await authClient.signOut();
-                window.location.reload();
+                router.refresh();
               }}
             >
               Switch account

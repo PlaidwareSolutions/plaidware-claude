@@ -9,9 +9,12 @@ import type { ProductDto } from "@/modules/catalog/queries";
 import { createCheckoutAction } from "../actions";
 import { formatCents } from "@/lib/money";
 import { intervalLabel, isRecurringKind, itemMrrCents } from "../mappers";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const label = (c: { kind: string; interval?: string | null; intervalCount?: number | null }) =>
   c.kind === "one_time" ? "one-time" : intervalLabel(c);
@@ -39,6 +42,7 @@ export function CheckoutFlow({
     subscriptionId: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
   const stripePromise = useMemo(
     () => (publishableKey ? loadStripe(publishableKey) : null),
     [publishableKey],
@@ -89,19 +93,14 @@ export function CheckoutFlow({
         subscriptionId: res.subscriptionId,
       });
     } else {
-      window.location.href = `/checkout/complete?subscription=${res.subscriptionId}`;
+      router.push(`/checkout/complete?subscription=${res.subscriptionId}`);
     }
   }
 
   return (
     <div className="mx-auto grid w-full max-w-4xl gap-6 lg:grid-cols-[1fr_340px]">
       <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-heading">
-            Subscribe to {product.name}
-          </h1>
-          <p className="text-sm text-muted-foreground">{product.tagline}</p>
-        </div>
+        <PageHeader title={`Subscribe to ${product.name}`} description={product.tagline} />
 
         {!payment ? (
           <Card>
@@ -220,15 +219,13 @@ export function CheckoutFlow({
             <>
               {promosEnabled && (
                 <div className="mt-1 grid gap-1.5">
-                  <label htmlFor="promo" className="text-xs text-muted-foreground">
-                    Promo code (optional)
-                  </label>
-                  <input
+                  <Label htmlFor="promo" className="text-xs text-muted-foreground">Promo code (optional)</Label>
+                  <Input
                     id="promo"
                     value={promoCode}
                     onChange={(e) => setPromoCode(e.target.value)}
                     placeholder="CODE"
-                    className="h-9 rounded-md border bg-transparent px-3 font-mono text-sm uppercase placeholder:normal-case focus-visible:outline-2 focus-visible:outline-ring"
+                    className="font-mono uppercase placeholder:normal-case"
                   />
                 </div>
               )}

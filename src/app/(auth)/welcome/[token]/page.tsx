@@ -1,5 +1,6 @@
 import { getSetupByToken } from "@/modules/onboarding/service";
 import { WelcomeFlow } from "@/modules/onboarding/components/welcome-flow";
+import { EmptyState } from "@/components/empty-state";
 
 export const metadata = { title: "Complete your setup" };
 export const dynamic = "force-dynamic";
@@ -14,13 +15,11 @@ export default async function WelcomePage({
 
   if (!proposal) {
     return (
-      <div className="flex flex-col gap-3 text-center">
-        <h1 className="text-xl font-semibold text-heading">Link not found</h1>
-        <p className="text-sm text-muted-foreground">
-          This setup link isn&apos;t valid. Ask your Plaidware contact to send a
-          fresh one.
-        </p>
-      </div>
+      <EmptyState
+        title="Link not found"
+        description="This setup link isn't valid. Ask your Plaidware contact to send a fresh one."
+        className="border-0 px-0 py-2"
+      />
     );
   }
 

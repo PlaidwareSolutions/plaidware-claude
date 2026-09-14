@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/policy";
+import { getSession, tenantStatusAllows } from "@/policy";
+import { AUTH } from "@/lib/routes";
 import { getProductBySlug } from "@/modules/catalog/queries";
 import { getTenantOverrides } from "@/modules/billing/service";
 import { getUserTenants } from "@/modules/tenancy/queries";
@@ -16,7 +17,7 @@ export default async function CheckoutPage({
   const session = await getSession();
   const { product: slug } = await searchParams;
   if (!slug) redirect("/products");
-  if (!session) redirect(`/login?redirect=${encodeURIComponent(`/checkout?product=${slug}`)}`);
+  if (!session) redirect(`${AUTH.login}?redirect=${encodeURIComponent(`/checkout?product=${slug}`)}`);
 
   const product = await getProductBySlug(slug);
   if (!product) redirect("/products");
@@ -25,6 +26,7 @@ export default async function CheckoutPage({
   const tenants = await getUserTenants(session.user.id);
   const active =
     tenants.find((t) => t.id === session.session.activeOrganizationId) ?? tenants[0];
+  if (active && !tenantStatusAllows(active.status, "write")) redirect("/billing"); // suspended: pay, don't buy
   if (active) {
     const overrides = await getTenantOverrides(active.id, product.components.map((c) => c.id));
     product.components = product.components.map((c) => ({

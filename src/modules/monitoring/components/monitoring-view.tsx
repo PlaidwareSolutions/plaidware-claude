@@ -1,9 +1,10 @@
 "use client";
 
 import type { MonitoringCardData } from "../queries";
+import { PageHeader } from "@/components/page-header";
 import { MonitoringCards } from "./monitoring-cards";
 
-/** Client-facing Monitoring page body (the PageHeader restyle lands in Phase 3). */
+/** Client-facing Monitoring page body. */
 export function MonitoringView({
   tenantId,
   canWrite,
@@ -17,12 +18,7 @@ export function MonitoringView({
 }) {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-heading">Monitoring</h1>
-        <p className="text-sm text-muted-foreground">
-          Uptime, business metrics, and the reporting integration for each product.
-        </p>
-      </div>
+      <PageHeader title="Monitoring" description="Uptime, business metrics, and the reporting integration for each product." />
       <MonitoringCards tenantId={tenantId} canWrite={canWrite} ingestUrl={ingestUrl} cards={cards} />
     </div>
   );
