@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../../db";
+import { organization } from "../auth/schema";
 import { subscriptions } from "../billing/schema";
 import { subscriptionProvisioning } from "../provisioning/schema";
 import { products } from "../catalog/schema";
@@ -162,6 +163,8 @@ export type Incident = {
   subscriptionId: string;
   healthCheckId: string;
   tenantId: string;
+  tenantName: string;
+  productId: string;
   productName: string;
   status: string;
   source: string;
@@ -197,10 +200,13 @@ export async function getActiveIncidents(): Promise<Incident[]> {
     .select({
       id: subscriptions.id,
       tenantId: subscriptions.tenantId,
+      tenantName: organization.name,
+      productId: subscriptions.productId,
       productName: products.name,
     })
     .from(subscriptions)
     .innerJoin(products, eq(subscriptions.productId, products.id))
+    .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
     .where(inArray(subscriptions.id, open.map((o) => o.subscriptionId)));
 
   return open.map((o) => {
@@ -209,6 +215,8 @@ export async function getActiveIncidents(): Promise<Incident[]> {
       subscriptionId: o.subscriptionId,
       healthCheckId: o.id,
       tenantId: s?.tenantId ?? "",
+      tenantName: s?.tenantName ?? "Unknown",
+      productId: s?.productId ?? "",
       productName: s?.productName ?? "Unknown",
       status: o.status,
       source: o.source,
@@ -250,6 +258,8 @@ export async function pruneTimeSeries(now = new Date()): Promise<Record<string, 
 export type QuietReporter = {
   subscriptionId: string;
   tenantId: string;
+  tenantName: string;
+  productId: string;
   productName: string;
   lastSeen: string | null;
   thresholdMinutes: number;
@@ -260,11 +270,14 @@ export async function findQuietReporters(now = new Date()): Promise<QuietReporte
     .select({
       id: subscriptions.id,
       tenantId: subscriptions.tenantId,
+      tenantName: organization.name,
+      productId: subscriptions.productId,
       productName: products.name,
       quietAfter: products.reporterQuietAfterMinutes,
     })
     .from(subscriptions)
     .innerJoin(products, eq(subscriptions.productId, products.id))
+    .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
     .where(inArray(subscriptions.status, ["active", "past_due"]));
   if (live.length === 0) return [];
 
@@ -287,6 +300,8 @@ export async function findQuietReporters(now = new Date()): Promise<QuietReporte
         ? {
             subscriptionId: l.id,
             tenantId: l.tenantId,
+            tenantName: l.tenantName,
+            productId: l.productId,
             productName: l.productName,
             lastSeen: last?.toISOString() ?? null,
             thresholdMinutes: threshold,
