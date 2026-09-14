@@ -172,7 +172,12 @@ export type Incident = {
   since: string;
 };
 
-export async function getActiveIncidents(): Promise<Incident[]> {
+export async function getActiveIncidents(opts: { tenantId?: string } = {}): Promise<Incident[]> {
+  const all = await loadActiveIncidents();
+  return opts.tenantId ? all.filter((i) => i.tenantId === opts.tenantId) : all;
+}
+
+async function loadActiveIncidents(): Promise<Incident[]> {
   const latest = await db
     .selectDistinctOn([healthChecks.subscriptionId], {
       id: healthChecks.id,
@@ -265,7 +270,10 @@ export type QuietReporter = {
   thresholdMinutes: number;
 };
 
-export async function findQuietReporters(now = new Date()): Promise<QuietReporter[]> {
+export async function findQuietReporters(
+  now = new Date(),
+  opts: { tenantId?: string } = {},
+): Promise<QuietReporter[]> {
   const live = await db
     .select({
       id: subscriptions.id,
@@ -278,7 +286,12 @@ export async function findQuietReporters(now = new Date()): Promise<QuietReporte
     .from(subscriptions)
     .innerJoin(products, eq(subscriptions.productId, products.id))
     .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
-    .where(inArray(subscriptions.status, ["active", "past_due"]));
+    .where(
+      and(
+        inArray(subscriptions.status, ["active", "past_due"]),
+        opts.tenantId ? eq(subscriptions.tenantId, opts.tenantId) : undefined,
+      ),
+    );
   if (live.length === 0) return [];
 
   const recent = await db

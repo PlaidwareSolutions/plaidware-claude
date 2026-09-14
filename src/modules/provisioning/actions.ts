@@ -7,6 +7,7 @@ import { z } from "zod";
 import { requireMembership, requireOps } from "../../policy";
 import { getSubscriptionForTenant } from "../billing/queries";
 import {
+  configureVerification,
   deleteCredential,
   revealCredentialSecret,
   runDnsVerification,
@@ -65,6 +66,21 @@ export async function setVerifyConfigAction(
       { verifyToken: p.verifyToken, expectedCname: p.expectedCname, expectedAIps: p.expectedAIps },
       session.user.id,
     );
+    revalidateClientViews();
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Mint the TXT token + default routing targets for a legacy "unconfigured" row. */
+export async function configureVerificationAction(
+  subscriptionId: string,
+): Promise<ActionResult> {
+  try {
+    const session = await requireOps();
+    z.string().uuid().parse(subscriptionId);
+    await configureVerification(subscriptionId, session.user.id);
     revalidateClientViews();
     return { ok: true };
   } catch (e) {

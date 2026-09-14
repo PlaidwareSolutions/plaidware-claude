@@ -155,27 +155,32 @@ export async function createClientSetup(opts: {
   const link = `${env.APP_BASE_URL}/welcome/${raw}`;
 
   if (opts.sendEmailToClient) {
-    const proposal = await assembleProposal(invite.id);
-    const names = proposal?.products.map((p) => p.productName).join(" + ");
-    void sendEmail({
-      to: email,
-      subject: "Your Plaidware setup is ready",
-      html: emailShell(
-        `Welcome, ${opts.clientName.trim()}`,
-        `<p>Your ${names ? `${names} ` : ""}services are configured and ready to activate. One step: open the link below, choose a password, and complete payment.</p>` +
-          (proposal
-            ? `<p><strong>Due today: ${formatCents(proposal.dueTodayCents)}</strong>${proposal.monthlyCents ? ` · then ${formatCents(proposal.monthlyCents)}/mo` : ""}${proposal.yearlyCents ? ` + ${formatCents(proposal.yearlyCents)}/yr` : ""}</p>` +
-              (proposal.products.length > 1
-                ? `<p style="color:#8b93b2;font-size:13px">Your card will be charged separately for each service — ${proposal.products.length} charges totaling ${formatCents(proposal.dueTodayCents)} today.</p>`
-                : "")
-            : "") +
-          emailButton(link, "Complete your setup") +
-          `<p style="color:#8b93b2;font-size:13px">This link is personal to you and expires in ${INVITE_DAYS} days.</p>`,
-      ),
-    });
+    await sendSetupLinkEmail(invite.id, link);
   }
 
   return { link, inviteId: invite.id, tenantId };
+}
+
+/** The "your setup is ready" email — used at creation and when ops resends a fresh link. */
+export async function sendSetupLinkEmail(inviteId: string, link: string): Promise<string | null> {
+  const proposal = await assembleProposal(inviteId);
+  if (!proposal) return null;
+  const names = proposal.products.map((p) => p.productName).join(" + ");
+  void sendEmail({
+    to: proposal.clientEmail,
+    subject: "Your Plaidware setup is ready",
+    html: emailShell(
+      `Welcome, ${proposal.clientName.trim()}`,
+      `<p>Your ${names ? `${names} ` : ""}services are configured and ready to activate. One step: open the link below, ${proposal.needsPassword ? "choose a password, " : "sign in, "}and complete payment.</p>` +
+        `<p><strong>Due today: ${formatCents(proposal.dueTodayCents)}</strong>${proposal.monthlyCents ? ` · then ${formatCents(proposal.monthlyCents)}/mo` : ""}${proposal.yearlyCents ? ` + ${formatCents(proposal.yearlyCents)}/yr` : ""}</p>` +
+        (proposal.products.length > 1
+          ? `<p style="color:#8b93b2;font-size:13px">Your card will be charged separately for each service — ${proposal.products.length} charges totaling ${formatCents(proposal.dueTodayCents)} today.</p>`
+          : "") +
+        emailButton(link, "Complete your setup") +
+        `<p style="color:#8b93b2;font-size:13px">This link is personal to you and expires in ${INVITE_DAYS} days.</p>`,
+    ),
+  });
+  return proposal.clientEmail;
 }
 
 // ---------------------------------------------------------------------------
@@ -549,11 +554,21 @@ export async function finalizePendingInvitesForCustomer(stripeCustomerId: string
   }
 }
 
-export async function revokeSetup(inviteId: string): Promise<void> {
-  await db
+export async function revokeSetup(inviteId: string, actorUserId?: string): Promise<void> {
+  const [row] = await db
     .update(onboardingInvites)
     .set({ status: "revoked" })
-    .where(eq(onboardingInvites.id, inviteId));
+    .where(and(eq(onboardingInvites.id, inviteId), inArray(onboardingInvites.status, ["pending", "expired"])))
+    .returning({ tenantId: onboardingInvites.tenantId });
+  if (!row) throw new Error("Only a pending or expired setup link can be revoked");
+  // Prices held for this link die with it (Phase 2: invite-held pricing).
+  await db.delete(tenantPriceOverrides).where(eq(tenantPriceOverrides.sourceInviteId, inviteId));
+  await writeAudit({
+    tenantId: row.tenantId,
+    actorUserId: actorUserId ?? null,
+    kind: "client_setup_revoked",
+    payload: { inviteId },
+  });
 }
 
 /**
@@ -565,7 +580,8 @@ export async function revokeSetup(inviteId: string): Promise<void> {
 export async function regenerateSetupLink(
   inviteId: string,
   actorUserId: string,
-): Promise<{ link: string }> {
+  opts: { emailClient?: boolean } = {},
+): Promise<{ link: string; sentTo: string | null }> {
   const invite = await db.query.onboardingInvites.findFirst({
     where: eq(onboardingInvites.id, inviteId),
   });
@@ -586,8 +602,10 @@ export async function regenerateSetupLink(
     tenantId: invite.tenantId,
     actorUserId,
     kind: "client_setup_created",
-    payload: { regenerated: true, inviteId },
+    payload: { regenerated: true, inviteId, emailed: Boolean(opts.emailClient) },
   });
 
-  return { link: `${env.APP_BASE_URL}/welcome/${raw}` };
+  const link = `${env.APP_BASE_URL}/welcome/${raw}`;
+  const sentTo = opts.emailClient ? await sendSetupLinkEmail(inviteId, link) : null;
+  return { link, sentTo };
 }

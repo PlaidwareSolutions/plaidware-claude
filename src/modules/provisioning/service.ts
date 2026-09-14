@@ -3,6 +3,9 @@ import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { encryptSecret, decryptSecret } from "../../lib/crypto";
 import { writeAudit } from "../audit/service";
+import { products } from "../catalog/schema";
+import { isMarketingSlug } from "../webhooks_out/logic";
+import { resolveDnsDefaults } from "./defaults";
 import { subscriptions } from "../billing/schema";
 import { provisioningCredentials, subscriptionProvisioning } from "./schema";
 import { verifyDomain, type DnsResolver, type VerifyResult } from "./dns-verifier";
@@ -40,6 +43,21 @@ async function subscriptionTenant(subscriptionId: string): Promise<string> {
   return sub.tenantId;
 }
 
+async function subscriptionProductSlug(subscriptionId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ slug: products.slug })
+    .from(subscriptions)
+    .innerJoin(products, eq(subscriptions.productId, products.id))
+    .where(eq(subscriptions.id, subscriptionId))
+    .limit(1);
+  return row?.slug ?? null;
+}
+
+/**
+ * Sets the live domain and resets the last verification. For Hub-hosted
+ * products a first domain also mints the verification token and fills the
+ * routing targets from defaults, so "unconfigured" can't happen by accident.
+ */
 export async function setDomain(
   subscriptionId: string,
   domainUrl: string | null,
@@ -58,6 +76,44 @@ export async function setDomain(
     kind: "domain_changed",
     payload: { before, after: domainUrl },
   });
+  if (domainUrl && !prov.verifyToken) {
+    const slug = await subscriptionProductSlug(subscriptionId);
+    if (slug && !isMarketingSlug(slug)) {
+      await configureVerification(subscriptionId, actorUserId, { auto: true });
+    }
+  }
+}
+
+/**
+ * One-click verification setup: mints a TXT token when there is none and
+ * fills empty CNAME / A targets from the defaults. Existing values are kept.
+ */
+export async function configureVerification(
+  subscriptionId: string,
+  actorUserId: string,
+  opts: { auto?: boolean } = {},
+): Promise<{ verifyToken: string; expectedCname: string | null; expectedAIps: string | null }> {
+  const prov = await getOrCreateProvisioning(subscriptionId);
+  const defaults = resolveDnsDefaults();
+  const next = {
+    verifyToken: prov.verifyToken ?? crypto.randomUUID(),
+    expectedCname: prov.expectedCname ?? defaults.expectedCname,
+    expectedAIps: prov.expectedAIps ?? defaults.expectedAIps,
+  };
+  await db.update(subscriptionProvisioning).set(next).where(eq(subscriptionProvisioning.id, prov.id));
+  await writeAudit({
+    tenantId: await subscriptionTenant(subscriptionId),
+    subscriptionId,
+    actorUserId,
+    kind: "dns_config_changed",
+    payload: {
+      hasToken: true,
+      expectedCname: next.expectedCname,
+      expectedAIps: next.expectedAIps,
+      auto: Boolean(opts.auto),
+    },
+  });
+  return next;
 }
 
 /**

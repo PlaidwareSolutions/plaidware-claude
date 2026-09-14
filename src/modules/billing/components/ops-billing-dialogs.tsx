@@ -40,7 +40,13 @@ export type InvoiceTarget = {
   amountDueCents: number;
   amountPaidCents: number;
 };
-export type HostingTarget = { id: string; productName: string };
+export type HostingTarget = {
+  id: string;
+  productName: string;
+  /** Current fee, so the dialog opens prefilled and "Remove fee" is explicit. */
+  monthlyHostingCents?: number | null;
+  hostingBillingStartMonth?: string | null;
+};
 
 type DialogProps<T> = { target: T | null; onOpenChange: (open: boolean) => void };
 
@@ -219,28 +225,44 @@ export function RecordPaymentDialog({ target, onOpenChange }: DialogProps<Invoic
 export function HostingFeeDialog({ target, onOpenChange }: DialogProps<HostingTarget>) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ amount: "", startMonth: new Date().toISOString().slice(0, 7) });
+  const hasFee = target?.monthlyHostingCents != null && target.monthlyHostingCents > 0;
+  const [form, setForm] = useState({
+    amount: hasFee ? (target!.monthlyHostingCents! / 100).toFixed(2) : "",
+    startMonth: target?.hostingBillingStartMonth ?? new Date().toISOString().slice(0, 7),
+  });
 
-  async function submit() {
+  async function save(cents: number) {
     if (!target) return;
     setBusy(true);
     try {
-      const cents = form.amount ? toCents(form.amount) : 0;
       const res = await setHostingFeeAction({
         subscriptionId: target.id,
         monthlyHostingCents: cents,
         startMonth: form.startMonth || null,
       });
       if (res.ok) {
-        toast.success(cents ? "Hosting fee configured" : "Hosting fee removed");
+        toast.success(cents ? `Hosting fee set — ${target.productName} bills it on the 1st` : "Hosting fee removed");
         onOpenChange(false);
         router.refresh();
       } else toast.error(res.error);
-    } catch {
-      toast.error("Enter a valid amount");
     } finally {
       setBusy(false);
     }
+  }
+
+  function submit() {
+    let cents: number;
+    try {
+      cents = toCents(form.amount);
+    } catch {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    if (cents <= 0) {
+      toast.error("Enter an amount, or use Remove fee");
+      return;
+    }
+    void save(cents);
   }
 
   return (
@@ -250,9 +272,15 @@ export function HostingFeeDialog({ target, onOpenChange }: DialogProps<HostingTa
           <DialogTitle>Hosting fee — {target?.productName}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
+          {hasFee && (
+            <p className="text-sm text-muted-foreground">
+              Currently <span className="font-medium text-heading">${(target!.monthlyHostingCents! / 100).toFixed(2)}/mo</span>
+              {target?.hostingBillingStartMonth ? ` since ${target.hostingBillingStartMonth}` : ""}.
+            </p>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label>Monthly fee (USD, 0 to remove)</Label>
+              <Label>Monthly fee (USD)</Label>
               <Input placeholder="79.00" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
             </div>
             <div className="grid gap-2">
@@ -266,9 +294,16 @@ export function HostingFeeDialog({ target, onOpenChange }: DialogProps<HostingTa
             link is emailed.
           </p>
         </div>
-        <DialogFooter>
-          <Button onClick={submit} disabled={busy}>
-            {busy ? "Saving…" : "Save"}
+        <DialogFooter className="sm:justify-between">
+          {hasFee ? (
+            <Button variant="ghost" className="text-destructive" onClick={() => void save(0)} disabled={busy}>
+              Remove fee
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button onClick={submit} disabled={busy || !form.amount}>
+            {busy ? "Saving…" : hasFee ? "Update fee" : "Set fee"}
           </Button>
         </DialogFooter>
       </DialogContent>

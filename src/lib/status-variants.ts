@@ -19,7 +19,8 @@ export type StatusKind =
   | "product"
   | "promo"
   | "role"
-  | "verification";
+  | "verification"
+  | "invite";
 
 type Entry = { variant: BadgeVariant; label?: string };
 
@@ -112,6 +113,12 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
   verification: {
     verified: { variant: "success" },
     pending: { variant: "warning" },
+  },
+  invite: {
+    pending: { variant: "outline" },
+    accepted: { variant: "success" },
+    expired: { variant: "warning" },
+    revoked: { variant: "outline" },
   },
 };
 

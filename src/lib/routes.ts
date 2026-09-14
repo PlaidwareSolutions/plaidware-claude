@@ -1,3 +1,5 @@
+export type ClientTab = "billing" | "provisioning" | "monitoring" | "people" | "activity";
+
 /**
  * Every internal path, in one place — used for <Link href> and for
  * revalidatePath alike, so a route move is a one-file change and a
@@ -7,6 +9,7 @@ export const OPS = {
   home: "/ops",
   clients: "/ops/clients",
   client: (id: string) => `/ops/clients/${id}`,
+  clientTab: (id: string, tab: ClientTab) => `/ops/clients/${id}/${tab}`,
   clientNew: "/ops/clients/new",
   billing: "/ops/billing",
   subscriptions: "/ops/billing/subscriptions",

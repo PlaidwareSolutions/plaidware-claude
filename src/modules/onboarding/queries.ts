@@ -1,6 +1,6 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
-import { user } from "../auth/schema";
+import { organization, user } from "../auth/schema";
 import { products } from "../catalog/schema";
 import { onboardingInvites } from "./schema";
 
@@ -54,4 +54,33 @@ export async function listTenantSetupInvites(tenantId: string): Promise<TenantSe
     createdAt: r.createdAt.toISOString(),
     isExpired: r.status === "pending" && r.expiresAt.getTime() < now,
   }));
+}
+
+export type OpenSetupInvite = TenantSetupInvite & { tenantId: string; tenantName: string };
+
+/** Every pending setup link on the platform (expired ones included) — the clients-list card. */
+export async function listOpenSetupInvites(): Promise<OpenSetupInvite[]> {
+  const rows = await db
+    .select({
+      id: onboardingInvites.id,
+      tenantId: onboardingInvites.tenantId,
+      tenantName: organization.name,
+    })
+    .from(onboardingInvites)
+    .innerJoin(organization, eq(onboardingInvites.tenantId, organization.id))
+    .where(eq(onboardingInvites.status, "pending"))
+    .orderBy(desc(onboardingInvites.createdAt))
+    .limit(50);
+  if (rows.length === 0) return [];
+  const byTenant = new Map<string, string>();
+  for (const r of rows) byTenant.set(r.tenantId, r.tenantName);
+  const perTenant = await Promise.all(
+    [...byTenant.keys()].map(async (tenantId) => ({
+      tenantId,
+      invites: (await listTenantSetupInvites(tenantId)).filter((i) => i.status === "pending"),
+    })),
+  );
+  return perTenant.flatMap(({ tenantId, invites }) =>
+    invites.map((i) => ({ ...i, tenantId, tenantName: byTenant.get(tenantId) ?? "" })),
+  );
 }

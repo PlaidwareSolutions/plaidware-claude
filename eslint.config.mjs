@@ -47,7 +47,7 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    files: ["src/lib/routes.ts", "src/lib/dates.ts", "src/app/robots.ts"],
+    files: ["src/lib/routes.ts", "src/lib/dates.ts", "src/app/robots.ts", "src/**/*.test.ts"],
     rules: {
       "no-restricted-syntax": "off",
       "no-restricted-properties": "off",

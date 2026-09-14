@@ -85,8 +85,9 @@ export async function finalizeSetupAction(
 
 export async function revokeSetupAction(inviteId: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    await requireOps();
-    await revokeSetup(inviteId);
+    const session = await requireOps();
+    z.string().uuid().parse(inviteId);
+    await revokeSetup(inviteId, session.user.id);
     revalidateClientViews();
     return { ok: true };
   } catch (e) {
@@ -94,15 +95,17 @@ export async function revokeSetupAction(inviteId: string): Promise<{ ok: boolean
   }
 }
 
+/** Fresh /welcome link on the same invite; optionally emailed to the client. */
 export async function regenerateSetupLinkAction(
   inviteId: string,
-): Promise<{ ok: true; link: string } | { ok: false; error: string }> {
+  opts: { emailClient?: boolean } = {},
+): Promise<{ ok: true; link: string; sentTo: string | null } | { ok: false; error: string }> {
   try {
     const session = await requireOps();
     z.string().uuid().parse(inviteId);
-    const { link } = await regenerateSetupLink(inviteId, session.user.id);
+    const r = await regenerateSetupLink(inviteId, session.user.id, opts);
     revalidateClientViews();
-    return { ok: true, link };
+    return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not regenerate link" };
   }

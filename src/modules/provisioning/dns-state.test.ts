@@ -28,3 +28,25 @@ describe("deriveDnsState", () => {
     expect(deriveDnsState({ ...base, managedByPartner: true })).toBe("provisioned");
   });
 });
+
+describe("buildDnsRecords", () => {
+  it("lists TXT first, then routing records", async () => {
+    const { buildDnsRecords } = await import("./dns-state");
+    const recs = buildDnsRecords({
+      host: "example.com",
+      verifyToken: "abc",
+      expectedCname: "edge.railway.app",
+      expectedAIps: "1.1.1.1, 2.2.2.2",
+    });
+    expect(recs.map((r) => `${r.type}:${r.value}`)).toEqual([
+      "TXT:plaidware-verify=abc",
+      "CNAME:edge.railway.app",
+      "A:1.1.1.1",
+      "A:2.2.2.2",
+    ]);
+  });
+  it("is empty when nothing is configured", async () => {
+    const { buildDnsRecords } = await import("./dns-state");
+    expect(buildDnsRecords({ host: "x", verifyToken: null, expectedCname: null, expectedAIps: null })).toEqual([]);
+  });
+});

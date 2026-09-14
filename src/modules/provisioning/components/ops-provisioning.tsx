@@ -1,18 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { Eye, Globe, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
-import type { ProvisioningView } from "../queries";
-import { formatDate, formatDateTime } from "@/lib/dates";
-import { OPS } from "@/lib/routes";
-import { useConfirm } from "@/components/confirm-dialog";
-import { Section } from "@/components/section";
-import { StatusBadge } from "@/components/status-badge";
-import { EmptyState } from "@/components/empty-state";
 import Link from "next/link";
+import { toast } from "sonner";
+import { Copy, Eye, Globe, KeyRound, Plus, RotateCcw, ShieldCheck, Trash2, Webhook } from "lucide-react";
+import type { ProvisioningView } from "../queries";
+import type { TenantDeliveryHealth } from "@/modules/webhooks_out/queries";
+import { requeueDeliveryAction } from "@/modules/webhooks_out/actions";
 import {
+  configureVerificationAction,
   deleteCredentialAction,
   revealCredentialAction,
   runDnsVerifyAction,
@@ -20,6 +16,15 @@ import {
   setVerifyConfigAction,
   upsertCredentialAction,
 } from "../actions";
+import { buildDnsRecords } from "../dns-state";
+import { hostFromUrl } from "../dns-verifier";
+import { formatDate, formatDateTime } from "@/lib/dates";
+import { OPS } from "@/lib/routes";
+import { useAction } from "@/lib/use-action";
+import { useConfirm } from "@/components/confirm-dialog";
+import { Section } from "@/components/section";
+import { StatusBadge } from "@/components/status-badge";
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -41,175 +46,173 @@ import {
 
 export type { ProvisioningView };
 
-export type TimelineView = {
-  id: string;
-  kind: string;
-  actorName: string | null;
-  createdAt: string;
-  payload: Record<string, unknown>;
-}[];
+type Cred = ProvisioningView["credentials"][number];
 
-const KIND_LABEL: Record<string, string> = {
-  domain_changed: "Domain changed",
-  dns_verified: "DNS verified",
-  dns_config_changed: "DNS config updated",
-  credential_added: "Credential added",
-  credential_updated: "Credential updated",
-  credential_deleted: "Credential deleted",
-  credential_revealed: "Credential revealed",
+const STATE_HINT: Record<ProvisioningView["state"], string> = {
+  no_domain: "Set the live domain to start.",
+  unconfigured: "Legacy row: nothing to verify against yet. Configure verification mints the TXT token and fills the routing targets.",
+  configured: "Records are ready to send to the client — run Verify DNS once they've added them.",
+  verified: "DNS proves ownership and routes to us.",
+  failing: "The last check failed — see the detail below and re-run after the client updates DNS.",
+  handshake_pending: "MHub hasn't returned a portal URL yet; the handshake retries automatically.",
+  provisioned: "MHub owns this domain — nothing to verify here.",
 };
 
 export function OpsProvisioning({
   tenantId,
   items,
-  timeline,
+  deliveries,
 }: {
   tenantId: string;
   items: ProvisioningView[];
-  timeline: TimelineView;
+  deliveries: TenantDeliveryHealth | null;
 }) {
-  const router = useRouter();
+  const { run, isPending } = useAction();
   const confirm = useConfirm();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [credFor, setCredFor] = useState<{ subscriptionId: string; cred?: ProvisioningView["credentials"][number] } | null>(null);
+  const [credFor, setCredFor] = useState<{ subscriptionId: string; cred?: Cred } | null>(null);
   const [credForm, setCredForm] = useState({ kind: "hosting", label: "", url: "", username: "", secret: "" });
   const [revealed, setRevealed] = useState<Record<string, string>>({});
 
-  async function saveDomain(item: ProvisioningView, value: string) {
-    const res = await setDomainAction({
-      tenantId,
-      subscriptionId: item.subscriptionId,
-      domainUrl: value || null,
-    });
-    if (res.ok) {
-      toast.success(value ? "Domain saved" : "Domain cleared");
-      router.refresh();
-    } else toast.error(res.error);
-  }
-
-  async function verify(item: ProvisioningView) {
-    setBusy(item.subscriptionId);
-    const res = await runDnsVerifyAction(item.subscriptionId);
-    setBusy(null);
-    if (res.ok) {
-      if (res.passed) toast.success(`DNS verified (${res.mode})`);
-      else toast.warning(res.detail);
-      router.refresh();
-    } else toast.error(res.error);
-  }
-
-  async function saveConfig(item: ProvisioningView, form: { token: string; cname: string; ips: string }) {
-    const res = await setVerifyConfigAction({
-      subscriptionId: item.subscriptionId,
-      verifyToken: form.token || null,
-      expectedCname: form.cname || null,
-      expectedAIps: form.ips || null,
-    });
-    if (res.ok) {
-      toast.success("Verification config saved");
-      router.refresh();
-    } else toast.error(res.error);
-  }
-
   async function saveCred() {
     if (!credFor) return;
-    const res = await upsertCredentialAction({
-      id: credFor.cred?.id,
-      subscriptionId: credFor.subscriptionId,
-      kind: credForm.kind as "registrar" | "dns" | "email" | "hosting" | "other",
-      label: credForm.label,
-      url: credForm.url || undefined,
-      username: credForm.username || undefined,
-      secret: credForm.secret || undefined,
-    });
-    if (res.ok) {
-      toast.success("Credential saved (encrypted at rest)");
-      setCredFor(null);
-      router.refresh();
-    } else toast.error(res.error);
+    const res = await run(
+      () =>
+        upsertCredentialAction({
+          id: credFor.cred?.id,
+          subscriptionId: credFor.subscriptionId,
+          kind: credForm.kind as "registrar" | "dns" | "email" | "hosting" | "other",
+          label: credForm.label,
+          url: credForm.url || undefined,
+          username: credForm.username || undefined,
+          secret: credForm.secret || undefined,
+        }),
+      { key: "cred", success: "Credential saved (encrypted at rest)" },
+    );
+    if (res?.ok) setCredFor(null);
   }
 
   async function reveal(credId: string) {
     const res = await revealCredentialAction(credId);
     if (res.ok) {
       setRevealed((r) => ({ ...r, [credId]: res.secret }));
-      toast.info("Reveal logged to the audit trail");
-      setTimeout(() => setRevealed((r) => {
-        const { [credId]: _drop, ...rest } = r;
-        return rest;
-      }), 30000);
+      toast.info("Reveal logged to the audit trail — hides in 30s");
+      setTimeout(
+        () =>
+          setRevealed((r) => {
+            const { [credId]: _drop, ...rest } = r;
+            return rest;
+          }),
+        30_000,
+      );
     } else toast.error(res.error);
   }
 
-  return (
-    <Section title="Provisioning" icon={Globe} count={items.length}>
-      {items.length === 0 && (
-        <EmptyState
-          icon={Globe}
-          title="Nothing to provision yet"
-          description="Domains, DNS verification, and stored credentials appear here per live subscription."
-        />
-      )}
-      {items.map((item) => (
-        <ProvisioningCard
-          key={item.subscriptionId}
-          item={item}
-          busy={busy === item.subscriptionId}
-          revealed={revealed}
-          onSaveDomain={saveDomain}
-          onVerify={verify}
-          onSaveConfig={saveConfig}
-          onAddCred={() => {
-            setCredFor({ subscriptionId: item.subscriptionId });
-            setCredForm({ kind: "hosting", label: "", url: "", username: "", secret: "" });
-          }}
-          onEditCred={(cred) => {
-            setCredFor({ subscriptionId: item.subscriptionId, cred });
-            setCredForm({ kind: cred.kind, label: cred.label, url: cred.url ?? "", username: cred.username ?? "", secret: "" });
-          }}
-          onDeleteCred={async (cred) => {
-            const ok = await confirm({
-              title: `Delete credential "${cred.label}"?`,
-              description: "The stored secret is erased. This cannot be undone.",
-              confirmLabel: "Delete",
-              destructive: true,
-            });
-            if (!ok) return;
-            const res = await deleteCredentialAction(cred.id);
-            if (res.ok) { toast.success("Credential deleted"); router.refresh(); }
-            else toast.error(res.error);
-          }}
-          onReveal={reveal}
-        />
-      ))}
+  const partnerItems = items.filter((i) => i.managedByPartner);
 
-      {timeline.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Timeline</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {timeline.slice(0, 20).map((t) => (
-              <div key={t.id} className="flex items-baseline justify-between gap-3 text-sm">
-                <div>
-                  <span className="text-heading">{KIND_LABEL[t.kind] ?? t.kind}</span>
-                  {t.kind === "domain_changed" && (
-                    <span className="text-muted-foreground"> → {String(t.payload.after ?? "cleared")}</span>
-                  )}
-                  {t.kind === "dns_verified" && (
-                    <span className={t.payload.ok ? "text-success" : "text-warning"}>
-                      {" "}{t.payload.ok ? "passed" : "failed"} ({String(t.payload.mode)})
-                    </span>
-                  )}
-                  {t.actorName && <span className="text-muted-foreground"> · {t.actorName}</span>}
-                </div>
-                <span className="whitespace-nowrap text-xs text-muted-foreground">
-                  {formatDateTime(t.createdAt)}
-                </span>
-              </div>
+  return (
+    <div className="flex flex-col gap-8">
+      <Section title="Domains & DNS" icon={Globe} count={items.length}>
+        {items.length === 0 ? (
+          <EmptyState icon={Globe} title="Nothing to provision yet" description="Domains, DNS verification, and stored credentials appear here per live subscription." />
+        ) : (
+          <div className="flex flex-col gap-4">
+            {items.map((item) => (
+              <ProvisioningCard
+                key={item.subscriptionId}
+                tenantId={tenantId}
+                item={item}
+                revealed={revealed}
+                pending={(k) => isPending(`${k}:${item.subscriptionId}`)}
+                onSaveDomain={(value) =>
+                  void run(() => setDomainAction({ tenantId, subscriptionId: item.subscriptionId, domainUrl: value || null }), {
+                    key: `domain:${item.subscriptionId}`,
+                    success: value ? "Domain saved — verification records are ready below" : "Domain cleared",
+                  })
+                }
+                onConfigure={() =>
+                  void run(() => configureVerificationAction(item.subscriptionId), {
+                    key: `configure:${item.subscriptionId}`,
+                    success: "Verification configured — send the client the records below",
+                  })
+                }
+                onVerify={async () => {
+                  const res = await run(() => runDnsVerifyAction(item.subscriptionId), {
+                    key: `verify:${item.subscriptionId}`,
+                    success: (r) => (r.passed ? `DNS verified (${r.mode})` : `Not verified yet — ${r.detail}`),
+                  });
+                  void res;
+                }}
+                onSaveConfig={(form) =>
+                  void run(
+                    () =>
+                      setVerifyConfigAction({
+                        subscriptionId: item.subscriptionId,
+                        verifyToken: form.token || null,
+                        expectedCname: form.cname || null,
+                        expectedAIps: form.ips || null,
+                      }),
+                    { key: `config:${item.subscriptionId}`, success: "Verification config saved" },
+                  )
+                }
+                onAddCred={() => {
+                  setCredFor({ subscriptionId: item.subscriptionId });
+                  setCredForm({ kind: "hosting", label: "", url: "", username: "", secret: "" });
+                }}
+                onEditCred={(cred) => {
+                  setCredFor({ subscriptionId: item.subscriptionId, cred });
+                  setCredForm({ kind: cred.kind, label: cred.label, url: cred.url ?? "", username: cred.username ?? "", secret: "" });
+                }}
+                onDeleteCred={async (cred) => {
+                  const ok = await confirm({
+                    title: `Delete credential "${cred.label}"?`,
+                    description: "The stored secret is erased. This cannot be undone.",
+                    confirmLabel: "Delete",
+                    destructive: true,
+                  });
+                  if (!ok) return;
+                  void run(() => deleteCredentialAction(cred.id), { key: `delcred:${cred.id}`, success: "Credential deleted" });
+                }}
+                onReveal={reveal}
+              />
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        )}
+      </Section>
+
+      {partnerItems.length > 0 && deliveries && (
+        <Section
+          title="MHub handshake"
+          icon={Webhook}
+          count={deliveries.total}
+          description={deliveries.dead ? `${deliveries.dead} dead-lettered` : deliveries.pending ? `${deliveries.pending} pending` : "all delivered"}
+          actions={<Link href={OPS.clientTab(tenantId, "activity")} className="text-sm text-primary hover:underline">All deliveries →</Link>}
+        >
+          {deliveries.recent.length === 0 ? (
+            <EmptyState icon={Webhook} title="No MHub deliveries yet" description="The provisioning handshake is queued when a marketing subscription activates." />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {deliveries.recent.slice(0, 5).map((d) => (
+                <div key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-4 py-2 text-sm">
+                  <StatusBadge kind="webhook" status={d.status} />
+                  <span className="font-medium text-heading">{d.event}</span>
+                  <span className="text-xs text-muted-foreground">attempt {d.attemptCount} · {formatDateTime(d.createdAt)}</span>
+                  {d.lastError && <span className="text-xs text-destructive">{d.lastError}</span>}
+                  {(d.status === "dead" || d.status === "disabled") && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-auto gap-1"
+                      disabled={isPending(`requeue:${d.id}`)}
+                      onClick={() => void run(() => requeueDeliveryAction(d.id), { key: `requeue:${d.id}`, success: "Requeued — the worker retries within a minute" })}
+                    >
+                      <RotateCcw className="size-3" /> Requeue
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
       )}
 
       <Dialog open={!!credFor} onOpenChange={(o) => !o && setCredFor(null)}>
@@ -252,111 +255,169 @@ export function OpsProvisioning({
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Secrets are AES-256-GCM encrypted at rest; every reveal is logged
-              to the audit trail with your name.
+              Secrets are AES-256-GCM encrypted at rest; every reveal is logged to the audit trail with your name.
             </p>
           </div>
           <DialogFooter>
-            <Button onClick={saveCred} disabled={!credForm.label}>Save</Button>
+            <Button onClick={saveCred} disabled={!credForm.label || isPending("cred")}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Section>
+    </div>
   );
 }
 
 function ProvisioningCard({
-  item, busy, revealed,
-  onSaveDomain, onVerify, onSaveConfig, onAddCred, onEditCred, onDeleteCred, onReveal,
+  item,
+  revealed,
+  pending,
+  onSaveDomain,
+  onConfigure,
+  onVerify,
+  onSaveConfig,
+  onAddCred,
+  onEditCred,
+  onDeleteCred,
+  onReveal,
 }: {
+  tenantId: string;
   item: ProvisioningView;
-  busy: boolean;
   revealed: Record<string, string>;
-  onSaveDomain: (item: ProvisioningView, value: string) => void;
-  onVerify: (item: ProvisioningView) => void;
-  onSaveConfig: (item: ProvisioningView, form: { token: string; cname: string; ips: string }) => void;
+  pending: (key: string) => boolean;
+  onSaveDomain: (value: string) => void;
+  onConfigure: () => void;
+  onVerify: () => void;
+  onSaveConfig: (form: { token: string; cname: string; ips: string }) => void;
   onAddCred: () => void;
-  onEditCred: (cred: ProvisioningView["credentials"][number]) => void;
-  onDeleteCred: (cred: ProvisioningView["credentials"][number]) => void;
+  onEditCred: (cred: Cred) => void;
+  onDeleteCred: (cred: Cred) => void;
   onReveal: (credId: string) => void;
 }) {
   const [domain, setDomain] = useState(item.domainUrl ?? "");
-  const [showConfig, setShowConfig] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [config, setConfig] = useState({
     token: item.verifyToken ?? "",
     cname: item.expectedCname ?? "",
     ips: item.expectedAIps ?? "",
   });
+  const records = item.domainUrl
+    ? buildDnsRecords({
+        host: hostFromUrl(item.domainUrl),
+        verifyToken: item.verifyToken,
+        expectedCname: item.expectedCname,
+        expectedAIps: item.expectedAIps,
+      })
+    : [];
 
   return (
-    <Card>
+    <Card className="gap-4 py-5">
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle className="flex items-center gap-2 text-base">
           <Globe className="size-4 text-primary" />
           <Link href={OPS.product(item.productId)} className="hover:text-primary">{item.productName}</Link>
+          <StatusBadge kind="dns" status={item.state} label={item.state === "provisioned" ? "provisioned by MHub" : undefined} />
         </CardTitle>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <StatusBadge
-            kind="dns"
-            status={item.state}
-            label={item.state === "provisioned" ? "provisioned by MHub" : undefined}
-          />
-          {!item.managedByPartner && item.dnsLastVerifiedAt && (
-            <span>checked {formatDate(item.dnsLastVerifiedAt)}</span>
-          )}
-        </div>
+        {!item.managedByPartner && item.dnsLastVerifiedAt && (
+          <span className="text-xs text-muted-foreground">last checked {formatDate(item.dnsLastVerifiedAt)}</span>
+        )}
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {item.managedByPartner ? (
-          <p className="text-sm text-muted-foreground">
-            {item.domainUrl ? (
-              <>
-                Portal:{" "}
-                <a href={item.domainUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                  {item.domainUrl}
-                </a>
-              </>
-            ) : (
-              "Waiting for the MHub provisioning handshake — retries run automatically (see System → Webhooks)."
-            )}
-          </p>
-        ) : (
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="grid min-w-64 flex-1 gap-2">
-            <Label>Live domain</Label>
-            <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="https://customer-site.com" />
-          </div>
-          <Button variant="outline" onClick={() => onSaveDomain(item, domain.trim())}>Save</Button>
-          <Button onClick={() => onVerify(item)} disabled={busy || !item.domainUrl} className="gap-1">
-            <ShieldCheck className="size-4" /> {busy ? "Checking…" : "Verify DNS"}
-          </Button>
-          <Button variant="ghost" onClick={() => setShowConfig(!showConfig)}>
-            {showConfig ? "Hide config" : "Verify config"}
-          </Button>
-        </div>
-        )}
-        {!item.managedByPartner && item.dnsLastResolved && (
-          <p className="text-xs text-muted-foreground">Last resolved: {item.dnsLastResolved}</p>
-        )}
+        <p className="text-sm text-muted-foreground">{STATE_HINT[item.state]}</p>
 
-        {!item.managedByPartner && showConfig && (
-          <div className="grid gap-3 rounded-md border p-3">
-            <div className="grid gap-2">
-              <Label>Ownership token (TXT: plaidware-verify=…)</Label>
-              <Input value={config.token} onChange={(e) => setConfig({ ...config, token: e.target.value })} placeholder="uuid or full plaidware-verify=… string" />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Expected CNAME</Label>
-                <Input value={config.cname} onChange={(e) => setConfig({ ...config, cname: e.target.value })} placeholder="edge.railway.app" />
+        {item.managedByPartner ? (
+          item.domainUrl && (
+            <p className="text-sm">
+              Portal:{" "}
+              <a href={item.domainUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                {item.domainUrl}
+              </a>
+            </p>
+          )
+        ) : (
+          <>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="grid min-w-64 flex-1 gap-2">
+                <Label htmlFor={`domain-${item.subscriptionId}`}>Live domain</Label>
+                <Input id={`domain-${item.subscriptionId}`} value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="https://customer-site.com" />
               </div>
-              <div className="grid gap-2">
-                <Label>A-record allow-list (comma-sep)</Label>
-                <Input value={config.ips} onChange={(e) => setConfig({ ...config, ips: e.target.value })} placeholder="1.2.3.4, 5.6.7.8" />
-              </div>
+              <Button variant="outline" disabled={pending("domain") || domain.trim() === (item.domainUrl ?? "")} onClick={() => onSaveDomain(domain.trim())}>
+                {pending("domain") ? "Saving…" : "Save domain"}
+              </Button>
+              {item.state === "unconfigured" ? (
+                <Button className="gap-1" disabled={pending("configure")} onClick={onConfigure}>
+                  <ShieldCheck className="size-4" /> {pending("configure") ? "Configuring…" : "Configure verification"}
+                </Button>
+              ) : (
+                item.domainUrl && (
+                  <Button className="gap-1" disabled={pending("verify")} onClick={onVerify}>
+                    <ShieldCheck className="size-4" /> {pending("verify") ? "Checking…" : "Verify DNS"}
+                  </Button>
+                )
+              )}
             </div>
-            <Button size="sm" className="w-fit" onClick={() => onSaveConfig(item, config)}>Save config</Button>
-          </div>
+
+            {records.length > 0 && (
+              <div className="rounded-md border bg-secondary/30 p-3">
+                <div className="mb-2 flex items-center justify-between text-sm font-medium text-heading">
+                  Records to add at the client&apos;s DNS provider
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="gap-1"
+                    onClick={() => {
+                      navigator.clipboard.writeText(records.map((r) => `${r.type}\t${r.host}\t${r.value}`).join("\n"));
+                      toast.success("Records copied");
+                    }}
+                  >
+                    <Copy className="size-3.5" /> Copy all
+                  </Button>
+                </div>
+                <div className="grid gap-1 font-mono text-xs">
+                  {records.map((r, i) => (
+                    <div key={i} className="grid grid-cols-[4rem_1fr_2fr] items-center gap-2 rounded bg-background px-2 py-1">
+                      <span className="text-heading">{r.type}</span>
+                      <span className="truncate text-muted-foreground">{r.host}</span>
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="truncate">{r.value}</span>
+                        {r.note && <span className="shrink-0 font-sans text-[10px] text-muted-foreground">{r.note}</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {item.dnsLastResolved && (
+              <p className={`text-xs ${item.state === "failing" ? "text-destructive" : "text-muted-foreground"}`}>
+                Last resolved: {item.dnsLastResolved}
+              </p>
+            )}
+
+            <button type="button" className="w-fit text-xs text-muted-foreground hover:text-heading" onClick={() => setShowAdvanced((v) => !v)}>
+              {showAdvanced ? "Hide verification settings" : "Edit verification (advanced)"}
+            </button>
+            {showAdvanced && (
+              <div className="grid gap-3 rounded-md border p-3">
+                <div className="grid gap-2">
+                  <Label>Ownership token (TXT: plaidware-verify=…)</Label>
+                  <Input value={config.token} onChange={(e) => setConfig({ ...config, token: e.target.value })} placeholder="uuid or full plaidware-verify=… string" />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Expected CNAME</Label>
+                    <Input value={config.cname} onChange={(e) => setConfig({ ...config, cname: e.target.value })} placeholder="edge.railway.app" />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>A-record allow-list (comma-separated)</Label>
+                    <Input value={config.ips} onChange={(e) => setConfig({ ...config, ips: e.target.value })} placeholder="1.2.3.4, 5.6.7.8" />
+                  </div>
+                </div>
+                <Button size="sm" className="w-fit" disabled={pending("config")} onClick={() => onSaveConfig(config)}>
+                  Save settings
+                </Button>
+              </div>
+            )}
+          </>
         )}
 
         <div>
@@ -368,9 +429,7 @@ function ProvisioningCard({
               <Plus className="size-4" /> Add
             </Button>
           </div>
-          {item.credentials.length === 0 && (
-            <p className="text-xs text-muted-foreground">None stored.</p>
-          )}
+          {item.credentials.length === 0 && <p className="text-xs text-muted-foreground">None stored.</p>}
           <div className="flex flex-col gap-1.5">
             {item.credentials.map((c) => (
               <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
@@ -393,7 +452,7 @@ function ProvisioningCard({
                     </Button>
                   )}
                   <Button variant="ghost" size="sm" onClick={() => onEditCred(c)}>Edit</Button>
-                  <Button variant="ghost" size="icon" onClick={() => onDeleteCred(c)}>
+                  <Button variant="ghost" size="icon" disabled={pending(`delcred:${c.id}`)} onClick={() => onDeleteCred(c)}>
                     <Trash2 className="size-4 text-destructive" />
                   </Button>
                 </div>

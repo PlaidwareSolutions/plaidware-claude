@@ -392,7 +392,9 @@ export type SubscriptionAutomation = {
   error: string | null;
 };
 
-export async function getBillingAutomationStatus(): Promise<SubscriptionAutomation[]> {
+export async function getBillingAutomationStatus(
+  opts: { tenantId?: string } = {},
+): Promise<SubscriptionAutomation[]> {
   const live = await db
     .select({
       id: subscriptions.id,
@@ -403,7 +405,12 @@ export async function getBillingAutomationStatus(): Promise<SubscriptionAutomati
     })
     .from(subscriptions)
     .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
-    .where(inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES));
+    .where(
+      and(
+        inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES),
+        opts.tenantId ? eq(subscriptions.tenantId, opts.tenantId) : undefined,
+      ),
+    );
 
   const base = (s: (typeof live)[number], error: string | null): SubscriptionAutomation => ({
     subscriptionId: s.id,
@@ -512,5 +519,53 @@ export async function listTenantPricingRows(tenantId: string): Promise<PricingRo
       intervalLabel: intervalLabel(c),
       overrideCents: overrides.find((o) => o.componentId === c.id)?.amountCents ?? null,
     })),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add-on options per live subscription, with the tenant's negotiated prices
+// ---------------------------------------------------------------------------
+
+export type AddonOption = {
+  id: string;
+  name: string;
+  kind: string;
+  interval: string | null;
+  intervalCount: number;
+  amountCents: number;
+};
+
+/** subscriptionId → add-ons not yet on it, priced for this tenant. */
+export async function listAddonOptions(
+  tenantId: string,
+  subs: Pick<SubscriptionDto, "id" | "status" | "productId" | "items">[],
+): Promise<Record<string, AddonOption[]>> {
+  const live = subs.filter((s) => !["canceled", "expired"].includes(s.status));
+  if (live.length === 0) return {};
+  const [allProducts, overrides] = await Promise.all([
+    listAllProductsOps(),
+    db.query.tenantPriceOverrides.findMany({ where: eq(tenantPriceOverrides.tenantId, tenantId) }),
+  ]);
+  const override = new Map(overrides.map((o) => [o.componentId, o.amountCents]));
+  return Object.fromEntries(
+    live.map((s) => {
+      const product = allProducts.find((p) => p.id === s.productId);
+      const onSub = new Set(
+        s.items.filter((i) => ["active", "pending"].includes(i.status)).map((i) => i.name),
+      );
+      return [
+        s.id,
+        (product?.components ?? [])
+          .filter((c) => c.role !== "base" && !onSub.has(c.name))
+          .map((c) => ({
+            id: c.id,
+            name: c.name,
+            kind: c.kind,
+            interval: c.interval,
+            intervalCount: c.intervalCount,
+            amountCents: override.get(c.id) ?? c.amountCents,
+          })),
+      ];
+    }),
   );
 }

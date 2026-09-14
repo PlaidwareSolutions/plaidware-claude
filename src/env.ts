@@ -17,6 +17,9 @@ const schema = z.object({
   RESEND_API_KEY: z.string().startsWith("re_").optional(),
   EMAIL_FROM: z.string().default("Plaidware <no-reply@contact.plaidware.com>"),
   OPS_EMAIL: z.string().optional(),
+  /** Fallback DNS targets for new provisioning rows (product defaults win, Phase 3). */
+  PROVISIONING_DEFAULT_CNAME: z.string().optional(),
+  PROVISIONING_DEFAULT_A_IPS: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().startsWith("sk_").optional(),
   CREDENTIALS_ENCRYPTION_KEY: z.string().min(40).optional(),
   PAGESPEED_INSIGHTS_API_KEY: z.string().optional(),

@@ -1,6 +1,10 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { invitation, member, organization, session, user } from "../auth/schema";
+import { subscriptions } from "../billing/schema";
+import { products } from "../catalog/schema";
+import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
+import { isMarketingSlug } from "../webhooks_out/logic";
 
 export type TenantSummary = {
   id: string;
@@ -196,4 +200,53 @@ export async function listPlatformUsers(): Promise<PlatformUserRow[]> {
     createdAt: u.createdAt,
     tenants: byUser.get(u.id) ?? [],
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Ops → Client page header (layout-level; every tab shares it)
+// ---------------------------------------------------------------------------
+
+export type ClientHeader = {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  memberCount: number;
+  stripeCustomerId: string | null;
+  /** Holds a live marketing-* subscription → MHub owns part of this client. */
+  hasMarketing: boolean;
+};
+
+export async function getClientHeader(tenantId: string): Promise<ClientHeader | null> {
+  const org = await db.query.organization.findFirst({ where: eq(organization.id, tenantId) });
+  if (!org) return null;
+  const [members, marketing] = await Promise.all([
+    db
+      .select({ role: member.role, name: user.name, email: user.email })
+      .from(member)
+      .innerJoin(user, eq(member.userId, user.id))
+      .where(eq(member.organizationId, tenantId))
+      .orderBy(member.createdAt),
+    db
+      .select({ slug: products.slug })
+      .from(subscriptions)
+      .innerJoin(products, eq(subscriptions.productId, products.id))
+      .where(and(eq(subscriptions.tenantId, tenantId), inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES))),
+  ]);
+  const owner = members.find((m) => m.role === "owner") ?? members[0] ?? null;
+  return {
+    id: org.id,
+    name: org.name,
+    slug: org.slug ?? "",
+    status: org.status ?? "active",
+    createdAt: org.createdAt.toISOString(),
+    ownerName: owner?.name ?? null,
+    ownerEmail: owner?.email ?? null,
+    memberCount: members.length,
+    stripeCustomerId: org.stripeCustomerId,
+    hasMarketing: marketing.some((m) => isMarketingSlug(m.slug)),
+  };
 }
