@@ -8,6 +8,7 @@ import type { KpiTile } from "../service";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sparkline } from "@/components/sparkline";
 
 type CardData = {
   subscriptionId: string;
@@ -20,21 +21,6 @@ type CardData = {
   keyPrefix: string | null;
   sampleKeys: string[];
 };
-
-function Sparkline({ data }: { data: number[] }) {
-  if (data.length < 2 || data.every((d) => d === 0)) {
-    return <div className="h-8 text-[10px] text-muted-foreground">no data yet</div>;
-  }
-  const max = Math.max(...data) || 1;
-  const pts = data
-    .map((d, i) => `${(i / (data.length - 1)) * 100},${28 - (d / max) * 24}`)
-    .join(" ");
-  return (
-    <svg viewBox="0 0 100 30" className="h-8 w-full" preserveAspectRatio="none" aria-hidden>
-      <polyline points={pts} fill="none" stroke="var(--primary)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
 
 function statusPill(status: string | null) {
   if (!status) return <Badge variant="outline">no data</Badge>;

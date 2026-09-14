@@ -31,6 +31,8 @@ const schema = z.object({
    * ride the same domain, and identical names would clobber each other.
    */
   COOKIE_PREFIX: z.string().min(1).optional(),
+  /** IANA zone every date in the UI is rendered in (src/lib/dates.ts). Default UTC. */
+  NEXT_PUBLIC_DISPLAY_TZ: z.string().optional(),
   /** MHub integration (marketing.plaidware.com). All optional: without them, lifecycle deliveries queue and fail-retry. */
   MHUB_BASE_URL: z.string().startsWith("http").optional(),
   MHUB_LIFECYCLE_URL: z.string().startsWith("http").optional(),

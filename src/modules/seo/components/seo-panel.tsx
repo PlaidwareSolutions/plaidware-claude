@@ -10,6 +10,7 @@ import { runSeoRecheckAction, snoozeSeoAction } from "../actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sparkline } from "@/components/sparkline";
 
 function scoreColor(v: number | null): string {
   if (v == null) return "text-muted-foreground";
@@ -18,17 +19,6 @@ function scoreColor(v: number | null): string {
 
 function verdictColor(v: string): string {
   return v === "good" ? "text-success" : v === "needs-improvement" ? "text-warning" : "text-destructive";
-}
-
-function MiniSeries({ data }: { data: (number | null)[] }) {
-  const vals = data.map((d) => d ?? 0);
-  if (vals.length < 2) return null;
-  const pts = vals.map((d, i) => `${(i / (vals.length - 1)) * 100},${30 - (d / 100) * 28}`).join(" ");
-  return (
-    <svg viewBox="0 0 100 32" className="h-7 w-full" preserveAspectRatio="none" aria-hidden>
-      <polyline points={pts} fill="none" stroke="var(--primary)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
 }
 
 const SCORE_LABELS: [string, string][] = [
@@ -125,7 +115,7 @@ export function SeoPanel({
                     {scores?.[key] ?? "—"}
                   </div>
                   <div className="text-[11px] text-muted-foreground">{label}</div>
-                  <MiniSeries data={panel.history.map((h) => h[key as keyof typeof h] ?? null)} />
+                  <Sparkline max={100} className="h-7 w-full" emptyLabel={null}data={panel.history.map((h) => h[key as keyof typeof h] ?? null)} />
                 </div>
               ))}
             </div>
