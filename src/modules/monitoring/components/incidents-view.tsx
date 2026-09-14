@@ -67,7 +67,8 @@ export function IncidentsView({
                     </Link>
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    via {i.source} · since {formatDateTime(i.since)} ({formatRelative(i.since)})
+                    {i.statusCode != null && <>HTTP {i.statusCode} · </>}
+                    via {i.source} · since {formatDateTime(i.since)} ({formatRelative(i.since)}) · {i.checks} failing check{i.checks === 1 ? "" : "s"}
                     {i.detail && <> · {i.detail}</>}
                   </div>
                 </div>

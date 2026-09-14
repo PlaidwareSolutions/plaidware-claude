@@ -14,6 +14,7 @@ import {
   usageRecords,
 } from "./schema";
 import { partitionEvents, type IngestEvent } from "./ingest-logic";
+import { classifyProbe, HEALTH_PATH } from "./probe-logic";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -126,21 +127,23 @@ export async function runUptimeProbe(): Promise<{ probed: number; down: number }
   let down = 0;
   await Promise.all(
     targets.map(async (t) => {
-      const base = t.domainUrl!.includes("://") ? t.domainUrl! : `https://${t.domainUrl}`;
+      const base = (t.domainUrl!.includes("://") ? t.domainUrl! : `https://${t.domainUrl}`).replace(/\/$/, "");
       const started = Date.now();
-      let status = "down";
-      let statusCode: number | null = null;
-      let detail: string | null = null;
-      try {
-        const res = await fetch(`${base.replace(/\/$/, "")}/api/system/health`, {
-          signal: AbortSignal.timeout(10_000),
-          headers: { "User-Agent": "Plaidware-Uptime/1.0" },
-        });
-        statusCode = res.status;
-        status = res.ok ? "healthy" : res.status >= 500 ? "down" : "degraded";
-      } catch (e) {
-        detail = e instanceof Error ? e.message.slice(0, 200) : "fetch failed";
-      }
+      const get = async (path: string) => {
+        try {
+          const res = await fetch(`${base}${path}`, {
+            signal: AbortSignal.timeout(10_000),
+            headers: { "User-Agent": "Plaidware-Uptime/1.0" },
+          });
+          return { status: res.status };
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : "fetch failed" };
+        }
+      };
+      const health = await get(HEALTH_PATH);
+      // Client-built apps rarely expose the health path; grade the homepage instead.
+      const home = "status" in health && health.status === 404 ? await get("/") : null;
+      const { status, statusCode, detail } = classifyProbe(health, home);
       if (status === "down") down++;
       await db.insert(healthChecks).values({
         subscriptionId: t.subscriptionId,
@@ -168,8 +171,12 @@ export type Incident = {
   productName: string;
   status: string;
   source: string;
+  statusCode: number | null;
   detail: string | null;
+  /** Start of the current failing streak (first failing check after the last healthy one). */
   since: string;
+  /** Failing checks in the streak. */
+  checks: number;
 };
 
 export async function getActiveIncidents(opts: { tenantId?: string } = {}): Promise<Incident[]> {
@@ -184,6 +191,7 @@ async function loadActiveIncidents(): Promise<Incident[]> {
       subscriptionId: healthChecks.subscriptionId,
       status: healthChecks.status,
       source: healthChecks.source,
+      statusCode: healthChecks.statusCode,
       detail: healthChecks.detail,
       createdAt: healthChecks.createdAt,
     })
@@ -214,8 +222,34 @@ async function loadActiveIncidents(): Promise<Incident[]> {
     .innerJoin(organization, eq(subscriptions.tenantId, organization.id))
     .where(inArray(subscriptions.id, open.map((o) => o.subscriptionId)));
 
+  // The streak: every failing check since the last healthy one (or ever).
+  const lastHealthy = await db
+    .select({ subscriptionId: healthChecks.subscriptionId, at: sql<Date | null>`max(${healthChecks.createdAt})` })
+    .from(healthChecks)
+    .where(and(inArray(healthChecks.subscriptionId, open.map((o) => o.subscriptionId)), eq(healthChecks.status, "healthy")))
+    .groupBy(healthChecks.subscriptionId);
+  const healthyAt = new Map(lastHealthy.map((r) => [r.subscriptionId, r.at ? new Date(r.at) : null]));
+  const streaks = await Promise.all(
+    open.map(async (o) => {
+      const from = healthyAt.get(o.subscriptionId) ?? null;
+      const [row] = await db
+        .select({ first: sql<Date | null>`min(${healthChecks.createdAt})`, n: sql<number>`count(*)::int` })
+        .from(healthChecks)
+        .where(
+          and(
+            eq(healthChecks.subscriptionId, o.subscriptionId),
+            from ? gte(healthChecks.createdAt, from) : undefined,
+            inArray(healthChecks.status, ["down", "degraded"]),
+          ),
+        );
+      return [o.subscriptionId, { first: row?.first ? new Date(row.first) : o.createdAt, n: row?.n ?? 1 }] as const;
+    }),
+  );
+  const streak = new Map(streaks);
+
   return open.map((o) => {
     const s = subs.find((x) => x.id === o.subscriptionId);
+    const st = streak.get(o.subscriptionId);
     return {
       subscriptionId: o.subscriptionId,
       healthCheckId: o.id,
@@ -225,8 +259,10 @@ async function loadActiveIncidents(): Promise<Incident[]> {
       productName: s?.productName ?? "Unknown",
       status: o.status,
       source: o.source,
+      statusCode: o.statusCode,
       detail: o.detail,
-      since: o.createdAt.toISOString(),
+      since: (st?.first ?? o.createdAt).toISOString(),
+      checks: st?.n ?? 1,
     };
   });
 }
