@@ -54,3 +54,15 @@ export function decideDunningAction(
 export function isCovered(amountDueCents: number, paidCentsTotal: number): boolean {
   return paidCentsTotal >= amountDueCents;
 }
+
+/**
+ * A settled invoice lifts dunning-driven suspensions only. A manual ops hold
+ * (`suspensionSource = 'manual'`) stays until ops reactivates; legacy rows with
+ * no source were all dunning-driven (backfilled in migration 0015).
+ */
+export function isDunningReactivationCandidate(sub: {
+  status: string;
+  suspensionSource: string | null;
+}): boolean {
+  return sub.status === "suspended" && sub.suspensionSource !== "manual";
+}

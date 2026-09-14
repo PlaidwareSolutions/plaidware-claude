@@ -1,21 +1,23 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../../db";
 import { requireOps } from "../../policy";
-import { dunningStates } from "./ar-schema";
-import { tenantPriceOverrides } from "./schema";
 import {
   createManualInvoice,
   generateHostingInvoices,
+  reactivateSubscription,
   recordOfflinePayment,
   runDunningSweep,
   sendCardSetupLink,
+  sendPreDueReminders,
+  setDunningPaused,
   setHostingFee,
+  setTenantPriceOverride,
+  suspendSubscriptionManually,
   switchSubscriptionToAutoCharge,
+  updateBillingPolicy,
 } from "./ar-service";
-import { cancelSubscription } from "./service";
+import { cancelSubscription, changeSubscriptionItems } from "./service";
 import { revalidateClientViews } from "@/lib/ops-revalidate";
 
 /** Every ops surface that renders billing state. */
@@ -101,12 +103,13 @@ export async function setHostingFeeAction(
   input: z.infer<typeof hostingFeeSchema>,
 ): Promise<ActionResult> {
   try {
-    await requireOps();
+    const session = await requireOps();
     const p = hostingFeeSchema.parse(input);
     await setHostingFee(
       p.subscriptionId,
       p.monthlyHostingCents === 0 ? null : p.monthlyHostingCents,
       p.startMonth,
+      session.user.id,
     );
     revalidateBilling();
     return { ok: true };
@@ -120,8 +123,8 @@ export async function toggleDunningPauseAction(
   paused: boolean,
 ): Promise<ActionResult> {
   try {
-    await requireOps();
-    await db.update(dunningStates).set({ paused }).where(eq(dunningStates.id, dunningStateId));
+    const session = await requireOps();
+    await setDunningPaused(dunningStateId, paused, session.user.id);
     revalidateBilling();
     return { ok: true };
   } catch (e) {
@@ -129,16 +132,40 @@ export async function toggleDunningPauseAction(
   }
 }
 
+/** The same pass the worker runs daily: pre-due notices, then the dunning sweep. */
 export async function runDunningSweepAction(): Promise<
-  { ok: true; reminded: number; suspended: number; opened: number } | { ok: false; error: string }
+  | { ok: true; preDue: number; reminded: number; suspended: number; opened: number }
+  | { ok: false; error: string }
 > {
   try {
     await requireOps();
+    const preDue = await sendPreDueReminders();
     const r = await runDunningSweep();
     revalidateBilling();
-    return { ok: true, ...r };
+    return { ok: true, preDue, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Sweep failed" };
+  }
+}
+
+const policySchema = z.object({
+  reminderDays: z.array(z.number().int().min(0).max(90)).min(1).max(6),
+  graceDays: z.number().int().min(1).max(90),
+  autoSuspend: z.boolean(),
+  upcomingReminderDays: z.number().int().min(0).max(30),
+});
+
+/** Platform-wide dunning policy — applies to every client. */
+export async function updateBillingPolicyAction(
+  input: z.infer<typeof policySchema>,
+): Promise<ActionResult> {
+  try {
+    const session = await requireOps();
+    await updateBillingPolicy(policySchema.parse(input), session.user.id);
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
   }
 }
 
@@ -157,33 +184,7 @@ export async function setTenantPriceOverrideAction(
   try {
     const session = await requireOps();
     const p = overrideSchema.parse(input);
-    if (p.amountCents == null || p.amountCents === 0) {
-      await db
-        .delete(tenantPriceOverrides)
-        .where(
-          and(
-            eq(tenantPriceOverrides.tenantId, p.tenantId),
-            eq(tenantPriceOverrides.componentId, p.componentId),
-          ),
-        );
-    } else {
-      await db
-        .insert(tenantPriceOverrides)
-        .values({
-          tenantId: p.tenantId,
-          componentId: p.componentId,
-          amountCents: p.amountCents,
-          createdByUserId: session.user.id,
-        })
-        .onConflictDoUpdate({
-          target: [tenantPriceOverrides.tenantId, tenantPriceOverrides.componentId],
-          set: {
-            amountCents: p.amountCents,
-            stripePriceId: null, // re-mint at next use
-            createdByUserId: session.user.id,
-          },
-        });
-    }
+    await setTenantPriceOverride({ ...p, actorUserId: session.user.id });
     revalidateBilling(p.tenantId);
     return { ok: true };
   } catch (e) {
@@ -218,6 +219,65 @@ export async function opsCancelSubscriptionAction(subscriptionId: string): Promi
     return { ok: true };
   } catch (e) {
     return fail(e);
+  }
+}
+
+const holdSchema = z.object({
+  subscriptionId: z.string().uuid(),
+  note: z.string().max(300).optional(),
+});
+
+/** Manual hold: stays suspended through payments and Stripe syncs until reactivated. */
+export async function opsSuspendSubscriptionAction(
+  input: z.infer<typeof holdSchema>,
+): Promise<ActionResult> {
+  try {
+    const session = await requireOps();
+    const p = holdSchema.parse(input);
+    await suspendSubscriptionManually(p.subscriptionId, {
+      actorUserId: session.user.id,
+      note: p.note?.trim() || null,
+    });
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function opsReactivateSubscriptionAction(subscriptionId: string): Promise<ActionResult> {
+  try {
+    const session = await requireOps();
+    z.string().uuid().parse(subscriptionId);
+    await reactivateSubscription(subscriptionId, { actorUserId: session.user.id });
+    revalidateBilling();
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const itemsSchema = z.object({
+  subscriptionId: z.string().uuid(),
+  addComponentIds: z.array(z.string().uuid()).max(20).default([]),
+  removeItemIds: z.array(z.string().uuid()).max(20).default([]),
+});
+
+/** Ops-side add-on changes: recurring prorates now, one-time invoices + charges now. */
+export async function opsChangeSubscriptionItemsAction(
+  input: z.infer<typeof itemsSchema>,
+): Promise<{ ok: true; added: number; removed: number } | { ok: false; error: string }> {
+  try {
+    const session = await requireOps();
+    const p = itemsSchema.parse(input);
+    if (p.addComponentIds.length === 0 && p.removeItemIds.length === 0) {
+      throw new Error("Nothing to change");
+    }
+    const r = await changeSubscriptionItems({ ...p, actorUserId: session.user.id });
+    revalidateBilling();
+    return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Change failed" };
   }
 }
 

@@ -462,7 +462,13 @@ export async function cancelSubscription(subscriptionId: string): Promise<void> 
   }
   await db
     .update(subscriptions)
-    .set({ status: "canceled", canceledAt: new Date() })
+    .set({
+      status: "canceled",
+      canceledAt: new Date(),
+      suspensionSource: null,
+      suspendedAt: null,
+      suspensionNote: null,
+    })
     .where(eq(subscriptions.id, subscriptionId));
   await db
     .update(subscriptionItems)
@@ -871,12 +877,20 @@ export async function applySubscriptionEvent(
     .map((i) => i.current_period_start)
     .filter(Boolean);
   const prevStatus = localSub.status;
-  const nextStatus = mapStripeSubscriptionStatus(stripeSub.status);
+  const stripeStatus = mapStripeSubscriptionStatus(stripeSub.status);
+  // A Hub-side hold (dunning or manual) is not Stripe's to lift: while Stripe
+  // still reports the subscription live, the local status stays suspended —
+  // payment resolution or an ops reactivation clears it. Terminal states win.
+  const holdSurvives =
+    prevStatus === "suspended" && ["active", "trialing", "past_due"].includes(stripeStatus);
+  const nextStatus = holdSurvives ? prevStatus : stripeStatus;
+  const closed = nextStatus === "canceled" || nextStatus === "expired";
 
   await db
     .update(subscriptions)
     .set({
       status: nextStatus,
+      ...(closed ? { suspensionSource: null, suspendedAt: null, suspensionNote: null } : {}),
       stripeSubscriptionId: stripeSub.id,
       currentPeriodStart: periodStarts.length
         ? new Date(Math.min(...periodStarts) * 1000)

@@ -236,7 +236,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
               if (!ok) return;
               void run(runDunningSweepAction, {
                 key: "sweep",
-                success: (r) => `Sweep done — ${r.opened} opened, ${r.reminded} reminded, ${r.suspended} suspended`,
+                success: (r) => `Sweep done — ${r.preDue} pre-due notices, ${r.opened} opened, ${r.reminded} reminded, ${r.suspended} suspended`,
               });
             }}
           >

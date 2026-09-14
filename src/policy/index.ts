@@ -4,7 +4,16 @@ import { and, eq } from "drizzle-orm";
 import { AUTH, TENANT } from "../lib/routes";
 import { auth } from "../lib/auth";
 import { db } from "../db";
-import { member } from "../modules/auth/schema";
+import { member, organization } from "../modules/auth/schema";
+import { tenantStatusAllows, tenantStatusMessage, type TenantCapability } from "./tenant-status";
+
+export {
+  normalizeTenantStatus,
+  tenantStatusAllows,
+  tenantStatusMessage,
+  type TenantCapability,
+  type TenantStatus,
+} from "./tenant-status";
 
 /**
  * The single authorization layer (PRD § 2). Every server action, RSC query,
@@ -20,8 +29,6 @@ export class PolicyError extends Error {
     this.name = "PolicyError";
   }
 }
-
-export type TenantCapability = "read" | "billing" | "write" | "team";
 
 /** PRD §4.2 role → capability matrix. */
 const ROLE_CAPS: Record<string, ReadonlySet<TenantCapability>> = {
@@ -68,18 +75,26 @@ export async function requireOpsPage() {
 }
 
 /**
- * Caller must be an ops admin OR hold `cap` in the tenant. Returns the session
- * plus the resolved membership role ("ops" for platform admins).
+ * Caller must be an ops admin OR hold `cap` in the tenant, AND the workspace's
+ * lifecycle status must still allow `cap` (suspended → read + billing only;
+ * inactive → read only). Ops admins bypass the status gate. Returns the
+ * session plus the resolved membership role ("ops" for platform admins).
  */
 export async function requireMembership(tenantId: string, cap: TenantCapability) {
   const session = await requireUser();
   if (isOps(session)) return { session, role: "ops" as const };
 
-  const m = await db.query.member.findFirst({
-    where: and(eq(member.organizationId, tenantId), eq(member.userId, session.user.id)),
-  });
+  const [m] = await db
+    .select({ role: member.role, status: organization.status })
+    .from(member)
+    .innerJoin(organization, eq(member.organizationId, organization.id))
+    .where(and(eq(member.organizationId, tenantId), eq(member.userId, session.user.id)))
+    .limit(1);
   if (!m || !roleHasCapability(m.role, cap)) {
     throw new PolicyError(403, "You don't have access to this workspace");
+  }
+  if (!tenantStatusAllows(m.status, cap)) {
+    throw new PolicyError(403, tenantStatusMessage(m.status));
   }
   return { session, role: m.role };
 }

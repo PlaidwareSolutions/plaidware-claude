@@ -33,6 +33,14 @@ export type SubscriptionDto = {
   monthlyCents: number;
   domainUrl: string | null;
   items: SubscriptionItemDto[];
+  stripeSubscriptionId: string | null;
+  /** Standalone monthly hosting fee (null = none); first billed month as YYYY-MM. */
+  monthlyHostingCents: number | null;
+  hostingBillingStartMonth: string | null;
+  /** 'dunning' | 'manual' while suspended, else null. */
+  suspensionSource: string | null;
+  suspendedAt: string | null;
+  suspensionNote: string | null;
 };
 
 export async function listTenantSubscriptions(tenantId: string): Promise<SubscriptionDto[]> {
@@ -47,6 +55,12 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
       trialEndsAt: subscriptions.trialEndsAt,
       currentPeriodEnd: subscriptions.currentPeriodEnd,
       subscribedAt: subscriptions.subscribedAt,
+      stripeSubscriptionId: subscriptions.stripeSubscriptionId,
+      monthlyHostingCents: subscriptions.monthlyHostingCents,
+      hostingBillingStartMonth: subscriptions.hostingBillingStartMonth,
+      suspensionSource: subscriptions.suspensionSource,
+      suspendedAt: subscriptions.suspendedAt,
+      suspensionNote: subscriptions.suspensionNote,
     })
     .from(subscriptions)
     .innerJoin(products, eq(subscriptions.productId, products.id))
@@ -71,6 +85,7 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
       trialEndsAt: s.trialEndsAt?.toISOString() ?? null,
       currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
       subscribedAt: s.subscribedAt.toISOString(),
+      suspendedAt: s.suspendedAt?.toISOString() ?? null,
       monthlyCents: LIVE_SUBSCRIPTION_STATUSES.includes(
         s.status as (typeof LIVE_SUBSCRIPTION_STATUSES)[number],
       )

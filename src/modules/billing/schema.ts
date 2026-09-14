@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   integer,
   jsonb,
   pgEnum,
@@ -12,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
+import { onboardingInvites } from "../onboarding/schema";
 
 export const subscriptionStatus = pgEnum("subscription_status", [
   "incomplete", // checkout started, first payment not settled
@@ -63,6 +65,14 @@ export const subscriptions = pgTable(
     monthlyHostingCents: integer("monthly_hosting_cents"),
     /** First month to bill hosting for, as YYYY-MM. */
     hostingBillingStartMonth: text("hosting_billing_start_month"),
+    /**
+     * Why status = suspended: 'dunning' lifts automatically when the invoice
+     * settles; 'manual' is an ops hold that survives payments and Stripe syncs
+     * until ops reactivates. Null unless suspended.
+     */
+    suspensionSource: text("suspension_source"),
+    suspendedAt: timestamp("suspended_at"),
+    suspensionNote: text("suspension_note"),
     subscribedAt: timestamp("subscribed_at").notNull().defaultNow(),
     canceledAt: timestamp("canceled_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -78,6 +88,10 @@ export const subscriptions = pgTable(
       .on(t.tenantId, t.productId)
       .where(sql`${t.status} not in ('canceled', 'expired')`),
     index("subscriptions_tenant_idx").on(t.tenantId),
+    check(
+      "subscriptions_suspension_source_chk",
+      sql`${t.suspensionSource} is null or ${t.suspensionSource} in ('dunning', 'manual')`,
+    ),
   ],
 );
 
@@ -168,6 +182,10 @@ export const tenantPriceOverrides = pgTable(
     /** Lazily minted tenant-specific Stripe Price. */
     stripePriceId: text("stripe_price_id"),
     createdByUserId: text("created_by_user_id"),
+    /** Set when the price came from a setup link; cleared rows die with a revoked/expired invite. */
+    sourceInviteId: uuid("source_invite_id").references(() => onboardingInvites.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at")
       .notNull()

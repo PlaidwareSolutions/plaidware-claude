@@ -7,11 +7,17 @@ import { formatCents } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import { env } from "../../env";
 import { member, organization, user } from "../auth/schema";
-import { invoices, subscriptions } from "./schema";
+import { invoices, subscriptions, tenantPriceOverrides } from "./schema";
 import { billingPolicy, dunningStates, payments } from "./ar-schema";
-import { daysPastDue, decideDunningAction, isCovered } from "./dunning-logic";
+import {
+  daysPastDue,
+  decideDunningAction,
+  isCovered,
+  isDunningReactivationCandidate,
+} from "./dunning-logic";
 import { createBillingPortalSession, ensureTenantStripeCustomer } from "./service";
 import { emitSubscriptionLifecycle } from "../webhooks_out/service";
+import { writeAudit } from "../audit/service";
 
 // ---------------------------------------------------------------------------
 // Policy
@@ -26,6 +32,37 @@ export async function getBillingPolicy() {
     .onConflictDoNothing()
     .returning();
   return created ?? (await db.query.billingPolicy.findFirst())!;
+}
+
+/** Platform-wide dunning policy (one row). Reminder days are sorted + deduped. */
+export async function updateBillingPolicy(
+  patch: {
+    reminderDays: number[];
+    graceDays: number;
+    autoSuspend: boolean;
+    upcomingReminderDays: number;
+  },
+  actorUserId: string,
+): Promise<void> {
+  const reminderDays = [...new Set(patch.reminderDays)].sort((a, b) => a - b);
+  if (reminderDays.some((d) => d < 0 || d > 90)) throw new Error("Reminder days must be 0–90");
+  if (patch.graceDays < 1 || patch.graceDays > 90) throw new Error("Grace period must be 1–90 days");
+  if (patch.upcomingReminderDays < 0 || patch.upcomingReminderDays > 30) {
+    throw new Error("Pre-due reminder must be 0–30 days");
+  }
+  const before = await getBillingPolicy();
+  await db
+    .update(billingPolicy)
+    .set({
+      reminderDays,
+      graceDays: patch.graceDays,
+      autoSuspend: patch.autoSuspend,
+      upcomingReminderDays: patch.upcomingReminderDays,
+    })
+    .where(eq(billingPolicy.id, 1));
+  console.log(
+    `[billing] policy updated by ${actorUserId}: reminders ${before.reminderDays.join("/")}→${reminderDays.join("/")}, grace ${before.graceDays}→${patch.graceDays}, autoSuspend ${before.autoSuspend}→${patch.autoSuspend}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -179,14 +216,97 @@ export async function setHostingFee(
   subscriptionId: string,
   monthlyHostingCents: number | null,
   startMonth: string | null,
+  actorUserId?: string,
 ): Promise<void> {
-  await db
+  const [before] = await db
     .update(subscriptions)
     .set({
       monthlyHostingCents,
       hostingBillingStartMonth: monthlyHostingCents == null ? null : startMonth,
     })
-    .where(eq(subscriptions.id, subscriptionId));
+    .where(eq(subscriptions.id, subscriptionId))
+    .returning({ tenantId: subscriptions.tenantId });
+  if (!before) throw new Error("Subscription not found");
+  await writeAudit({
+    tenantId: before.tenantId,
+    subscriptionId,
+    actorUserId,
+    kind: monthlyHostingCents == null ? "hosting_fee_cleared" : "hosting_fee_set",
+    payload: { monthlyHostingCents, startMonth },
+  });
+}
+
+/**
+ * Per-tenant negotiated price (billing v2). Null clears back to list. Applies
+ * to future checkouts and add-ons; existing subscriptions keep their snapshots.
+ */
+export async function setTenantPriceOverride(opts: {
+  tenantId: string;
+  componentId: string;
+  amountCents: number | null;
+  actorUserId: string;
+  /** Tag rows minted from a setup link so they die with a revoked/expired invite. */
+  sourceInviteId?: string | null;
+}): Promise<void> {
+  if (opts.amountCents == null || opts.amountCents === 0) {
+    await db
+      .delete(tenantPriceOverrides)
+      .where(
+        and(
+          eq(tenantPriceOverrides.tenantId, opts.tenantId),
+          eq(tenantPriceOverrides.componentId, opts.componentId),
+        ),
+      );
+  } else {
+    await db
+      .insert(tenantPriceOverrides)
+      .values({
+        tenantId: opts.tenantId,
+        componentId: opts.componentId,
+        amountCents: opts.amountCents,
+        createdByUserId: opts.actorUserId,
+        sourceInviteId: opts.sourceInviteId ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [tenantPriceOverrides.tenantId, tenantPriceOverrides.componentId],
+        set: {
+          amountCents: opts.amountCents,
+          stripePriceId: null, // re-mint at next use
+          createdByUserId: opts.actorUserId,
+          sourceInviteId: opts.sourceInviteId ?? null,
+        },
+      });
+  }
+  await writeAudit({
+    tenantId: opts.tenantId,
+    actorUserId: opts.actorUserId,
+    kind: opts.amountCents ? "price_override_set" : "price_override_cleared",
+    payload: {
+      componentId: opts.componentId,
+      amountCents: opts.amountCents,
+      sourceInviteId: opts.sourceInviteId ?? null,
+    },
+  });
+}
+
+/** Ops override: freeze/unfreeze automated reminders + suspension on one case. */
+export async function setDunningPaused(
+  dunningStateId: string,
+  paused: boolean,
+  actorUserId: string,
+): Promise<void> {
+  const [row] = await db
+    .update(dunningStates)
+    .set({ paused })
+    .where(eq(dunningStates.id, dunningStateId))
+    .returning({ tenantId: dunningStates.tenantId, invoiceId: dunningStates.invoiceId });
+  if (!row) throw new Error("Dunning case not found");
+  await writeAudit({
+    tenantId: row.tenantId,
+    actorUserId,
+    kind: paused ? "dunning_paused" : "dunning_resumed",
+    payload: { invoiceId: row.invoiceId },
+  });
 }
 
 /** Generate hosting invoices for `month` (default: last month). Idempotent
@@ -395,16 +515,25 @@ export async function resolveDunningForInvoice(invoiceId: string): Promise<void>
   });
   if (openCases.length > 0) return;
 
-  const suspended = await db.query.subscriptions.findMany({
-    where: and(eq(subscriptions.tenantId, dcase.tenantId), eq(subscriptions.status, "suspended")),
-  });
+  // Only dunning-driven holds lift; a manual ops hold stays until ops clears it.
+  const suspended = (
+    await db.query.subscriptions.findMany({
+      where: and(eq(subscriptions.tenantId, dcase.tenantId), eq(subscriptions.status, "suspended")),
+    })
+  ).filter(isDunningReactivationCandidate);
   if (suspended.length === 0) return;
   await db
     .update(subscriptions)
-    .set({ status: "active" })
-    .where(and(eq(subscriptions.tenantId, dcase.tenantId), eq(subscriptions.status, "suspended")));
+    .set({ status: "active", suspensionSource: null, suspendedAt: null, suspensionNote: null })
+    .where(inArray(subscriptions.id, suspended.map((s) => s.id)));
   for (const sub of suspended) {
     await emitSubscriptionLifecycle(sub.id, "subscription.activated");
+    await writeAudit({
+      tenantId: sub.tenantId,
+      subscriptionId: sub.id,
+      kind: "subscription_reactivated",
+      payload: { source: "dunning", invoiceId },
+    });
   }
 
   const contacts = await tenantBillingContacts(dcase.tenantId);
@@ -494,7 +623,7 @@ export async function runDunningSweep(now = new Date()): Promise<{
     } else if (action.kind === "suspend") {
       const flipped = await db
         .update(subscriptions)
-        .set({ status: "suspended" })
+        .set({ status: "suspended", suspensionSource: "dunning", suspendedAt: now, suspensionNote: null })
         .where(
           and(
             eq(subscriptions.tenantId, dcase.tenantId),
@@ -504,6 +633,12 @@ export async function runDunningSweep(now = new Date()): Promise<{
         .returning({ id: subscriptions.id });
       for (const sub of flipped) {
         await emitSubscriptionLifecycle(sub.id, "subscription.suspended");
+        await writeAudit({
+          tenantId: dcase.tenantId,
+          subscriptionId: sub.id,
+          kind: "subscription_suspended",
+          payload: { source: "dunning", invoiceId: inv.id, invoiceNumber: inv.invoiceNumber },
+        });
       }
       await db
         .update(dunningStates)
@@ -536,6 +671,68 @@ export async function runDunningSweep(now = new Date()): Promise<{
     }
   }
   return { reminded, suspended: suspendedCount, opened };
+}
+
+// ---------------------------------------------------------------------------
+// Manual hold — an ops suspension that payments and Stripe syncs don't undo
+// ---------------------------------------------------------------------------
+
+export async function suspendSubscriptionManually(
+  subscriptionId: string,
+  opts: { actorUserId: string; note?: string | null },
+): Promise<void> {
+  const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, subscriptionId) });
+  if (!sub) throw new Error("Subscription not found");
+  if (sub.status === "suspended") {
+    // Upgrade a dunning hold to a manual one without a second lifecycle event.
+    await db
+      .update(subscriptions)
+      .set({ suspensionSource: "manual", suspensionNote: opts.note ?? null })
+      .where(eq(subscriptions.id, subscriptionId));
+  } else {
+    if (!["active", "trialing", "past_due"].includes(sub.status)) {
+      throw new Error(`A ${sub.status.replace("_", " ")} subscription can't be suspended`);
+    }
+    await db
+      .update(subscriptions)
+      .set({
+        status: "suspended",
+        suspensionSource: "manual",
+        suspendedAt: new Date(),
+        suspensionNote: opts.note ?? null,
+      })
+      .where(eq(subscriptions.id, subscriptionId));
+    await emitSubscriptionLifecycle(subscriptionId, "subscription.suspended");
+  }
+  await writeAudit({
+    tenantId: sub.tenantId,
+    subscriptionId,
+    actorUserId: opts.actorUserId,
+    kind: "subscription_suspended",
+    payload: { source: "manual", note: opts.note ?? null, previousStatus: sub.status },
+  });
+}
+
+/** Lifts any hold (manual or dunning). Stripe's next sync re-derives the exact status. */
+export async function reactivateSubscription(
+  subscriptionId: string,
+  opts: { actorUserId: string },
+): Promise<void> {
+  const sub = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, subscriptionId) });
+  if (!sub) throw new Error("Subscription not found");
+  if (sub.status !== "suspended") throw new Error("This subscription isn't suspended");
+  await db
+    .update(subscriptions)
+    .set({ status: "active", suspensionSource: null, suspendedAt: null, suspensionNote: null })
+    .where(eq(subscriptions.id, subscriptionId));
+  await emitSubscriptionLifecycle(subscriptionId, "subscription.activated");
+  await writeAudit({
+    tenantId: sub.tenantId,
+    subscriptionId,
+    actorUserId: opts.actorUserId,
+    kind: "subscription_reactivated",
+    payload: { source: sub.suspensionSource ?? "dunning", clearedNote: sub.suspensionNote },
+  });
 }
 
 // ---------------------------------------------------------------------------

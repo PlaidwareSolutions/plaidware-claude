@@ -4,6 +4,7 @@ import { magicLink, organization } from "better-auth/plugins";
 import { db } from "../db";
 import { env } from "../env";
 import { sendEmail, emailShell, emailButton } from "./email";
+import { sendInvitationEmail } from "./invite-email";
 import { ac, orgRoles } from "./org-roles";
 import {
   emitMembershipChanged,
@@ -154,17 +155,13 @@ export const auth = betterAuth({
           });
         },
       },
-      // Invite emails get their real template in M2's tenancy milestone.
       sendInvitationEmail: async (data) => {
-        const url = `${env.APP_BASE_URL}/invite/${data.id}`;
-        await sendEmail({
+        await sendInvitationEmail({
           to: data.email,
-          subject: `You're invited to ${data.organization.name} on Plaidware`,
-          html: emailShell(
-            `Join ${data.organization.name}`,
-            `<p>${data.inviter.user.name} invited you to join <strong>${data.organization.name}</strong> as ${data.role}.</p>` +
-              emailButton(url, "Accept invitation"),
-          ),
+          invitationId: data.id,
+          organizationName: data.organization.name,
+          inviterName: data.inviter.user.name,
+          role: data.role,
         });
       },
     }),
