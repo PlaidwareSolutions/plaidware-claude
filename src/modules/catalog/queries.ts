@@ -103,3 +103,74 @@ export async function getProductBySlug(slug: string): Promise<ProductDto | null>
     components: comps.filter((c) => c.isActive).map(toComponentDto),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Ops → Product editor
+// ---------------------------------------------------------------------------
+
+export type ProductEditorDto = {
+  id: string;
+  slug: string;
+  name: string;
+  category: string;
+  tagline: string | null;
+  description: string;
+  features: string[];
+  color: string | null;
+  trialDays: number | null;
+  isActive: boolean;
+};
+
+export type ComponentEditorDto = {
+  id: string;
+  kind: string;
+  role: string;
+  interval: string | null;
+  intervalCount: number;
+  name: string;
+  description: string | null;
+  amountCents: number;
+  isRequired: boolean;
+  isActive: boolean;
+  /** A Stripe Price exists; otherwise it is minted at the next checkout. */
+  synced: boolean;
+};
+
+/** One product with every component (hidden ones included) for the ops editor. */
+export async function getProductForEditor(
+  id: string,
+): Promise<{ product: ProductEditorDto; components: ComponentEditorDto[] } | null> {
+  const p = await db.query.products.findFirst({ where: eq(products.id, id) });
+  if (!p) return null;
+  const comps = await db.query.productComponents.findMany({
+    where: eq(productComponents.productId, id),
+    orderBy: [asc(productComponents.sortOrder)],
+  });
+  return {
+    product: {
+      id: p.id,
+      slug: p.slug,
+      name: p.name,
+      category: p.category,
+      tagline: p.tagline,
+      description: p.description,
+      features: p.features,
+      color: p.color,
+      trialDays: p.trialDays,
+      isActive: p.isActive,
+    },
+    components: comps.map((c) => ({
+      id: c.id,
+      kind: c.kind,
+      role: c.role,
+      interval: c.interval,
+      intervalCount: c.intervalCount,
+      name: c.name,
+      description: c.description,
+      amountCents: c.amountCents,
+      isRequired: c.isRequired,
+      isActive: c.isActive,
+      synced: Boolean(c.stripePriceId),
+    })),
+  };
+}

@@ -1,13 +1,21 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
 import { requireOpsPage } from "@/policy";
-import { db } from "@/db";
-import { productComponents, products } from "@/modules/catalog/schema";
-import { asc } from "drizzle-orm";
+import { getProductForEditor } from "@/modules/catalog/queries";
 import { ProductEditor } from "@/modules/catalog/components/product-editor";
+import { OPS } from "@/lib/routes";
+import { PageHeader } from "@/components/page-header";
+import { StatusBadge } from "@/components/status-badge";
 
-export const metadata = { title: "Edit product" };
 export const dynamic = "force-dynamic";
+
+const load = cache(getProductForEditor);
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const data = await load(id);
+  return { title: data ? `${data.product.name} · Products` : "Product" };
+}
 
 export default async function OpsProductEditPage({
   params,
@@ -17,40 +25,19 @@ export default async function OpsProductEditPage({
   await requireOpsPage();
 
   const { id } = await params;
-  const product = await db.query.products.findFirst({ where: eq(products.id, id) });
-  if (!product) notFound();
-  const components = await db.query.productComponents.findMany({
-    where: eq(productComponents.productId, id),
-    orderBy: [asc(productComponents.sortOrder)],
-  });
+  const data = await load(id);
+  if (!data) notFound();
 
   return (
-    <ProductEditor
-      product={{
-        id: product.id,
-        slug: product.slug,
-        name: product.name,
-        category: product.category,
-        tagline: product.tagline,
-        description: product.description,
-        features: product.features,
-        color: product.color,
-        trialDays: product.trialDays,
-        isActive: product.isActive,
-      }}
-      components={components.map((c) => ({
-        id: c.id,
-        kind: c.kind,
-        role: c.role,
-        interval: c.interval,
-        intervalCount: c.intervalCount,
-        name: c.name,
-        description: c.description,
-        amountCents: c.amountCents,
-        isRequired: c.isRequired,
-        isActive: c.isActive,
-        synced: Boolean(c.stripePriceId),
-      }))}
-    />
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        back={{ href: OPS.products, label: "Products" }}
+        title={data.product.name}
+        badge={<StatusBadge kind="product" status={data.product.isActive ? "active" : "hidden"} />}
+        meta={`/${data.product.slug} · ${data.product.category}`}
+        description="Catalog copy, trial, and the pricing components each checkout is built from."
+      />
+      <ProductEditor product={data.product} components={data.components} />
+    </div>
   );
 }

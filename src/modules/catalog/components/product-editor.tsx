@@ -29,32 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-type ProductForm = {
-  id: string;
-  slug: string;
-  name: string;
-  category: string;
-  tagline: string | null;
-  description: string;
-  features: string[];
-  color: string | null;
-  trialDays: number | null;
-  isActive: boolean;
-};
-
-type ComponentRow = {
-  id: string;
-  kind: string;
-  role: string;
-  interval: string | null;
-  intervalCount: number;
-  name: string;
-  description: string | null;
-  amountCents: number;
-  isRequired: boolean;
-  isActive: boolean;
-  synced: boolean;
-};
+import type { ComponentEditorDto as ComponentRow, ProductEditorDto as ProductForm } from "../queries";
 
 function freqLabel(c: { kind: string; interval?: string | null; intervalCount?: number | null }) {
   if (c.kind === "one_time") return "one-time";
@@ -132,17 +107,7 @@ export function ProductEditor({
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-heading">{product.name}</h1>
-          <p className="text-sm text-muted-foreground">/{product.slug}</p>
-        </div>
-        <Badge variant={form.isActive ? "secondary" : "destructive"}>
-          {form.isActive ? "active" : "hidden"}
-        </Badge>
-      </div>
-
+    <div className="flex flex-col gap-6">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Product</CardTitle>
