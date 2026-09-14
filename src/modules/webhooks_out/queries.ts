@@ -88,3 +88,12 @@ export async function tenantDeliveryHealth(
     pending: rows.filter((r) => r.status === "pending").length,
   };
 }
+
+/** Sidebar pill: deliveries that need a human (dead letters + 410-disabled). */
+export async function countDeadDeliveries(): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(webhookDeliveries)
+    .where(inArray(webhookDeliveries.status, ["dead", "disabled"]));
+  return row?.n ?? 0;
+}

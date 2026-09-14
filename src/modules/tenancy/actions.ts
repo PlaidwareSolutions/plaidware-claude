@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { TENANT } from "@/lib/routes";
+import { revalidateClientViews } from "@/lib/ops-revalidate";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../../lib/auth";
@@ -39,7 +41,7 @@ export async function inviteMemberAction(input: z.infer<typeof inviteSchema>): P
         role: parsed.role,
       },
     });
-    revalidatePath("/team");
+    revalidatePath(TENANT.team);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -53,7 +55,7 @@ export async function cancelInviteAction(tenantId: string, invitationId: string)
       headers: await headers(),
       body: { invitationId },
     });
-    revalidatePath("/team");
+    revalidatePath(TENANT.team);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -77,7 +79,7 @@ export async function updateMemberRoleAction(input: z.infer<typeof roleSchema>):
       headers: await headers(),
       body: { organizationId: parsed.tenantId, memberId: parsed.memberId, role: parsed.role },
     });
-    revalidatePath("/team");
+    revalidatePath(TENANT.team);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -94,7 +96,7 @@ export async function removeMemberAction(tenantId: string, memberId: string): Pr
       headers: await headers(),
       body: { organizationId: tenantId, memberIdOrEmail: memberId },
     });
-    revalidatePath("/team");
+    revalidatePath(TENANT.team);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -109,7 +111,7 @@ export async function transferOwnershipAction(tenantId: string, toUserId: string
     }
     void session;
     await transferOwnership(tenantId, toUserId);
-    revalidatePath("/team");
+    revalidatePath(TENANT.team);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -138,7 +140,7 @@ export async function opsCreateTenantAction(input: z.infer<typeof createTenantSc
       ? await uniqueSlug(parsed.slug)
       : await uniqueSlug(parsed.name);
     await createTenantWithOwner({ name: parsed.name, slug, ownerUserId: owner.id });
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -152,8 +154,8 @@ export async function opsSetTenantStatusAction(
   try {
     await requireOps();
     await setTenantStatus(tenantId, status);
-    revalidatePath("/ops/tenants");
-    revalidatePath(`/ops/tenants/${tenantId}`);
+    revalidateClientViews();
+    revalidateClientViews(tenantId);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -164,7 +166,7 @@ export async function opsDeleteTenantAction(tenantId: string, confirmSlug: strin
   try {
     await requireOps();
     await deleteTenant(tenantId, confirmSlug);
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return fail(e);

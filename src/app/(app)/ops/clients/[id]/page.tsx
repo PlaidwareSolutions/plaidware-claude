@@ -1,6 +1,6 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { getSession, isOps } from "@/policy";
+import { requireOpsPage } from "@/policy";
 import { db } from "@/db";
 import { invoices } from "@/modules/billing/schema";
 import { dunningStates, payments } from "@/modules/billing/ar-schema";
@@ -16,7 +16,7 @@ import { intervalLabel } from "@/modules/billing/mappers";
 import { OpsCustomPricing } from "@/modules/billing/components/ops-custom-pricing";
 import { isMarketingSlug } from "@/modules/webhooks_out/logic";
 
-export const metadata = { title: "Tenant" };
+export const metadata = { title: "Client" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsTenantDetailPage({
@@ -24,9 +24,7 @@ export default async function OpsTenantDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!isOps(session)) redirect("/dashboard");
+  await requireOpsPage();
 
   const { id } = await params;
   const tenant = await getTenant(id);
@@ -158,10 +156,10 @@ export default async function OpsTenantDetailPage({
           })),
       }))}
     />
-    <div className="mx-auto w-full max-w-5xl">
+    <div>
       <OpsCustomPricing tenantId={id} rows={pricingRows} />
     </div>
-    <div className="mx-auto w-full max-w-5xl">
+    <div>
       <OpsProvisioning
         tenantId={id}
         items={provisioningItems}

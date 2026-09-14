@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession, isOps } from "@/policy";
+import { OPS } from "@/lib/routes";
 import { getUserTenants, listMembers } from "@/modules/tenancy/queries";
 import { listTenantInvoices, listTenantSubscriptions } from "@/modules/billing/queries";
 import { formatCents } from "@/lib/money";
@@ -11,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 export default async function DashboardPage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  if (isOps(session)) redirect("/ops");
+  if (isOps(session)) redirect(OPS.home);
 
   const tenants = await getUserTenants(session.user.id);
   const active =

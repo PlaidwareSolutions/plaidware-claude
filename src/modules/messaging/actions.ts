@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { OPS, TENANT } from "@/lib/routes";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
@@ -32,8 +33,8 @@ export async function createThreadAction(input: z.infer<typeof createSchema>): P
       senderRole: ops ? "ops" : "tenant",
       subscriptionId: p.subscriptionId,
     });
-    revalidatePath("/inbox");
-    revalidatePath("/ops/inbox");
+    revalidatePath(TENANT.inbox);
+    revalidatePath(OPS.inbox);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -55,8 +56,8 @@ export async function replyAction(threadId: string, body: string): Promise<R> {
       senderUserId: session.user.id,
       senderRole: ops ? "ops" : "tenant",
     });
-    revalidatePath("/inbox");
-    revalidatePath("/ops/inbox");
+    revalidatePath(TENANT.inbox);
+    revalidatePath(OPS.inbox);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -67,7 +68,7 @@ export async function closeThreadAction(threadId: string): Promise<R> {
   try {
     await requireOps();
     await closeThread(threadId);
-    revalidatePath("/ops/inbox");
+    revalidatePath(OPS.inbox);
     return { ok: true };
   } catch (e) {
     return fail(e);

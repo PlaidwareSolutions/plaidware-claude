@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { TENANT } from "@/lib/routes";
+import { revalidateClientViews } from "@/lib/ops-revalidate";
 import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { requireOps } from "../../policy";
@@ -27,8 +29,8 @@ export async function runSeoRecheckAction(
     if (!prov?.domainUrl) throw new Error("Set a live domain first");
     cooldown.set(subscriptionId, Date.now());
     await auditOneSubscription(subscriptionId, prov.domainUrl);
-    revalidatePath("/monitoring");
-    revalidatePath("/ops/tenants");
+    revalidatePath(TENANT.monitoring);
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Recheck failed" };
@@ -74,7 +76,7 @@ export async function snoozeSeoAction(
           snoozedByUserId: session.user.id,
         },
       });
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Snooze failed" };

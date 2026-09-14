@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { OPS } from "@/lib/routes";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
@@ -71,7 +72,7 @@ export async function createPromoAction(input: z.infer<typeof createSchema>): Pr
     if (stripeConfigured() && !needsMintedCoupon(row)) {
       await syncPromoToStripe(row.id);
     }
-    revalidatePath("/ops/promos");
+    revalidatePath(OPS.promos);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -89,7 +90,7 @@ export async function archivePromoAction(promoId: string): Promise<ActionResult>
         .promotionCodes.update(promo.stripePromotionCodeId, { active: false })
         .catch(() => {});
     }
-    revalidatePath("/ops/promos");
+    revalidatePath(OPS.promos);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -100,7 +101,7 @@ export async function syncPromoAction(promoId: string): Promise<ActionResult> {
   try {
     await requireOps();
     await syncPromoToStripe(promoId);
-    revalidatePath("/ops/promos");
+    revalidatePath(OPS.promos);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -124,7 +125,7 @@ export async function togglePromoAssignmentAction(
         .delete(promoAssignments)
         .where(and(eq(promoAssignments.promoCodeId, promoId), eq(promoAssignments.tenantId, tenantId)));
     }
-    revalidatePath("/ops/promos");
+    revalidatePath(OPS.promos);
     return { ok: true };
   } catch (e) {
     return fail(e);

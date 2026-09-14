@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getSession, isOps } from "@/policy";
+import { requireOpsPage } from "@/policy";
 import { listAllTenants, listPlatformUsers } from "@/modules/tenancy/queries";
 import { countNewContactSubmissions } from "@/modules/contact/queries";
 import { listActiveProducts } from "@/modules/catalog/queries";
@@ -8,14 +7,14 @@ import { getPlatformBillingStats } from "@/modules/billing/queries";
 import { getActiveIncidents, findQuietReporters } from "@/modules/monitoring/service";
 import { unreadCount } from "@/modules/messaging/service";
 import { formatCents } from "@/lib/money";
+import { OPS } from "@/lib/routes";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata = { title: "Command Center" };
+export const dynamic = "force-dynamic";
 
 export default async function OpsHomePage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!isOps(session)) redirect("/dashboard");
+  await requireOpsPage();
 
   const [tenants, users, newLeads, products, billing, incidents, quiet, inboxUnread] =
     await Promise.all([
@@ -30,29 +29,29 @@ export default async function OpsHomePage() {
     ]);
 
   const pillars = [
-    { n: 1, name: "Onboarding", value: `${newLeads} new leads`, detail: "Contact requests awaiting reply", href: "/ops/contact-inbox" },
-    { n: 2, name: "Provisioning", value: `${quiet.length} gaps`, detail: "Quiet or unconfigured reporters", href: "/ops/incidents" },
-    { n: 3, name: "Access & roles", value: `${users.length} accounts`, detail: `${tenants.length} tenant workspaces`, href: "/ops/users" },
-    { n: 4, name: "Monitoring", value: `${incidents.length} incidents`, detail: incidents[0] ? `${incidents[0].productName} is ${incidents[0].status}` : "All systems healthy", href: "/ops/incidents" },
-    { n: 5, name: "Billing", value: formatCents(billing.pastDueCents), detail: `${billing.failedInvoices} failed invoices · ${billing.suspendedSubscriptions} suspended`, href: "/ops/billing" },
-    { n: 6, name: "Automations", value: "8 jobs", detail: "Probes, dunning, sweeps, digests — on schedule", href: "/ops/incidents" },
+    { n: 1, name: "Onboarding", value: `${newLeads} new leads`, detail: "Contact requests awaiting reply", href: OPS.leads },
+    { n: 2, name: "Provisioning", value: `${quiet.length} gaps`, detail: "Quiet or unconfigured reporters", href: OPS.monitoring },
+    { n: 3, name: "Access & roles", value: `${users.length} accounts`, detail: `${tenants.length} tenant workspaces`, href: OPS.access },
+    { n: 4, name: "Monitoring", value: `${incidents.length} incidents`, detail: incidents[0] ? `${incidents[0].productName} is ${incidents[0].status}` : "All systems healthy", href: OPS.monitoring },
+    { n: 5, name: "Billing", value: formatCents(billing.pastDueCents), detail: `${billing.failedInvoices} failed invoices · ${billing.suspendedSubscriptions} suspended`, href: OPS.billing },
+    { n: 6, name: "Automations", value: "8 jobs", detail: "Probes, dunning, sweeps, digests — on schedule", href: OPS.monitoring },
   ];
 
   const tiles = [
-    { label: "MRR", value: formatCents(billing.mrrCents), href: "/ops/billing" },
-    { label: "Past-due AR", value: formatCents(billing.pastDueCents), href: "/ops/billing" },
-    { label: "Live subscriptions", value: billing.liveSubscriptions, href: "/ops/subscriptions" },
-    { label: "Trials", value: billing.trialing, href: "/ops/subscriptions" },
-    { label: "Suspended", value: billing.suspendedSubscriptions, href: "/ops/subscriptions" },
-    { label: "Failed invoices", value: billing.failedInvoices, href: "/ops/billing" },
-    { label: "Tenants", value: tenants.length, href: "/ops/tenants" },
-    { label: "Products", value: products.length, href: "/ops/products" },
-    { label: "Platform users", value: users.length, href: "/ops/users" },
-    { label: "New contact requests", value: newLeads, href: "/ops/contact-inbox" },
+    { label: "MRR", value: formatCents(billing.mrrCents), href: OPS.billing },
+    { label: "Past-due AR", value: formatCents(billing.pastDueCents), href: OPS.billing },
+    { label: "Live subscriptions", value: billing.liveSubscriptions, href: OPS.subscriptions },
+    { label: "Trials", value: billing.trialing, href: OPS.subscriptions },
+    { label: "Suspended", value: billing.suspendedSubscriptions, href: OPS.subscriptions },
+    { label: "Failed invoices", value: billing.failedInvoices, href: OPS.billing },
+    { label: "Tenants", value: tenants.length, href: OPS.clients },
+    { label: "Products", value: products.length, href: OPS.products },
+    { label: "Platform users", value: users.length, href: OPS.access },
+    { label: "New contact requests", value: newLeads, href: OPS.leads },
   ];
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-heading">Plaidware Command Center</h1>
         <p className="text-sm text-muted-foreground">
@@ -96,7 +95,7 @@ export default async function OpsHomePage() {
       </div>
 
       {inboxUnread > 0 && (
-        <Link href="/ops/inbox" className="text-sm text-coral hover:underline">
+        <Link href={OPS.inbox} className="text-sm text-coral hover:underline">
           {inboxUnread} unread customer message{inboxUnread === 1 ? "" : "s"} →
         </Link>
       )}

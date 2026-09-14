@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { OPS } from "@/lib/routes";
 import { z } from "zod";
 import { requireOps } from "../../policy";
 import { requeueDelivery } from "./service";
@@ -12,7 +13,7 @@ export async function requeueDeliveryAction(
     await requireOps();
     const id = z.uuid().parse(deliveryRowId);
     await requeueDelivery(id);
-    revalidatePath("/ops/webhooks");
+    revalidatePath(OPS.webhooks);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Requeue failed" };

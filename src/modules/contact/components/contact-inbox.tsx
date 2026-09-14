@@ -31,14 +31,7 @@ export function ContactInbox({ submissions }: { submissions: Submission[] }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-heading">Contact Inbox</h1>
-        <p className="text-sm text-muted-foreground">
-          Demo requests and messages from the marketing site.
-        </p>
-      </div>
-
+    <div className="flex max-w-3xl flex-col gap-6">
       {submissions.length === 0 && (
         <div className="rounded-lg border bg-card py-16 text-center text-muted-foreground">
           <Inbox className="mx-auto mb-2 size-8 opacity-40" />

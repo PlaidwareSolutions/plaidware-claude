@@ -9,23 +9,19 @@ import {
   Building2,
   Check,
   ChevronsUpDown,
-  CreditCard,
   Home,
   MessageSquare,
-  Server,
-  Siren,
-  Inbox,
   LayoutDashboard,
   LogOut,
   Moon,
   Menu,
-  Package,
   Receipt,
   Settings,
   Sun,
   Users,
-  Webhook,
 } from "lucide-react";
+import { isNavActive, OPS_NAV, type NavItem, type OpsNavCounts } from "@/components/ops-nav";
+import { OPS, TENANT } from "@/lib/routes";
 import { authClient } from "@/lib/auth-client";
 import { setActiveTenantAction } from "@/modules/tenancy/actions";
 import type { TenantSummary } from "@/modules/tenancy/queries";
@@ -42,42 +38,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
-type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
-
 const TENANT_NAV: NavItem[] = [
-  { href: "/dashboard", label: "Home", icon: Home },
-  { href: "/monitoring", label: "Monitoring", icon: Activity },
-  { href: "/billing", label: "Billing", icon: Receipt },
-  { href: "/inbox", label: "Messages", icon: MessageSquare },
-  { href: "/team", label: "Team", icon: Users },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
-
-const OPS_NAV: NavItem[] = [
-  { href: "/ops", label: "Command Center", icon: LayoutDashboard },
-  { href: "/ops/tenants", label: "Tenants", icon: Building2 },
-  { href: "/ops/subscriptions", label: "Subscriptions", icon: Receipt },
-  { href: "/ops/billing", label: "Billing", icon: CreditCard },
-  { href: "/ops/products", label: "Products", icon: Package },
-  { href: "/ops/incidents", label: "Incidents", icon: Siren },
-  { href: "/ops/inbox", label: "Inbox", icon: MessageSquare },
-  { href: "/ops/costs", label: "Hosting Costs", icon: Server },
-  { href: "/ops/webhooks", label: "Webhooks", icon: Webhook },
-  { href: "/ops/users", label: "Access", icon: Users },
-  { href: "/ops/contact-inbox", label: "Contact Inbox", icon: Inbox },
+  { href: TENANT.dashboard, label: "Home", icon: Home, exact: true },
+  { href: TENANT.monitoring, label: "Monitoring", icon: Activity },
+  { href: TENANT.billing, label: "Billing", icon: Receipt },
+  { href: TENANT.inbox, label: "Messages", icon: MessageSquare },
+  { href: TENANT.team, label: "Team", icon: Users },
+  { href: TENANT.settings, label: "Settings", icon: Settings },
 ];
 
 export function AppShell({
   user,
   tenants,
   activeTenantId,
-  unread,
+  counts,
   children,
 }: {
   user: { name: string; email: string; isOps: boolean };
   tenants: TenantSummary[];
   activeTenantId: string | null;
-  unread?: { tenant: number; ops: number };
+  counts?: { tenantUnread: number; ops?: OpsNavCounts };
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -86,7 +66,7 @@ export function AppShell({
   const [pending, startTransition] = useTransition();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const inOps = pathname.startsWith("/ops");
+  const inOps = isNavActive(OPS.home, pathname);
   const nav = inOps ? OPS_NAV : TENANT_NAV;
   const active = tenants.find((t) => t.id === activeTenantId) ?? null;
 
@@ -107,8 +87,13 @@ export function AppShell({
   const sidebar = (
     <nav className="flex flex-col gap-1 p-3">
       {nav.map((item) => {
-        const current =
-          item.href === "/ops" ? pathname === "/ops" : pathname.startsWith(item.href);
+        const current = isNavActive(item.href, pathname, item.exact);
+        const count =
+          item.href === TENANT.inbox
+            ? (counts?.tenantUnread ?? 0)
+            : item.countKey
+              ? (counts?.ops?.[item.countKey] ?? 0)
+              : 0;
         return (
           <Link
             key={item.href}
@@ -123,11 +108,8 @@ export function AppShell({
           >
             <item.icon className="size-4" />
             {item.label}
-            {(item.href === "/inbox" && (unread?.tenant ?? 0) > 0) && (
-              <span className="ml-auto rounded-full bg-coral px-1.5 text-[10px] font-bold text-white">{unread!.tenant}</span>
-            )}
-            {(item.href === "/ops/inbox" && (unread?.ops ?? 0) > 0) && (
-              <span className="ml-auto rounded-full bg-coral px-1.5 text-[10px] font-bold text-white">{unread!.ops}</span>
+            {count > 0 && (
+              <span className="ml-auto rounded-full bg-coral px-1.5 text-[10px] font-bold text-white">{count}</span>
             )}
           </Link>
         );
@@ -138,7 +120,7 @@ export function AppShell({
             {inOps ? "Tenant view" : "Operations"}
           </div>
           <Link
-            href={inOps ? "/dashboard" : "/ops"}
+            href={inOps ? TENANT.dashboard : OPS.home}
             onClick={() => setMobileOpen(false)}
             className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
@@ -240,7 +222,7 @@ export function AppShell({
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link href="/settings">
+                <Link href={TENANT.settings}>
                   <Settings className="size-4" /> Settings
                 </Link>
               </DropdownMenuItem>

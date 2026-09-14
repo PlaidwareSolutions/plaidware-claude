@@ -1,14 +1,12 @@
-import { redirect } from "next/navigation";
-import { getSession, isOps } from "@/policy";
+import { requireOpsPage } from "@/policy";
 import { listContactSubmissions } from "@/modules/contact/queries";
 import { ContactInbox } from "@/modules/contact/components/contact-inbox";
 
-export const metadata = { title: "Contact Inbox" };
+export const metadata = { title: "Leads · Inbox" };
+export const dynamic = "force-dynamic";
 
 export default async function ContactInboxPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!isOps(session)) redirect("/dashboard");
+  await requireOpsPage();
 
   const submissions = await listContactSubmissions();
   return (

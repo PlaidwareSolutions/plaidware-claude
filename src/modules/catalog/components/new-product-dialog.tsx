@@ -1,4 +1,5 @@
 "use client";
+import { OPS } from "@/lib/routes";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -31,7 +32,7 @@ export function NewProductDialog() {
     if (res.ok) {
       toast.success("Product created — add pricing components, then make it visible");
       setOpen(false);
-      router.push(`/ops/products/${res.id}`);
+      router.push(OPS.product(res.id));
     } else toast.error(res.error);
   }
 

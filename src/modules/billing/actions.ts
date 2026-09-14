@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { TENANT } from "@/lib/routes";
 import { z } from "zod";
 import { env } from "../../env";
 import { requireMembership, requireUser } from "../../policy";
@@ -72,8 +73,8 @@ export async function createCheckoutAction(
       skipAutoPromos: parsed.skipAutoPromos ?? false,
       userId: session.user.id,
     });
-    revalidatePath("/billing");
-    revalidatePath("/dashboard");
+    revalidatePath(TENANT.billing);
+    revalidatePath(TENANT.dashboard);
     return { ok: true, ...result };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Checkout failed" };
@@ -117,7 +118,7 @@ export async function changeSubscriptionItemsAction(
       removeItemIds: p.removeItemIds,
       actorUserId: session.user.id,
     });
-    revalidatePath("/billing");
+    revalidatePath(TENANT.billing);
     return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Change failed" };
@@ -133,7 +134,7 @@ export async function cancelSubscriptionAction(
     const sub = await getSubscriptionForTenant(subscriptionId, tenantId);
     if (!sub) throw new Error("Subscription not found");
     await cancelSubscription(subscriptionId);
-    revalidatePath("/billing");
+    revalidatePath(TENANT.billing);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Cancel failed" };

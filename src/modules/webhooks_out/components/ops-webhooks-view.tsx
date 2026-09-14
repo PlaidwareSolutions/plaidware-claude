@@ -63,14 +63,11 @@ export function OpsWebhooksView({
   recent: WebhookDeliveryDto[];
 }) {
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-heading">Outbound webhooks</h1>
-        <p className="text-sm text-muted-foreground">
-          MHub lifecycle deliveries and provisioning handshakes. Dead letters exhausted their
-          retries; requeue restarts the backoff with the same delivery id.
-        </p>
-      </div>
+    <div className="flex flex-col gap-6">
+      <p className="text-sm text-muted-foreground">
+        MHub lifecycle deliveries and provisioning handshakes. Dead letters exhausted their
+        retries; requeue restarts the backoff with the same delivery id.
+      </p>
 
       <Card>
         <CardHeader>

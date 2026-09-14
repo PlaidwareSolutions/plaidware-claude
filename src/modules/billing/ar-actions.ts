@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
@@ -17,12 +16,11 @@ import {
   switchSubscriptionToAutoCharge,
 } from "./ar-service";
 import { cancelSubscription } from "./service";
+import { revalidateClientViews } from "@/lib/ops-revalidate";
 
 /** Every ops surface that renders billing state. */
-const BILLING_PATHS = ["/ops/billing", "/ops/subscriptions", "/ops/tenants", "/ops"] as const;
 function revalidateBilling(tenantId?: string) {
-  for (const p of BILLING_PATHS) revalidatePath(p);
-  if (tenantId) revalidatePath(`/ops/tenants/${tenantId}`);
+  revalidateClientViews(tenantId);
 }
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -186,7 +184,7 @@ export async function setTenantPriceOverrideAction(
           },
         });
     }
-    revalidatePath(`/ops/tenants/${p.tenantId}`);
+    revalidateBilling(p.tenantId);
     return { ok: true };
   } catch (e) {
     return fail(e);

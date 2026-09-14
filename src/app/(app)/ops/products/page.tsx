@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getSession, isOps } from "@/policy";
+import { requireOpsPage } from "@/policy";
+import { OPS } from "@/lib/routes";
 import { listAllProductsOps } from "@/modules/catalog/queries";
 import { formatCents } from "@/lib/money";
 import { NewProductDialog } from "@/modules/catalog/components/new-product-dialog";
@@ -15,16 +15,15 @@ import {
 } from "@/components/ui/table";
 
 export const metadata = { title: "Products" };
+export const dynamic = "force-dynamic";
 
 export default async function OpsProductsPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!isOps(session)) redirect("/dashboard");
+  await requireOpsPage();
 
   const products = await listAllProductsOps();
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-heading">Products</h1>
@@ -50,7 +49,7 @@ export default async function OpsProductsPage() {
               return (
                 <TableRow key={p.id}>
                   <TableCell>
-                    <Link href={`/ops/products/${p.id}`} className="flex items-center gap-2 font-medium text-heading hover:text-primary">
+                    <Link href={OPS.product(p.id)} className="flex items-center gap-2 font-medium text-heading hover:text-primary">
                       <span className="size-2 rounded-full" style={{ background: p.color ?? "var(--primary)" }} />
                       {p.name}
                     </Link>

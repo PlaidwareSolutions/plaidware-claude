@@ -1,5 +1,7 @@
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
+import { AUTH, TENANT } from "../lib/routes";
 import { auth } from "../lib/auth";
 import { db } from "../db";
 import { member } from "../modules/auth/schema";
@@ -50,6 +52,18 @@ export function isOps(session: { user: { platformRole?: string | null } }) {
 export async function requireOps() {
   const session = await requireUser();
   if (!isOps(session)) throw new PolicyError(403, "Ops access required");
+  return session;
+}
+
+/**
+ * Page/layout variant of requireOps(): redirects instead of throwing. Called
+ * by the ops layout (hard loads) AND by every ops page — layouts don't re-run
+ * on client-side navigation, so the page check is the one that always holds.
+ */
+export async function requireOpsPage() {
+  const session = await getSession();
+  if (!session) redirect(AUTH.login);
+  if (!isOps(session)) redirect(TENANT.dashboard);
   return session;
 }
 

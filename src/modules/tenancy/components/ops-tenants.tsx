@@ -1,4 +1,5 @@
 "use client";
+import { OPS } from "@/lib/routes";
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -87,12 +88,12 @@ export function OpsTenants({ tenants }: { tenants: OpsTenantRow[] }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-heading">Tenants</h1>
+          <h1 className="text-2xl font-semibold text-heading">Clients</h1>
           <p className="text-sm text-muted-foreground">
-            Every customer organization on the platform.
+            Every customer workspace on the platform.
           </p>
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -156,7 +157,7 @@ export function OpsTenants({ tenants }: { tenants: OpsTenantRow[] }) {
             {tenants.map((t) => (
               <TableRow key={t.id}>
                 <TableCell>
-                  <a href={`/ops/tenants/${t.id}`} className="font-medium text-heading hover:text-primary">
+                  <a href={OPS.client(t.id)} className="font-medium text-heading hover:text-primary">
                     {t.name}
                   </a>
                   <div className="text-xs text-muted-foreground">{t.slug}</div>

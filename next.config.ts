@@ -16,6 +16,21 @@ const nextConfig: NextConfig = {
       ],
     },
   },
+  // Ops IA moved to client-centric routes (2026-09). Temporary (307) until the
+  // new layout has settled — browsers cache 308s forever.
+  async redirects() {
+    return [
+      { source: "/ops/tenants", destination: "/ops/clients", permanent: false },
+      { source: "/ops/tenants/:id", destination: "/ops/clients/:id", permanent: false },
+      { source: "/ops/subscriptions", destination: "/ops/billing/subscriptions", permanent: false },
+      { source: "/ops/incidents", destination: "/ops/monitoring", permanent: false },
+      { source: "/ops/contact-inbox", destination: "/ops/inbox/leads", permanent: false },
+      { source: "/ops/users", destination: "/ops/system/access", permanent: false },
+      { source: "/ops/webhooks", destination: "/ops/system/webhooks", permanent: false },
+      { source: "/ops/costs", destination: "/ops/system/costs", permanent: false },
+      { source: "/ops/promos", destination: "/ops/system/promos", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

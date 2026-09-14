@@ -28,6 +28,7 @@ import {
   toggleDunningPauseAction,
 } from "../ar-actions";
 import { formatCents } from "@/lib/money";
+import { OPS } from "@/lib/routes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -173,7 +174,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
               : "Emails a payment link — no card on file, won't collect on its own",
         amountCents: amount,
         tone: !a || a.error ? "muted" : autoOk ? "ok" : "warn",
-        href: `/ops/tenants/${s.tenantId}`,
+        href: OPS.client(s.tenantId),
       });
     }
     out.push({
@@ -280,14 +281,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-heading">Billing</h1>
-          <p className="text-sm text-muted-foreground">
-            Who&apos;s paying, what&apos;s about to bill, and whether it will actually collect.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
           <Button
             variant="outline"
             className="gap-2"
@@ -319,7 +313,6 @@ export function OpsBillingBoard(p: BillingBoardProps) {
           <Button variant="outline" className="gap-2" onClick={exportCsv}>
             <Download className="size-4" /> Export CSV
           </Button>
-        </div>
       </div>
 
       {/* Summary */}
@@ -399,7 +392,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                     <TableCell>
                       {i === 0 ? (
                         <>
-                          <Link href={`/ops/tenants/${t.id}`} className="font-medium text-heading hover:text-primary">
+                          <Link href={OPS.client(t.id)} className="font-medium text-heading hover:text-primary">
                             {t.name}
                           </Link>
                           <div className="text-xs text-muted-foreground">{t.ownerEmail ?? t.slug}</div>
@@ -452,7 +445,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>{t.name}</DropdownMenuLabel>
                             <DropdownMenuItem asChild>
-                              <Link href={`/ops/tenants/${t.id}`}>Open tenant</Link>
+                              <Link href={OPS.client(t.id)}>Open tenant</Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => setInvoiceFor({ id: t.id, name: t.name })}>
                               <FilePlus2 className="size-4" /> New invoice
@@ -598,7 +591,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Link href={`/ops/tenants/${inv.tenantId}`} className="hover:text-primary">{inv.tenantName}</Link>
+                    <Link href={OPS.client(inv.tenantId)} className="hover:text-primary">{inv.tenantName}</Link>
                     <div className="text-xs text-muted-foreground">{fmtDay(inv.createdAt)}</div>
                   </TableCell>
                   <TableCell>{invoiceBadge(inv.status)}</TableCell>

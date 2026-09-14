@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { OPS } from "@/lib/routes";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
@@ -33,7 +34,7 @@ export async function registerHostedAppAction(input: z.infer<typeof appSchema>):
         .values({ productId: p.productId, hostedAppId: app.id })
         .onConflictDoNothing();
     }
-    revalidatePath("/ops/costs");
+    revalidatePath(OPS.costs);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -63,7 +64,7 @@ export async function toggleAppProductLinkAction(
           ),
         );
     }
-    revalidatePath("/ops/costs");
+    revalidatePath(OPS.costs);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -85,7 +86,7 @@ export async function upsertManualCostAction(
         target: [appCostSamples.hostedAppId, appCostSamples.month, appCostSamples.source],
         set: { costCents, createdAt: new Date() },
       });
-    revalidatePath("/ops/costs");
+    revalidatePath(OPS.costs);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -98,7 +99,7 @@ export async function syncRailwayNowAction(): Promise<
   try {
     await requireOps();
     const r = await syncRailwayCosts(currentMonth());
-    revalidatePath("/ops/costs");
+    revalidatePath(OPS.costs);
     return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Sync failed" };

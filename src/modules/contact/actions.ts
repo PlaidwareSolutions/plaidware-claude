@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { OPS } from "@/lib/routes";
 import { z } from "zod";
 import { db } from "../../db";
 import { eq } from "drizzle-orm";
@@ -68,7 +69,7 @@ export async function setContactStatusAction(
         handledAt: status === "new" ? null : new Date(),
       })
       .where(eq(contactSubmissions.id, id));
-    revalidatePath("/ops/contact-inbox");
+    revalidatePath(OPS.leads);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Update failed" };

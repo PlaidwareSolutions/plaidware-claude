@@ -33,7 +33,7 @@ export function IncidentsView({
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-heading">Monitoring</h1>
         <p className="text-sm text-muted-foreground">

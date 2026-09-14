@@ -1,6 +1,6 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
-import { getSession, isOps } from "@/policy";
+import { requireOpsPage } from "@/policy";
 import { db } from "@/db";
 import { productComponents, products } from "@/modules/catalog/schema";
 import { asc } from "drizzle-orm";
@@ -14,9 +14,7 @@ export default async function OpsProductEditPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!isOps(session)) redirect("/dashboard");
+  await requireOpsPage();
 
   const { id } = await params;
   const product = await db.query.products.findFirst({ where: eq(products.id, id) });

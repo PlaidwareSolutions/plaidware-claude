@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateClientViews } from "@/lib/ops-revalidate";
 import { z } from "zod";
 import { requireOps, requireUser } from "../../policy";
 import {
@@ -46,7 +46,7 @@ export async function createClientSetupAction(
     const session = await requireOps();
     const p = createSchema.parse(input);
     const r = await createClientSetup({ ...p, actorUserId: session.user.id });
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true, link: r.link, tenantId: r.tenantId };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Setup creation failed" };
@@ -87,7 +87,7 @@ export async function revokeSetupAction(inviteId: string): Promise<{ ok: boolean
   try {
     await requireOps();
     await revokeSetup(inviteId);
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Revoke failed" };
@@ -101,7 +101,7 @@ export async function regenerateSetupLinkAction(
     const session = await requireOps();
     z.string().uuid().parse(inviteId);
     const { link } = await regenerateSetupLink(inviteId, session.user.id);
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true, link };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not regenerate link" };

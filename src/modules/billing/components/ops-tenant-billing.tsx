@@ -8,6 +8,7 @@ import { ArrowLeft, ExternalLink, FilePlus2, HandCoins } from "lucide-react";
 import type { SubscriptionDto } from "../queries";
 import { toggleDunningPauseAction } from "../ar-actions";
 import { formatCents } from "@/lib/money";
+import { OPS } from "@/lib/routes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,10 +81,10 @@ export function OpsTenantBilling({
   );
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
-        <Link href="/ops/tenants" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-4" /> Tenants
+        <Link href={OPS.clients} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="size-4" /> Clients
         </Link>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold text-heading">{tenant.name}</h1>

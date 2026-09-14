@@ -13,7 +13,7 @@ import { subscriptions } from "../billing/schema";
 export const webhookDeliveryStatus = pgEnum("webhook_delivery_status", [
   "pending", // queued or awaiting retry (see nextAttemptAt)
   "delivered", // target answered 2xx
-  "dead", // retries exhausted — surfaced on /ops/webhooks, requeueable
+  "dead", // retries exhausted — surfaced on /ops/system/webhooks, requeueable
   "disabled", // target answered 410 Gone — permanently off unless requeued
 ]);
 

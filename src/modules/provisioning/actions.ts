@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { TENANT } from "@/lib/routes";
+import { revalidateClientViews } from "@/lib/ops-revalidate";
 import { z } from "zod";
 import { requireMembership, requireOps } from "../../policy";
 import { getSubscriptionForTenant } from "../billing/queries";
@@ -37,8 +39,8 @@ export async function setDomainAction(input: z.infer<typeof domainSchema>): Prom
     const sub = await getSubscriptionForTenant(p.subscriptionId, p.tenantId);
     if (!sub) throw new Error("Subscription not found");
     await setDomain(p.subscriptionId, p.domainUrl?.trim() || null, session.user.id);
-    revalidatePath("/billing");
-    revalidatePath(`/ops/tenants/${p.tenantId}`);
+    revalidatePath(TENANT.billing);
+    revalidateClientViews(p.tenantId);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -63,7 +65,7 @@ export async function setVerifyConfigAction(
       { verifyToken: p.verifyToken, expectedCname: p.expectedCname, expectedAIps: p.expectedAIps },
       session.user.id,
     );
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -76,7 +78,7 @@ export async function runDnsVerifyAction(
   try {
     const session = await requireOps();
     const r = await runDnsVerification(subscriptionId, session.user.id);
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true, passed: r.ok, mode: r.mode, detail: r.detail };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Verification failed" };
@@ -104,7 +106,7 @@ export async function upsertCredentialAction(
       secret: p.secret || null,
       actorUserId: session.user.id,
     });
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -115,7 +117,7 @@ export async function deleteCredentialAction(credentialId: string): Promise<Acti
   try {
     const session = await requireOps();
     await deleteCredential(credentialId, session.user.id);
-    revalidatePath("/ops/tenants");
+    revalidateClientViews();
     return { ok: true };
   } catch (e) {
     return fail(e);

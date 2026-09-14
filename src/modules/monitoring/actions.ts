@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { OPS, TENANT } from "@/lib/routes";
 import { requireMembership, requireOps } from "../../policy";
 import { getSubscriptionForTenant } from "../billing/queries";
 import { acknowledgeIncident, mintIngestKey } from "./service";
@@ -14,7 +15,7 @@ export async function rotateIngestKeyAction(
     const sub = await getSubscriptionForTenant(subscriptionId, tenantId);
     if (!sub) throw new Error("Subscription not found");
     const key = await mintIngestKey(subscriptionId);
-    revalidatePath("/monitoring");
+    revalidatePath(TENANT.monitoring);
     return { ok: true, key };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Rotation failed" };
@@ -29,7 +30,7 @@ export async function ackIncidentAction(
   try {
     const session = await requireOps();
     await acknowledgeIncident(healthCheckId, subscriptionId, session.user.id, note);
-    revalidatePath("/ops/incidents");
+    revalidatePath(OPS.monitoring);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Ack failed" };

@@ -1,5 +1,6 @@
 "use client";
 
+import { OPS, TENANT } from "@/lib/routes";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -36,7 +37,7 @@ export function InboxView({
   activeMessages: MessageDto[];
 }) {
   const router = useRouter();
-  const base = scope === "ops" ? "/ops/inbox" : "/inbox";
+  const base = scope === "ops" ? OPS.inbox : TENANT.inbox;
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
@@ -69,14 +70,13 @@ export function InboxView({
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-[320px_1fr]">
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-heading">Messages</h1>
-          {scope === "tenant" && tenantId && (
+        {scope === "tenant" && tenantId && (
+          <div className="flex justify-end">
             <Button size="sm" className="gap-1" onClick={() => setNewOpen(true)}>
               <Plus className="size-4" /> New
             </Button>
-          )}
-        </div>
+          </div>
+        )}
         <div className="flex max-h-[70vh] flex-col gap-1 overflow-y-auto">
           {threads.length === 0 && (
             <div className="rounded-md border bg-card py-10 text-center text-sm text-muted-foreground">

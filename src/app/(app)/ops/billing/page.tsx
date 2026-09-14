@@ -1,5 +1,4 @@
-import { redirect } from "next/navigation";
-import { getSession, isOps } from "@/policy";
+import { requireOpsPage } from "@/policy";
 import { env } from "@/env";
 import { stripeConfigured } from "@/lib/stripe";
 import { listAllTenants, listTenantOwnerEmails } from "@/modules/tenancy/queries";
@@ -12,13 +11,11 @@ import {
 import { BILLING_SCHEDULE, nextDailyRunUtc, nextMonthlyRunUtc } from "@/modules/billing/schedule";
 import { OpsBillingBoard } from "@/modules/billing/components/ops-billing-board";
 
-export const metadata = { title: "Billing" };
+export const metadata = { title: "Board · Billing" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsBillingPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!isOps(session)) redirect("/dashboard");
+  await requireOpsPage();
 
   const [tenants, owners, subscriptions, invoices, stats, automation] = await Promise.all([
     listAllTenants(),

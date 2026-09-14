@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { OPS } from "@/lib/routes";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
@@ -47,7 +48,7 @@ export async function createProductAction(
         sortOrder: 99,
       })
       .returning({ id: products.id });
-    revalidatePath("/ops/products");
+    revalidatePath(OPS.products);
     return { ok: true, id: row.id };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Create failed" };
@@ -85,7 +86,7 @@ export async function updateProductAction(
         isActive: p.isActive,
       })
       .where(eq(products.id, p.id));
-    revalidatePath("/ops/products");
+    revalidatePath(OPS.products);
     revalidatePath("/products");
     return { ok: true };
   } catch (e) {
@@ -176,7 +177,7 @@ export async function upsertComponentAction(
         sortOrder: 99,
       });
     }
-    revalidatePath("/ops/products");
+    revalidatePath(OPS.products);
     revalidatePath("/products");
     return { ok: true };
   } catch (e) {

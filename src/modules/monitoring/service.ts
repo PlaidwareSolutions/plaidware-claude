@@ -385,3 +385,8 @@ export async function subscriptionKpis(
     };
   });
 }
+
+/** Sidebar pill: how many subscriptions are down/degraded and unacknowledged. */
+export async function countActiveIncidents(): Promise<number> {
+  return (await getActiveIncidents()).length;
+}

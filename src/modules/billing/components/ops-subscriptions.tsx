@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Download, Receipt } from "lucide-react
 import type { OpsSubscriptionDto } from "../queries";
 import { MRR_STATUSES } from "../mappers";
 import { formatCents } from "@/lib/money";
+import { OPS } from "@/lib/routes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -158,18 +159,6 @@ export function OpsSubscriptions({ rows }: { rows: OpsSubscriptionDto[] }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-heading">Subscriptions</h1>
-          <p className="text-sm text-muted-foreground">
-            Every subscription across every tenant — who pays for what, and how much.
-          </p>
-        </div>
-        <Button variant="outline" className="gap-2" onClick={exportCsv} disabled={filtered.length === 0}>
-          <Download className="size-4" /> Export CSV
-        </Button>
-      </div>
-
       <div className="flex flex-wrap items-center gap-2">
         <Input
           className="h-9 w-64"
@@ -195,10 +184,13 @@ export function OpsSubscriptions({ rows }: { rows: OpsSubscriptionDto[] }) {
           </SelectContent>
         </Select>
         <p className="ml-auto text-sm text-muted-foreground">
-          {filtered.length} subscription{filtered.length === 1 ? "" : "s"} · {tenantCount} tenant
+          {filtered.length} subscription{filtered.length === 1 ? "" : "s"} · {tenantCount} client
           {tenantCount === 1 ? "" : "s"} · MRR{" "}
           <span className="font-medium tabular-nums text-heading">{formatCents(mrrCents)}</span>
         </p>
+        <Button variant="outline" size="sm" className="gap-2" onClick={exportCsv} disabled={filtered.length === 0}>
+          <Download className="size-4" /> Export CSV
+        </Button>
       </div>
 
       <div className="rounded-lg border bg-card">
@@ -227,7 +219,7 @@ export function OpsSubscriptions({ rows }: { rows: OpsSubscriptionDto[] }) {
             {filtered.map((r) => (
               <TableRow key={r.id}>
                 <TableCell>
-                  <Link href={`/ops/tenants/${r.tenantId}`} className="font-medium text-heading hover:text-primary">
+                  <Link href={OPS.client(r.tenantId)} className="font-medium text-heading hover:text-primary">
                     {r.tenantName}
                   </Link>
                   <div className="text-xs text-muted-foreground">{r.tenantSlug}</div>

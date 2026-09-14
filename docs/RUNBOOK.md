@@ -25,7 +25,7 @@ concepts — only products whose slug starts with `marketing-`. Surfaces:
   POSTs to `MHUB_LIFECYCLE_URL` signed with `MHUB_WEBHOOK_SECRET`
   (`X-Plaidware-Signature: sha256=` HMAC of `${timestamp}.${rawBody}`).
   Retry backoff 1m/5m/30m/2h/12h, then dead-letter. A 410 response disables
-  the delivery. Dead letters: **Ops → Webhooks** (`/ops/webhooks`), requeue
+  the delivery. Dead letters: **Ops → Webhooks** (`/ops/system/webhooks`), requeue
   restarts the backoff with the same `X-Plaidware-Delivery` id. With MHub env
   unset the sweep no-ops and rows queue untouched.
 - **Provisioning handshake**: first activation of a `marketing-*` subscription

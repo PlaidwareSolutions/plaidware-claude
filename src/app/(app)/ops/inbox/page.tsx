@@ -1,12 +1,11 @@
-import { redirect } from "next/navigation";
 import { inArray } from "drizzle-orm";
-import { getSession, isOps } from "@/policy";
+import { requireOpsPage } from "@/policy";
 import { db } from "@/db";
 import { user } from "@/modules/auth/schema";
 import { getThreadWithMessages, listThreads } from "@/modules/messaging/service";
 import { InboxView } from "@/modules/messaging/components/inbox-view";
 
-export const metadata = { title: "Inbox" };
+export const metadata = { title: "Messages · Inbox" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsInboxPage({
@@ -14,9 +13,7 @@ export default async function OpsInboxPage({
 }: {
   searchParams: Promise<{ thread?: string }>;
 }) {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!isOps(session)) redirect("/dashboard");
+  await requireOpsPage();
 
   const { thread: threadId } = await searchParams;
   const threads = await listThreads("ops");

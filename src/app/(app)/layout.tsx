@@ -3,10 +3,12 @@ import { getSession, isOps } from "@/policy";
 import { getUserTenants } from "@/modules/tenancy/queries";
 import { unreadCount } from "@/modules/messaging/service";
 import { AppShell } from "@/components/app-shell";
+import { AUTH } from "@/lib/routes";
+import { getOpsNavCounts } from "./ops/nav-counts";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
-  if (!session) redirect("/login");
+  if (!session) redirect(AUTH.login);
 
   const tenants = await getUserTenants(session.user.id);
   const activeTenantId =
@@ -14,18 +16,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     tenants[0]?.id ??
     null;
   const ops = isOps(session);
-  const [tenantUnread, opsUnread] = await Promise.all([
+  const [tenantUnread, opsCounts] = await Promise.all([
     activeTenantId ? unreadCount("tenant", activeTenantId) : Promise.resolve(0),
-    ops ? unreadCount("ops") : Promise.resolve(0),
+    ops ? getOpsNavCounts() : Promise.resolve(undefined),
   ]);
 
   return (
     <AppShell
-      unread={{ tenant: tenantUnread, ops: opsUnread }}
+      counts={{ tenantUnread, ops: opsCounts }}
       user={{
         name: session.user.name,
         email: session.user.email,
-        isOps: isOps(session),
+        isOps: ops,
       }}
       tenants={tenants}
       activeTenantId={activeTenantId}

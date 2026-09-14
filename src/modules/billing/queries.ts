@@ -445,3 +445,12 @@ export async function getBillingAutomationStatus(): Promise<SubscriptionAutomati
     }),
   );
 }
+
+/** Sidebar pill: invoices that are failed, or open and past their due date. */
+export async function countPastDueInvoices(now = new Date()): Promise<number> {
+  const rows = await db
+    .select({ status: invoices.status, dueDate: invoices.dueDate })
+    .from(invoices)
+    .where(inArray(invoices.status, ["open", "failed"]));
+  return rows.filter((r) => r.status === "failed" || (r.dueDate != null && r.dueDate < now)).length;
+}

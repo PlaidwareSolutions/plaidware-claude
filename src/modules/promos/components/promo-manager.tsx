@@ -127,14 +127,11 @@ export function PromoManager({
   }
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-heading">Promos</h1>
-          <p className="text-sm text-muted-foreground">
-            Discount codes, auto-applied offers, and actual dollars saved.
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          Discount codes, auto-applied offers, and actual dollars saved.
+        </p>
         <div className="flex gap-2">
           <Button variant="outline" onClick={sweep} disabled={busy}>
             Sweep orphan coupons
