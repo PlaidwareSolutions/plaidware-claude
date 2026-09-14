@@ -418,3 +418,82 @@ export async function subscriptionKpis(
 export async function countActiveIncidents(): Promise<number> {
   return (await getActiveIncidents()).length;
 }
+
+// ---------------------------------------------------------------------------
+// Fleet rollups (Monitoring board) — one query for every live subscription
+// ---------------------------------------------------------------------------
+
+export type UptimeRollup = { probes: number; uptimePct: number | null; avgResponseMs: number | null };
+
+export async function uptimeBySubscription(
+  subscriptionIds: string[],
+  days = 30,
+): Promise<Map<string, UptimeRollup>> {
+  const out = new Map<string, UptimeRollup>();
+  if (subscriptionIds.length === 0) return out;
+  const since = new Date(Date.now() - days * DAY);
+  const rows = await db
+    .select({
+      subscriptionId: healthChecks.subscriptionId,
+      probes: sql<number>`count(*)::int`,
+      healthy: sql<number>`count(*) filter (where ${healthChecks.status} = 'healthy')::int`,
+      avgMs: sql<number | null>`avg(${healthChecks.responseTimeMs})`,
+    })
+    .from(healthChecks)
+    .where(
+      and(
+        inArray(healthChecks.subscriptionId, subscriptionIds),
+        eq(healthChecks.source, "probe"),
+        gte(healthChecks.createdAt, since),
+      ),
+    )
+    .groupBy(healthChecks.subscriptionId);
+  for (const r of rows) {
+    out.set(r.subscriptionId, {
+      probes: r.probes,
+      uptimePct: r.probes ? Math.round((r.healthy / r.probes) * 10000) / 100 : null,
+      avgResponseMs: r.avgMs != null ? Math.round(Number(r.avgMs)) : null,
+    });
+  }
+  return out;
+}
+
+export type LatestHealth = { status: string; source: string; at: string; detail: string | null };
+
+export async function latestHealthBySubscription(subscriptionIds: string[]): Promise<Map<string, LatestHealth>> {
+  const out = new Map<string, LatestHealth>();
+  if (subscriptionIds.length === 0) return out;
+  const rows = await db
+    .selectDistinctOn([healthChecks.subscriptionId], {
+      subscriptionId: healthChecks.subscriptionId,
+      status: healthChecks.status,
+      source: healthChecks.source,
+      detail: healthChecks.detail,
+      createdAt: healthChecks.createdAt,
+    })
+    .from(healthChecks)
+    .where(inArray(healthChecks.subscriptionId, subscriptionIds))
+    .orderBy(healthChecks.subscriptionId, desc(healthChecks.createdAt));
+  for (const r of rows) {
+    out.set(r.subscriptionId, { status: r.status, source: r.source, at: r.createdAt.toISOString(), detail: r.detail });
+  }
+  return out;
+}
+
+/** Ingest audit rows for the last `days` (7-day retention table). */
+export async function listRecentIngestEvents(days = 7) {
+  return db.query.metricIngestEvents.findMany({
+    where: gte(metricIngestEvents.createdAt, new Date(Date.now() - days * DAY)),
+    orderBy: [desc(metricIngestEvents.createdAt)],
+    limit: 5000,
+  });
+}
+
+/** When the worker last did each thing — derived from data, not from pg-boss. */
+export async function lastObservedRuns(): Promise<{ probeAt: string | null }> {
+  const [probe] = await db
+    .select({ at: sql<Date | null>`max(${healthChecks.createdAt})` })
+    .from(healthChecks)
+    .where(eq(healthChecks.source, "probe"));
+  return { probeAt: probe?.at ? new Date(probe.at).toISOString() : null };
+}

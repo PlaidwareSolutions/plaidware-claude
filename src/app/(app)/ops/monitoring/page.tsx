@@ -1,10 +1,7 @@
 import { requireOpsPage } from "@/policy";
-import { findQuietReporters, getActiveIncidents } from "@/modules/monitoring/service";
-import { getTenant } from "@/modules/tenancy/queries";
-import { IncidentsView } from "@/modules/monitoring/components/incidents-view";
+import { getMonitoringBoard } from "@/modules/monitoring/queries";
+import { OpsMonitoringBoard } from "@/modules/monitoring/components/ops-monitoring-board";
 import { PageHeader } from "@/components/page-header";
-import { FilterChip } from "@/components/filter-chip";
-import { OPS } from "@/lib/routes";
 
 export const metadata = { title: "Monitoring" };
 export const dynamic = "force-dynamic";
@@ -12,29 +9,19 @@ export const dynamic = "force-dynamic";
 export default async function OpsMonitoringPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tenant?: string }>;
+  searchParams: Promise<{ product?: string; tenant?: string; status?: string; q?: string }>;
 }) {
   await requireOpsPage();
-
-  const { tenant: tenantId } = await searchParams;
-  const [incidents, quiet, tenant] = await Promise.all([
-    getActiveIncidents(),
-    findQuietReporters(),
-    tenantId ? getTenant(tenantId) : Promise.resolve(null),
-  ]);
-  const scoped = tenant ? { id: tenant.id, name: tenant.name } : null;
+  const filter = await searchParams;
+  const board = await getMonitoringBoard(filter);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Monitoring"
-        description="Active incidents and reporters that have gone quiet, across every client."
-        actions={scoped && <FilterChip label={`Client: ${scoped.name}`} clearHref={OPS.monitoring} />}
+        description="Incidents, quiet reporters, fleet uptime, SEO, reporter health, and what the worker does next — across every client."
       />
-      <IncidentsView
-        incidents={scoped ? incidents.filter((i) => i.tenantId === scoped.id) : incidents}
-        quiet={scoped ? quiet.filter((q) => q.tenantId === scoped.id) : quiet}
-      />
+      <OpsMonitoringBoard board={board} />
     </div>
   );
 }

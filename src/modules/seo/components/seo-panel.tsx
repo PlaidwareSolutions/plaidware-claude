@@ -1,14 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { Gauge } from "lucide-react";
 import type { SeoPanelData } from "../service";
 import { cwvVerdict } from "../pagespeed";
-import { runSeoRecheckAction, snoozeSeoAction } from "../actions";
 import { formatDateTime } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
+import { SeoControls } from "./seo-controls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkline } from "@/components/sparkline";
 
@@ -40,32 +38,17 @@ export function SeoPanel({
   subscriptionId,
   panels,
   opsControls,
+  snoozedUntil = null,
 }: {
   productName: string;
   subscriptionId: string;
   panels: SeoPanelData[];
   opsControls: boolean;
+  /** Active snooze for the shown strategy (ops only). */
+  snoozedUntil?: string | null;
 }) {
-  const router = useRouter();
   const [strategy, setStrategy] = useState<string>(panels[0]?.strategy ?? "mobile");
-  const [busy, setBusy] = useState(false);
   const panel = panels.find((p) => p.strategy === strategy);
-
-  async function recheck() {
-    setBusy(true);
-    const res = await runSeoRecheckAction(subscriptionId);
-    setBusy(false);
-    if (res.ok) {
-      toast.success("Audit complete");
-      router.refresh();
-    } else toast.error(res.error ?? "Recheck failed");
-  }
-
-  async function snooze(days: 1 | 3 | 7) {
-    const res = await snoozeSeoAction(subscriptionId, strategy as "mobile" | "desktop", days);
-    if (res.ok) toast.success(`Alerts snoozed ${days}d — a sharper regression still pages`);
-    else toast.error(res.error ?? "Snooze failed");
-  }
 
   const scores = panel ? (panel.latestOk ? panel.latest : (panel.lastGood ?? panel.latest)) : null;
 
@@ -86,11 +69,6 @@ export function SeoPanel({
               {p.strategy}
             </Button>
           ))}
-          {opsControls && (
-            <Button variant="outline" size="sm" onClick={recheck} disabled={busy}>
-              {busy ? "Auditing…" : "Run now"}
-            </Button>
-          )}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -99,6 +77,9 @@ export function SeoPanel({
             No audits yet — the daily sweep covers Company Website subscriptions
             with a live domain{opsControls ? ", or use Run now" : ""}.
           </p>
+        )}
+        {!panel && opsControls && (
+          <SeoControls subscriptionId={subscriptionId} strategy={strategy as "mobile" | "desktop"} snoozedUntil={snoozedUntil} compact />
         )}
         {panel && (
           <>
@@ -141,14 +122,7 @@ export function SeoPanel({
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>Last audit {formatDateTime(panel.fetchedAt)}</span>
               {opsControls && (
-                <span className="flex items-center gap-1">
-                  Snooze alerts:
-                  {[1, 3, 7].map((d) => (
-                    <Button key={d} variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => snooze(d as 1 | 3 | 7)}>
-                      {d}d
-                    </Button>
-                  ))}
-                </span>
+                <SeoControls subscriptionId={subscriptionId} strategy={strategy as "mobile" | "desktop"} snoozedUntil={snoozedUntil} />
               )}
             </div>
           </>

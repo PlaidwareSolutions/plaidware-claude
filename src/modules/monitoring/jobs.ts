@@ -3,25 +3,26 @@ import { formatDateTime } from "../../lib/dates";
 import { env } from "../../env";
 import { emailShell, sendEmail } from "../../lib/email";
 import { findQuietReporters, pruneTimeSeries, runUptimeProbe } from "./service";
+import { MONITORING_SCHEDULE as S } from "./schedule";
 
 export async function registerMonitoringJobs(boss: PgBoss): Promise<string[]> {
-  await boss.createQueue("monitoring.uptime-probe");
-  await boss.schedule("monitoring.uptime-probe", "*/5 * * * *");
-  await boss.work("monitoring.uptime-probe", async () => {
+  await boss.createQueue(S.uptimeProbe.queue);
+  await boss.schedule(S.uptimeProbe.queue, S.uptimeProbe.cron);
+  await boss.work(S.uptimeProbe.queue, async () => {
     const r = await runUptimeProbe();
     if (r.probed > 0) console.log(`[monitoring] probed ${r.probed}, down ${r.down}`);
   });
 
-  await boss.createQueue("monitoring.prune");
-  await boss.schedule("monitoring.prune", "30 6 * * *");
-  await boss.work("monitoring.prune", async () => {
+  await boss.createQueue(S.prune.queue);
+  await boss.schedule(S.prune.queue, S.prune.cron);
+  await boss.work(S.prune.queue, async () => {
     const r = await pruneTimeSeries();
     console.log(`[monitoring] pruned`, r);
   });
 
-  await boss.createQueue("monitoring.quiet-reporters");
-  await boss.schedule("monitoring.quiet-reporters", "0 15 * * *");
-  await boss.work("monitoring.quiet-reporters", async () => {
+  await boss.createQueue(S.quietReporters.queue);
+  await boss.schedule(S.quietReporters.queue, S.quietReporters.cron);
+  await boss.work(S.quietReporters.queue, async () => {
     const quiet = await findQuietReporters();
     console.log(`[monitoring] quiet reporters: ${quiet.length}`);
     if (quiet.length === 0 || !env.OPS_EMAIL) return;
@@ -42,5 +43,5 @@ export async function registerMonitoringJobs(boss: PgBoss): Promise<string[]> {
     });
   });
 
-  return ["monitoring.uptime-probe", "monitoring.prune", "monitoring.quiet-reporters"];
+  return [S.uptimeProbe.queue, S.prune.queue, S.quietReporters.queue];
 }

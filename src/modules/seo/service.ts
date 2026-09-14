@@ -86,17 +86,25 @@ const CAT_FIELDS: Record<Category, "performance" | "seo" | "accessibility" | "be
   bestPractices: "bestPractices",
 };
 
-export async function runSeoAlertDigest(now = new Date()): Promise<number> {
-  if (!env.OPS_EMAIL) return 0;
+export type SeoAlertRow = {
+  subscriptionId: string;
+  tenantId: string;
+  tenantName: string;
+  domainUrl: string | null;
+  strategy: string;
+  alerts: { category: string; current: number; baseline: number | null; severity: number; reasons: string[] }[];
+  /** Set when a snooze is holding this row back from the digest. */
+  snoozedUntil: string | null;
+};
+
+/**
+ * One code path for "what would page ops right now": latest good audit per
+ * strategy vs the ≥7-day-old baseline, minus active snoozes (unless the
+ * regression breaks through). The digest emails it; the board renders it.
+ */
+export async function collectSeoAlerts(now = new Date(), opts: { includeSnoozed?: boolean } = {}): Promise<SeoAlertRow[]> {
   const targets = await seoTargets();
-  type Row = {
-    tenantId: string;
-    tenantName: string;
-    domainUrl: string | null;
-    strategy: string;
-    alerts: { category: string; current: number; baseline: number | null; severity: number; reasons: string[] }[];
-  };
-  const rows: Row[] = [];
+  const rows: SeoAlertRow[] = [];
 
   for (const t of targets) {
     for (const strategy of STRATEGIES) {
@@ -125,12 +133,25 @@ export async function runSeoAlertDigest(now = new Date()): Promise<number> {
         where: and(eq(seoSnoozes.tenantId, t.tenantId), eq(seoSnoozes.strategy, strategy)),
       });
       const worst = alerts[0].severity;
-      if (snooze && snooze.snoozedUntil > now && !breaksThroughSnooze(worst, snooze.severityAtSnooze)) {
-        continue;
-      }
-      rows.push({ tenantId: t.tenantId, tenantName: t.tenantName, domainUrl: t.domainUrl, strategy, alerts });
+      const held = Boolean(snooze && snooze.snoozedUntil > now && !breaksThroughSnooze(worst, snooze.severityAtSnooze));
+      if (held && !opts.includeSnoozed) continue;
+      rows.push({
+        subscriptionId: t.subscriptionId,
+        tenantId: t.tenantId,
+        tenantName: t.tenantName,
+        domainUrl: t.domainUrl,
+        strategy,
+        alerts,
+        snoozedUntil: held ? snooze!.snoozedUntil.toISOString() : null,
+      });
     }
   }
+  return rows;
+}
+
+export async function runSeoAlertDigest(now = new Date()): Promise<number> {
+  if (!env.OPS_EMAIL) return 0;
+  const rows = await collectSeoAlerts(now);
 
   if (rows.length > 0) {
     // "below 50" is a floor alert, not a regression — a score can improve and
@@ -209,4 +230,66 @@ export async function seoPanelData(subscriptionId: string): Promise<SeoPanelData
     });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Board overview — every audited site with its latest scores and alert state
+// ---------------------------------------------------------------------------
+
+export type SeoOverviewRow = {
+  subscriptionId: string;
+  tenantId: string;
+  tenantName: string;
+  domainUrl: string | null;
+  lastAuditAt: string | null;
+  scores: Record<"mobile" | "desktop", { performance: number | null; seo: number | null; ok: boolean } | null>;
+  alerts: SeoAlertRow["alerts"];
+  worstSeverity: number;
+  snoozedUntil: string | null;
+};
+
+export async function seoOverview(now = new Date()): Promise<SeoOverviewRow[]> {
+  const [targets, alertRows] = await Promise.all([seoTargets(), collectSeoAlerts(now, { includeSnoozed: true })]);
+  const out: SeoOverviewRow[] = [];
+  for (const t of targets) {
+    const latest = await db
+      .selectDistinctOn([seoAudits.strategy], {
+        strategy: seoAudits.strategy,
+        performance: seoAudits.performance,
+        seo: seoAudits.seo,
+        ok: seoAudits.ok,
+        fetchedAt: seoAudits.fetchedAt,
+      })
+      .from(seoAudits)
+      .where(eq(seoAudits.subscriptionId, t.subscriptionId))
+      .orderBy(seoAudits.strategy, desc(seoAudits.fetchedAt));
+    const mine = alertRows.filter((r) => r.subscriptionId === t.subscriptionId);
+    const alerts = mine.flatMap((r) => r.alerts).sort((a, b) => b.severity - a.severity);
+    const pick = (s: "mobile" | "desktop") => {
+      const row = latest.find((l) => l.strategy === s);
+      return row ? { performance: row.performance, seo: row.seo, ok: row.ok } : null;
+    };
+    out.push({
+      subscriptionId: t.subscriptionId,
+      tenantId: t.tenantId,
+      tenantName: t.tenantName,
+      domainUrl: t.domainUrl,
+      lastAuditAt: latest.length ? new Date(Math.max(...latest.map((l) => l.fetchedAt.getTime()))).toISOString() : null,
+      scores: { mobile: pick("mobile"), desktop: pick("desktop") },
+      alerts,
+      worstSeverity: alerts[0]?.severity ?? 0,
+      snoozedUntil: mine.find((r) => r.snoozedUntil)?.snoozedUntil ?? null,
+    });
+  }
+  return out.sort((a, b) => b.worstSeverity - a.worstSeverity || a.tenantName.localeCompare(b.tenantName));
+}
+
+/** Latest audit timestamp (any strategy) — the manual recheck cooldown source. */
+export async function lastAuditAt(subscriptionId: string): Promise<Date | null> {
+  const row = await db.query.seoAudits.findFirst({
+    where: eq(seoAudits.subscriptionId, subscriptionId),
+    orderBy: [desc(seoAudits.fetchedAt)],
+    columns: { fetchedAt: true },
+  });
+  return row?.fetchedAt ?? null;
 }
