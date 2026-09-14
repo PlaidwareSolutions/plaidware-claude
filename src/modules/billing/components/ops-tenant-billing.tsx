@@ -2,16 +2,19 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { ArrowLeft, ExternalLink, FilePlus2, HandCoins } from "lucide-react";
-import type { SubscriptionDto } from "../queries";
+import { CreditCard, ExternalLink, FilePlus2, HandCoins, Receipt } from "lucide-react";
+import type { OpsInvoiceDto, SubscriptionDto } from "../queries";
 import { toggleDunningPauseAction } from "../ar-actions";
 import { formatCents } from "@/lib/money";
+import { formatDate } from "@/lib/dates";
 import { OPS } from "@/lib/routes";
+import { useAction } from "@/lib/use-action";
+import { Section } from "@/components/section";
+import { StatusBadge } from "@/components/status-badge";
+import { EmptyState } from "@/components/empty-state";
+import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -29,114 +32,94 @@ import {
   type TenantTarget,
 } from "./ops-billing-dialogs";
 
-type InvoiceRow = {
-  id: string;
-  invoiceNumber: string;
-  kind: string;
-  status: string;
-  amountDueCents: number;
-  amountPaidCents: number;
-  hostedInvoiceUrl: string | null;
-  dueDate: string | null;
-  createdAt: string;
-  dunning: {
-    id: string;
-    remindersSent: number;
-    suspendedAt: string | null;
-    paused: boolean;
-  } | null;
-  payments: {
-    id: string;
-    amountCents: number;
-    method: string;
-    reference: string | null;
-    receivedAt: string;
-  }[];
-};
-
-function invoiceBadge(status: string) {
-  const variant =
-    status === "paid" ? ("secondary" as const)
-    : status === "open" || status === "draft" ? ("outline" as const)
-    : ("destructive" as const);
-  return <Badge variant={variant}>{status}</Badge>;
-}
-
 export function OpsTenantBilling({
   tenant,
   subscriptions,
   invoices,
+  pastDueCount,
 }: {
-  tenant: { id: string; name: string; slug: string; status: string; memberCount: number };
+  tenant: { id: string; name: string };
   subscriptions: SubscriptionDto[];
-  invoices: InvoiceRow[];
+  invoices: OpsInvoiceDto[];
+  /** Computed server-side (open past due date, or failed) so the view stays pure. */
+  pastDueCount: number;
 }) {
-  const router = useRouter();
+  const { run, isPending } = useAction();
   const [invoiceFor, setInvoiceFor] = useState<TenantTarget | null>(null);
   const [payFor, setPayFor] = useState<InvoiceTarget | null>(null);
   const [hostingFor, setHostingFor] = useState<HostingTarget | null>(null);
 
-  const pastDue = invoices.filter(
-    (i) => (i.status === "open" && i.dueDate && new Date(i.dueDate) < new Date()) || i.status === "failed",
-  );
-
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <Link href={OPS.clients} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-4" /> Clients
-        </Link>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold text-heading">{tenant.name}</h1>
-          <Badge variant={tenant.status === "active" ? "secondary" : "destructive"}>{tenant.status}</Badge>
-          <span className="text-sm text-muted-foreground">
-            {tenant.slug} · {tenant.memberCount} members
-          </span>
-          <div className="flex-1" />
-          <Button className="gap-2" onClick={() => setInvoiceFor({ id: tenant.id, name: tenant.name })}>
+    <>
+      <Section title="Subscriptions" count={subscriptions.length} icon={CreditCard}>
+        {subscriptions.length === 0 ? (
+          <EmptyState
+            icon={CreditCard}
+            title="No subscriptions"
+            description="Products appear here once the client completes a setup link or checkout."
+          />
+        ) : (
+          <div className="flex flex-col gap-2">
+            {subscriptions.map((s) => (
+              <div key={s.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-3">
+                <span className="size-2 shrink-0 rounded-full" style={{ background: s.productColor ?? "var(--primary)" }} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link href={OPS.product(s.productId)} className="font-medium text-heading hover:text-primary">
+                      {s.productName}
+                    </Link>
+                    <StatusBadge kind="subscription" status={s.status} />
+                    {s.monthlyCents > 0 && (
+                      <span className="tabular-nums text-muted-foreground">{formatCents(s.monthlyCents)}/mo</span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {s.domainUrl ? (
+                      <a href={s.domainUrl} target="_blank" rel="noreferrer" className="hover:text-primary">
+                        {s.domainUrl}
+                      </a>
+                    ) : (
+                      "no domain yet"
+                    )}
+                    {" · "}
+                    {s.status === "trialing" && s.trialEndsAt
+                      ? `trial ends ${formatDate(s.trialEndsAt)}`
+                      : s.currentPeriodEnd
+                        ? `renews ${formatDate(s.currentPeriodEnd)}`
+                        : `since ${formatDate(s.subscribedAt)}`}
+                    {s.items.filter((i) => i.status === "active").length > 1 &&
+                      ` · ${s.items.filter((i) => i.status === "active").length} items`}
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setHostingFor({ id: s.id, productName: s.productName })}
+                >
+                  Hosting fee…
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title="Invoices & payments"
+        count={invoices.length}
+        icon={Receipt}
+        description={
+          pastDueCount > 0
+            ? `${pastDueCount} past due — dunning sends reminders and suspends automatically`
+            : undefined
+        }
+        actions={
+          <Button size="sm" className="gap-2" onClick={() => setInvoiceFor({ id: tenant.id, name: tenant.name })}>
             <FilePlus2 className="size-4" /> New invoice
           </Button>
-        </div>
-        {pastDue.length > 0 && (
-          <p className="mt-2 text-sm text-warning">
-            {pastDue.length} past-due {pastDue.length === 1 ? "invoice" : "invoices"} — dunning handles reminders and suspension automatically.
-          </p>
-        )}
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Subscriptions</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {subscriptions.length === 0 && (
-            <p className="text-sm text-muted-foreground">No subscriptions.</p>
-          )}
-          {subscriptions.map((s) => (
-            <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="size-2 rounded-full" style={{ background: s.productColor ?? "var(--primary)" }} />
-                <span className="font-medium text-heading">{s.productName}</span>
-                {invoiceBadge(s.status)}
-                {s.monthlyCents > 0 && (
-                  <span className="text-muted-foreground">{formatCents(s.monthlyCents)}/mo</span>
-                )}
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setHostingFor({ id: s.id, productName: s.productName })}
-              >
-                Hosting fee…
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-heading">Invoices & payments</h2>
-        <div className="rounded-lg border bg-card">
+        }
+      >
+        <DataTableShell>
           <Table>
             <TableHeader>
               <TableRow>
@@ -149,11 +132,12 @@ export function OpsTenantBilling({
             </TableHeader>
             <TableBody>
               {invoices.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                    No invoices yet.
-                  </TableCell>
-                </TableRow>
+                <TableEmpty
+                  colSpan={5}
+                  icon={Receipt}
+                  title="No invoices yet"
+                  description="Stripe invoices sync here automatically; create a manual one for offline work."
+                />
               )}
               {invoices.map((inv) => (
                 <TableRow key={inv.id}>
@@ -162,15 +146,18 @@ export function OpsTenantBilling({
                     <div className="mt-0.5 flex flex-wrap gap-1">
                       <Badge variant="outline" className="text-[10px]">{inv.kind}</Badge>
                       {inv.dunning && !inv.dunning.suspendedAt && (
-                        <Badge variant="destructive" className="text-[10px]">
-                          dunning · {inv.dunning.remindersSent} reminders
-                        </Badge>
+                        <StatusBadge
+                          kind="dunning"
+                          status="reminding"
+                          label={`dunning · ${inv.dunning.remindersSent} reminder${inv.dunning.remindersSent === 1 ? "" : "s"}`}
+                          className="text-[10px]"
+                        />
                       )}
                       {inv.dunning?.suspendedAt && (
-                        <Badge variant="destructive" className="text-[10px]">suspended</Badge>
+                        <StatusBadge kind="dunning" status="suspended" className="text-[10px]" />
                       )}
                       {inv.dunning?.paused && (
-                        <Badge variant="outline" className="text-[10px]">dunning paused</Badge>
+                        <StatusBadge kind="dunning" status="paused" label="dunning paused" className="text-[10px]" />
                       )}
                     </div>
                     {inv.payments.length > 0 && (
@@ -178,31 +165,33 @@ export function OpsTenantBilling({
                         {inv.payments.map((p) => (
                           <div key={p.id}>
                             {formatCents(p.amountCents)} · {p.method.replace("_", " ")}
-                            {p.reference ? ` · ${p.reference}` : ""} ·{" "}
-                            {new Date(p.receivedAt).toLocaleDateString()}
+                            {p.reference ? ` · ${p.reference}` : ""} · {formatDate(p.receivedAt)}
                           </div>
                         ))}
                       </div>
                     )}
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">{formatDate(inv.createdAt)}</div>
                   </TableCell>
-                  <TableCell>{invoiceBadge(inv.status)}</TableCell>
+                  <TableCell>
+                    <StatusBadge kind="invoice" status={inv.status} />
+                  </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
-                    {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : "—"}
+                    {formatDate(inv.dueDate)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatCents(inv.amountDueCents)}
                     {inv.amountPaidCents > 0 && inv.status !== "paid" && (
-                      <div className="text-xs text-success">
-                        {formatCents(inv.amountPaidCents)} received
-                      </div>
+                      <div className="text-xs text-success">{formatCents(inv.amountPaidCents)} received</div>
                     )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       {inv.hostedInvoiceUrl && (
-                        <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer" className="p-1 text-primary" title="Hosted invoice">
-                          <ExternalLink className="size-4" />
-                        </a>
+                        <Button asChild variant="ghost" size="icon" title="Hosted invoice">
+                          <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer">
+                            <ExternalLink className="size-4" />
+                          </a>
+                        </Button>
                       )}
                       {!["paid", "void"].includes(inv.status) && (
                         <Button
@@ -225,12 +214,13 @@ export function OpsTenantBilling({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={async () => {
-                            const res = await toggleDunningPauseAction(inv.dunning!.id, !inv.dunning!.paused);
-                            if (res.ok) {
-                              toast.success(inv.dunning!.paused ? "Dunning resumed" : "Dunning paused");
-                              router.refresh();
-                            } else toast.error(res.error);
+                          disabled={isPending(`dunning:${inv.id}`)}
+                          onClick={() => {
+                            const d = inv.dunning!;
+                            void run(() => toggleDunningPauseAction(d.id, !d.paused), {
+                              key: `dunning:${inv.id}`,
+                              success: d.paused ? "Dunning resumed" : "Dunning paused",
+                            });
                           }}
                         >
                           {inv.dunning.paused ? "Resume" : "Pause"}
@@ -242,12 +232,12 @@ export function OpsTenantBilling({
               ))}
             </TableBody>
           </Table>
-        </div>
-      </div>
+        </DataTableShell>
+      </Section>
 
       <NewInvoiceDialog key={invoiceFor?.id ?? "none"} target={invoiceFor} onOpenChange={(o) => !o && setInvoiceFor(null)} />
       <RecordPaymentDialog key={payFor?.id ?? "none"} target={payFor} onOpenChange={(o) => !o && setPayFor(null)} />
       <HostingFeeDialog key={hostingFor?.id ?? "none"} target={hostingFor} onOpenChange={(o) => !o && setHostingFor(null)} />
-    </div>
+    </>
   );
 }

@@ -1,22 +1,24 @@
 import { requireOpsPage } from "@/policy";
 import { listAllTenants } from "@/modules/tenancy/queries";
 import { listActiveProducts } from "@/modules/catalog/queries";
-import { OpsTenants } from "@/modules/tenancy/components/ops-tenants";
+import { OpsClientsTable } from "@/modules/tenancy/components/ops-clients-table";
 import { OnboardClientWizard } from "@/modules/onboarding/components/onboard-client-wizard";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata = { title: "Clients" };
 export const dynamic = "force-dynamic";
 
-export default async function OpsTenantsPage() {
+export default async function OpsClientsPage() {
   await requireOpsPage();
-
   const [tenants, products] = await Promise.all([listAllTenants(), listActiveProducts()]);
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
-      <div className="flex justify-end">
-        <OnboardClientWizard products={products} />
-      </div>
-      <OpsTenants tenants={tenants} />
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Clients"
+        description="Every customer workspace on the platform."
+        actions={<OnboardClientWizard products={products} />}
+      />
+      <OpsClientsTable tenants={tenants} />
     </div>
   );
 }

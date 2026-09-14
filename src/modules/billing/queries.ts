@@ -4,10 +4,11 @@ import { db } from "../../db";
 import { getStripe, stripeConfigured } from "../../lib/stripe";
 import { organization } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
+import { listAllProductsOps } from "../catalog/queries";
 import { subscriptionProvisioning } from "../provisioning/schema";
 import { dunningStates, payments } from "./ar-schema";
-import { invoices, subscriptionItems, subscriptions } from "./schema";
-import { isRecurringKind, itemMrrCents, LIVE_SUBSCRIPTION_STATUSES, MRR_STATUSES } from "./mappers";
+import { invoices, subscriptionItems, subscriptions, tenantPriceOverrides } from "./schema";
+import { intervalLabel, isRecurringKind, itemMrrCents, LIVE_SUBSCRIPTION_STATUSES, MRR_STATUSES } from "./mappers";
 
 export type SubscriptionItemDto = {
   id: string;
@@ -179,6 +180,7 @@ export type OpsSubscriptionDto = {
   tenantId: string;
   tenantName: string;
   tenantSlug: string;
+  productId: string;
   productName: string;
   productSlug: string;
   status: string;
@@ -200,6 +202,7 @@ export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
       tenantId: subscriptions.tenantId,
       tenantName: organization.name,
       tenantSlug: organization.slug,
+      productId: subscriptions.productId,
       productName: products.name,
       productSlug: products.slug,
       status: subscriptions.status,
@@ -251,6 +254,7 @@ export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
       tenantId: s.tenantId,
       tenantName: s.tenantName,
       tenantSlug: s.tenantSlug,
+      productId: s.productId,
       productName: s.productName,
       productSlug: s.productSlug,
       status: s.status,
@@ -287,7 +291,10 @@ export type OpsInvoiceDto = {
   payments: { id: string; amountCents: number; method: string; reference: string | null; receivedAt: string }[];
 };
 
-export async function listAllInvoicesOps(limit = 250): Promise<OpsInvoiceDto[]> {
+export async function listAllInvoicesOps(
+  limit = 250,
+  opts: { tenantId?: string } = {},
+): Promise<OpsInvoiceDto[]> {
   const rows = await db
     .select({
       id: invoices.id,
@@ -306,6 +313,7 @@ export async function listAllInvoicesOps(limit = 250): Promise<OpsInvoiceDto[]> 
     })
     .from(invoices)
     .innerJoin(organization, eq(invoices.tenantId, organization.id))
+    .where(opts.tenantId ? eq(invoices.tenantId, opts.tenantId) : undefined)
     .orderBy(desc(invoices.createdAt))
     .limit(limit);
   if (rows.length === 0) return [];
@@ -453,4 +461,37 @@ export async function countPastDueInvoices(now = new Date()): Promise<number> {
     .from(invoices)
     .where(inArray(invoices.status, ["open", "failed"]));
   return rows.filter((r) => r.status === "failed" || (r.dueDate != null && r.dueDate < now)).length;
+}
+
+// ---------------------------------------------------------------------------
+// Ops → Client: negotiated prices per component
+// ---------------------------------------------------------------------------
+
+export type PricingRow = {
+  componentId: string;
+  productId: string;
+  productName: string;
+  componentName: string;
+  listCents: number;
+  intervalLabel: string;
+  overrideCents: number | null;
+};
+
+/** Every catalog component with this client's override (if any) beside the list price. */
+export async function listTenantPricingRows(tenantId: string): Promise<PricingRow[]> {
+  const [allProducts, overrides] = await Promise.all([
+    listAllProductsOps(),
+    db.query.tenantPriceOverrides.findMany({ where: eq(tenantPriceOverrides.tenantId, tenantId) }),
+  ]);
+  return allProducts.flatMap((p) =>
+    p.components.map((c) => ({
+      componentId: c.id,
+      productId: p.id,
+      productName: p.name,
+      componentName: c.name,
+      listCents: c.amountCents,
+      intervalLabel: intervalLabel(c),
+      overrideCents: overrides.find((o) => o.componentId === c.id)?.amountCents ?? null,
+    })),
+  );
 }

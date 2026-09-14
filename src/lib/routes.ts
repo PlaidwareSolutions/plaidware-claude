@@ -38,6 +38,14 @@ export const AUTH = {
   welcome: (token: string) => `/welcome/${token}`,
 } as const;
 
+/** `withQuery(OPS.monitoring, { tenant: id })` → "/ops/monitoring?tenant=…"; empty values are dropped. */
+export function withQuery(path: string, params: Record<string, string | null | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
+  const s = qs.toString();
+  return s ? `${path}?${s}` : path;
+}
+
 const STRIPE = "https://dashboard.stripe.com";
 export function stripeCustomerUrl(customerId: string, testMode = false): string {
   return `${STRIPE}${testMode ? "/test" : ""}/customers/${customerId}`;

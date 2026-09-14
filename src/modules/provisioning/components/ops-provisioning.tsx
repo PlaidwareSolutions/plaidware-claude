@@ -4,6 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Eye, Globe, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import type { ProvisioningView } from "../queries";
+import { formatDate, formatDateTime } from "@/lib/dates";
+import { OPS } from "@/lib/routes";
+import { useConfirm } from "@/components/confirm-dialog";
+import { Section } from "@/components/section";
+import { StatusBadge } from "@/components/status-badge";
+import { EmptyState } from "@/components/empty-state";
+import Link from "next/link";
 import {
   deleteCredentialAction,
   revealCredentialAction,
@@ -12,7 +20,6 @@ import {
   setVerifyConfigAction,
   upsertCredentialAction,
 } from "../actions";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -32,28 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type ProvisioningView = {
-  subscriptionId: string;
-  productName: string;
-  /** marketing-* products: MHub owns the domain via the provisioning handshake — no DNS controls. */
-  managedByPartner: boolean;
-  domainUrl: string | null;
-  hasVerifyToken: boolean;
-  verifyToken: string | null;
-  expectedCname: string | null;
-  expectedAIps: string | null;
-  dnsLastOk: boolean | null;
-  dnsLastVerifiedAt: string | null;
-  dnsLastResolved: string | null;
-  credentials: {
-    id: string;
-    kind: string;
-    label: string;
-    url: string | null;
-    username: string | null;
-    hasSecret: boolean;
-  }[];
-};
+export type { ProvisioningView };
 
 export type TimelineView = {
   id: string;
@@ -83,6 +69,7 @@ export function OpsProvisioning({
   timeline: TimelineView;
 }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const [credFor, setCredFor] = useState<{ subscriptionId: string; cred?: ProvisioningView["credentials"][number] } | null>(null);
   const [credForm, setCredForm] = useState({ kind: "hosting", label: "", url: "", username: "", secret: "" });
@@ -155,8 +142,14 @@ export function OpsProvisioning({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <h2 className="text-sm font-semibold text-heading">Provisioning</h2>
+    <Section title="Provisioning" icon={Globe} count={items.length}>
+      {items.length === 0 && (
+        <EmptyState
+          icon={Globe}
+          title="Nothing to provision yet"
+          description="Domains, DNS verification, and stored credentials appear here per live subscription."
+        />
+      )}
       {items.map((item) => (
         <ProvisioningCard
           key={item.subscriptionId}
@@ -175,7 +168,13 @@ export function OpsProvisioning({
             setCredForm({ kind: cred.kind, label: cred.label, url: cred.url ?? "", username: cred.username ?? "", secret: "" });
           }}
           onDeleteCred={async (cred) => {
-            if (!confirm(`Delete credential "${cred.label}"?`)) return;
+            const ok = await confirm({
+              title: `Delete credential "${cred.label}"?`,
+              description: "The stored secret is erased. This cannot be undone.",
+              confirmLabel: "Delete",
+              destructive: true,
+            });
+            if (!ok) return;
             const res = await deleteCredentialAction(cred.id);
             if (res.ok) { toast.success("Credential deleted"); router.refresh(); }
             else toast.error(res.error);
@@ -205,7 +204,7 @@ export function OpsProvisioning({
                   {t.actorName && <span className="text-muted-foreground"> · {t.actorName}</span>}
                 </div>
                 <span className="whitespace-nowrap text-xs text-muted-foreground">
-                  {new Date(t.createdAt).toLocaleString()}
+                  {formatDateTime(t.createdAt)}
                 </span>
               </div>
             ))}
@@ -262,7 +261,7 @@ export function OpsProvisioning({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </Section>
   );
 }
 
@@ -293,20 +292,19 @@ function ProvisioningCard({
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Globe className="size-4 text-primary" /> {item.productName}
+          <Globe className="size-4 text-primary" />
+          <Link href={OPS.product(item.productId)} className="hover:text-primary">{item.productName}</Link>
         </CardTitle>
-        {item.managedByPartner ? (
-          <Badge variant={item.domainUrl ? "secondary" : "outline"}>
-            {item.domainUrl ? "Provisioned by MHub" : "Provisioning pending"}
-          </Badge>
-        ) : (
-          item.dnsLastOk != null && (
-            <Badge variant={item.dnsLastOk ? "secondary" : "destructive"}>
-              DNS {item.dnsLastOk ? "verified" : "failing"}
-              {item.dnsLastVerifiedAt && ` · ${new Date(item.dnsLastVerifiedAt).toLocaleDateString()}`}
-            </Badge>
-          )
-        )}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <StatusBadge
+            kind="dns"
+            status={item.state}
+            label={item.state === "provisioned" ? "provisioned by MHub" : undefined}
+          />
+          {!item.managedByPartner && item.dnsLastVerifiedAt && (
+            <span>checked {formatDate(item.dnsLastVerifiedAt)}</span>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {item.managedByPartner ? (
@@ -319,7 +317,7 @@ function ProvisioningCard({
                 </a>
               </>
             ) : (
-              "Waiting for the MHub provisioning handshake — retries run automatically (see Ops → Webhooks)."
+              "Waiting for the MHub provisioning handshake — retries run automatically (see System → Webhooks)."
             )}
           </p>
         ) : (

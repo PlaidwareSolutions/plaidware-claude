@@ -1,25 +1,40 @@
+import { cache } from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { Activity, CreditCard, ExternalLink, MessageSquare, Receipt } from "lucide-react";
 import { requireOpsPage } from "@/policy";
-import { db } from "@/db";
-import { invoices } from "@/modules/billing/schema";
-import { dunningStates, payments } from "@/modules/billing/ar-schema";
 import { getTenant, listMembers } from "@/modules/tenancy/queries";
-import { listTenantSubscriptions } from "@/modules/billing/queries";
-import { OpsTenantBilling } from "@/modules/billing/components/ops-tenant-billing";
-import { subscriptionProvisioning, provisioningCredentials } from "@/modules/provisioning/schema";
+import {
+  listAllInvoicesOps,
+  listTenantPricingRows,
+  listTenantSubscriptions,
+} from "@/modules/billing/queries";
+import { listTenantProvisioning } from "@/modules/provisioning/queries";
 import { tenantTimeline } from "@/modules/audit/service";
-import { OpsProvisioning } from "@/modules/provisioning/components/ops-provisioning";
-import { listAllProductsOps } from "@/modules/catalog/queries";
-import { tenantPriceOverrides } from "@/modules/billing/schema";
-import { intervalLabel } from "@/modules/billing/mappers";
+import { OpsTenantBilling } from "@/modules/billing/components/ops-tenant-billing";
 import { OpsCustomPricing } from "@/modules/billing/components/ops-custom-pricing";
-import { isMarketingSlug } from "@/modules/webhooks_out/logic";
+import { OpsProvisioning } from "@/modules/provisioning/components/ops-provisioning";
+import { LIVE_SUBSCRIPTION_STATUSES } from "@/modules/billing/mappers";
+import { formatCents } from "@/lib/money";
+import { formatDate } from "@/lib/dates";
+import { OPS, stripeCustomerUrl, withQuery } from "@/lib/routes";
+import { stripeTestMode } from "@/lib/stripe";
+import { PageHeader } from "@/components/page-header";
+import { StatTile } from "@/components/stat-tile";
+import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
 
-export const metadata = { title: "Client" };
 export const dynamic = "force-dynamic";
 
-export default async function OpsTenantDetailPage({
+const loadTenant = cache(getTenant);
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const tenant = await loadTenant(id);
+  return { title: tenant?.name ?? "Client" };
+}
+
+export default async function OpsClientDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -27,142 +42,111 @@ export default async function OpsTenantDetailPage({
   await requireOpsPage();
 
   const { id } = await params;
-  const tenant = await getTenant(id);
+  const tenant = await loadTenant(id);
   if (!tenant) notFound();
 
-  const [members, subscriptions, tenantInvoices] = await Promise.all([
+  const [members, subscriptions, invoices, pricingRows, timeline] = await Promise.all([
     listMembers(id),
     listTenantSubscriptions(id),
-    db.query.invoices.findMany({
-      where: eq(invoices.tenantId, id),
-      orderBy: [desc(invoices.createdAt)],
-      limit: 100,
-    }),
-  ]);
-
-  const subIds = subscriptions.map((s) => s.id);
-  const [provRows, credRows, timeline] = await Promise.all([
-    subIds.length
-      ? db.query.subscriptionProvisioning.findMany({
-          where: inArray(subscriptionProvisioning.subscriptionId, subIds),
-        })
-      : Promise.resolve([]),
-    subIds.length
-      ? db.query.provisioningCredentials.findMany({
-          where: inArray(provisioningCredentials.subscriptionId, subIds),
-        })
-      : Promise.resolve([]),
+    listAllInvoicesOps(100, { tenantId: id }),
+    listTenantPricingRows(id),
     tenantTimeline(id),
   ]);
+  const provisioning = await listTenantProvisioning(subscriptions);
 
-  const [allProducts, overrides] = await Promise.all([
-    listAllProductsOps(),
-    db.query.tenantPriceOverrides.findMany({
-      where: eq(tenantPriceOverrides.tenantId, id),
-    }),
-  ]);
-  const pricingRows = allProducts.flatMap((p) =>
-    p.components.map((c) => ({
-      componentId: c.id,
-      productName: p.name,
-      componentName: c.name,
-      listCents: c.amountCents,
-      intervalLabel: intervalLabel(c),
-      overrideCents: overrides.find((o) => o.componentId === c.id)?.amountCents ?? null,
-    })),
+  const live = subscriptions.filter((s) =>
+    (LIVE_SUBSCRIPTION_STATUSES as readonly string[]).includes(s.status),
   );
-
-  const invoiceIds = tenantInvoices.map((i) => i.id);
-  const [cases, paymentRows] = await Promise.all([
-    invoiceIds.length
-      ? db.query.dunningStates.findMany({
-          where: and(inArray(dunningStates.invoiceId, invoiceIds), isNull(dunningStates.resolvedAt)),
-        })
-      : Promise.resolve([]),
-    invoiceIds.length
-      ? db.query.payments.findMany({ where: inArray(payments.invoiceId, invoiceIds) })
-      : Promise.resolve([]),
-  ]);
-
-  const provisioningItems = subscriptions
-    .filter((s) => !["canceled", "expired"].includes(s.status))
-    .map((s) => {
-      const p = provRows.find((x) => x.subscriptionId === s.id);
-      return {
-        subscriptionId: s.id,
-        productName: s.productName,
-        managedByPartner: isMarketingSlug(s.productSlug),
-        domainUrl: p?.domainUrl ?? null,
-        hasVerifyToken: Boolean(p?.verifyToken),
-        verifyToken: p?.verifyToken ?? null,
-        expectedCname: p?.expectedCname ?? null,
-        expectedAIps: p?.expectedAIps ?? null,
-        dnsLastOk: p?.dnsLastOk ?? null,
-        dnsLastVerifiedAt: p?.dnsLastVerifiedAt?.toISOString() ?? null,
-        dnsLastResolved: p?.dnsLastResolved ?? null,
-        credentials: credRows
-          .filter((c) => c.subscriptionId === s.id)
-          .map((c) => ({
-            id: c.id,
-            kind: c.kind,
-            label: c.label,
-            url: c.url,
-            username: c.username,
-            hasSecret: Boolean(c.secretCiphertext),
-          })),
-      };
-    });
+  const mrrCents = subscriptions.reduce((sum, s) => sum + s.monthlyCents, 0);
+  const outstandingCents = invoices
+    .filter((i) => i.status === "open" || i.status === "failed")
+    .reduce((sum, i) => sum + i.amountDueCents - i.amountPaidCents, 0);
+  const lifetimeCents = invoices.reduce((sum, i) => sum + i.amountPaidCents, 0);
+  const now = Date.now();
+  const pastDueCount = invoices.filter(
+    (i) => i.status === "failed" || (i.status === "open" && i.dueDate != null && new Date(i.dueDate).getTime() < now),
+  ).length;
+  const dnsProblems = provisioning.filter((p) =>
+    ["unconfigured", "failing", "no_domain"].includes(p.state),
+  ).length;
+  const slug = tenant.slug ?? "";
+  const status = tenant.status ?? "active";
 
   return (
     <div className="flex flex-col gap-8">
-    <OpsTenantBilling
-      tenant={{
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug ?? "",
-        status: tenant.status ?? "active",
-        memberCount: members.length,
-      }}
-      subscriptions={subscriptions}
-      invoices={tenantInvoices.map((inv) => ({
-        id: inv.id,
-        invoiceNumber: inv.invoiceNumber,
-        kind: inv.kind,
-        status: inv.status,
-        amountDueCents: inv.amountDueCents,
-        amountPaidCents: inv.amountPaidCents,
-        hostedInvoiceUrl: inv.hostedInvoiceUrl,
-        dueDate: inv.dueDate?.toISOString() ?? null,
-        createdAt: inv.createdAt.toISOString(),
-        dunning: (() => {
-          const c = cases.find((x) => x.invoiceId === inv.id);
-          return c
-            ? {
-                id: c.id,
-                remindersSent: c.remindersSent,
-                suspendedAt: c.suspendedAt?.toISOString() ?? null,
-                paused: c.paused,
-              }
-            : null;
-        })(),
-        payments: paymentRows
-          .filter((p) => p.invoiceId === inv.id)
-          .map((p) => ({
-            id: p.id,
-            amountCents: p.amountCents,
-            method: p.method,
-            reference: p.reference,
-            receivedAt: p.receivedAt.toISOString(),
-          })),
-      }))}
-    />
-    <div>
-      <OpsCustomPricing tenantId={id} rows={pricingRows} />
-    </div>
-    <div>
+      <PageHeader
+        back={{ href: OPS.clients, label: "Clients" }}
+        title={tenant.name}
+        badge={<StatusBadge kind="tenant" status={status} />}
+        meta={
+          <>
+            {slug} · {members.length} member{members.length === 1 ? "" : "s"} · since{" "}
+            {formatDate(tenant.createdAt)}
+          </>
+        }
+        actions={
+          <>
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href={withQuery(OPS.subscriptions, { q: slug })}>
+                <Receipt className="size-4" /> Subscriptions
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href={withQuery(OPS.monitoring, { tenant: id })}>
+                <Activity className="size-4" /> Monitoring
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href={withQuery(OPS.inbox, { tenant: id })}>
+                <MessageSquare className="size-4" /> Inbox
+              </Link>
+            </Button>
+            {tenant.stripeCustomerId && (
+              <Button asChild variant="outline" size="sm" className="gap-1.5">
+                <a
+                  href={stripeCustomerUrl(tenant.stripeCustomerId, stripeTestMode())}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <CreditCard className="size-4" /> Stripe <ExternalLink className="size-3" />
+                </a>
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile label="Monthly recurring" value={formatCents(mrrCents)} sub={`${live.length} live subscription${live.length === 1 ? "" : "s"}`} />
+        <StatTile
+          label="Outstanding"
+          value={formatCents(outstandingCents)}
+          tone={outstandingCents > 0 ? "warning" : "default"}
+          sub="open + failed invoices"
+        />
+        <StatTile label="Lifetime paid" value={formatCents(lifetimeCents)} sub={`${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`} />
+        <StatTile
+          label="Provisioning"
+          value={dnsProblems ? `${dnsProblems} need${dnsProblems === 1 ? "s" : ""} attention` : provisioning.length ? "All set" : "—"}
+          tone={dnsProblems ? "warning" : provisioning.length ? "success" : "default"}
+          sub={`${provisioning.length} product${provisioning.length === 1 ? "" : "s"} provisioned`}
+        />
+      </div>
+
+      <OpsTenantBilling
+        tenant={{ id: tenant.id, name: tenant.name }}
+        subscriptions={subscriptions}
+        invoices={invoices}
+        pastDueCount={pastDueCount}
+      />
+      <OpsCustomPricing
+        tenantId={id}
+        rows={pricingRows}
+        subscribedProductIds={live.map((s) => s.productId)}
+      />
       <OpsProvisioning
         tenantId={id}
-        items={provisioningItems}
+        items={provisioning}
         timeline={timeline.map((t) => ({
           id: t.id,
           kind: t.kind,
@@ -171,7 +155,6 @@ export default async function OpsTenantDetailPage({
           payload: t.payload,
         }))}
       />
-    </div>
     </div>
   );
 }

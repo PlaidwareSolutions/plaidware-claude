@@ -15,3 +15,8 @@ export function getStripe(): Stripe {
 export function stripeConfigured(): boolean {
   return Boolean(env.STRIPE_SECRET_KEY);
 }
+
+/** Dashboard links need `/test/` when the configured key is a test key. */
+export function stripeTestMode(): boolean {
+  return Boolean(env.STRIPE_SECRET_KEY?.startsWith("sk_test_"));
+}
