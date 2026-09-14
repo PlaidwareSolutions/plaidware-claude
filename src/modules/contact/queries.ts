@@ -16,3 +16,7 @@ export async function countNewContactSubmissions(): Promise<number> {
     .where(eq(contactSubmissions.status, "new"));
   return rows.length;
 }
+
+export async function getContactSubmission(id: string) {
+  return db.query.contactSubmissions.findFirst({ where: eq(contactSubmissions.id, id) });
+}

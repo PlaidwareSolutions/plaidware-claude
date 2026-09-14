@@ -1,10 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { Inbox, UserPlus } from "lucide-react";
-import type { ProductDto } from "@/modules/catalog/queries";
-import { OnboardClientWizard } from "@/modules/onboarding/components/onboard-client-wizard";
 import { setContactStatusAction } from "../actions";
 import { formatDateTime } from "@/lib/dates";
+import { OPS, withQuery } from "@/lib/routes";
 import { useAction } from "@/lib/use-action";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
@@ -22,7 +22,7 @@ export type LeadRow = {
   createdAt: string;
 };
 
-export function ContactInbox({ submissions, products }: { submissions: LeadRow[]; products: ProductDto[] }) {
+export function ContactInbox({ submissions }: { submissions: LeadRow[] }) {
   const { run, isPending } = useAction();
 
   function setStatus(s: LeadRow, status: LeadRow["status"]) {
@@ -63,18 +63,11 @@ export function ContactInbox({ submissions, products }: { submissions: LeadRow[]
             <p className="whitespace-pre-wrap text-sm">{s.message}</p>
             <div className="flex flex-wrap gap-2">
               {s.status !== "archived" && (
-                <OnboardClientWizard
-                  products={products}
-                  initial={{ clientName: s.name, clientEmail: s.email, tenantName: s.company ?? "" }}
-                  trigger={(open) => (
-                    <Button size="sm" className="gap-1.5" onClick={open}>
-                      <UserPlus className="size-4" /> Onboard…
-                    </Button>
-                  )}
-                  onCreated={() => {
-                    if (s.status === "new") setStatus(s, "contacted");
-                  }}
-                />
+                <Button asChild size="sm" className="gap-1.5">
+                  <Link href={withQuery(OPS.clientNew, { lead: s.id })}>
+                    <UserPlus className="size-4" /> Onboard…
+                  </Link>
+                </Button>
               )}
               {s.status !== "contacted" && (
                 <Button size="sm" variant="outline" disabled={isPending(`${s.id}:contacted`)} onClick={() => setStatus(s, "contacted")}>

@@ -10,7 +10,6 @@ import { normalizePhone } from "../../lib/phone";
 import { requireMembership, requireOps } from "../../policy";
 import {
   assertNotOwner,
-  createTenantWithOwner,
   deleteTenant,
   deleteTenantPreview,
   opsCancelInvite,
@@ -20,10 +19,9 @@ import {
   opsUpdateMemberRole,
   setTenantStatus,
   transferOwnership,
-  uniqueSlug,
   type DeleteTenantPreview,
 } from "./service";
-import { findUserByEmail, listMembers } from "./queries";
+import { listMembers } from "./queries";
 
 /** Tenant-side pages and the ops client page both render membership. */
 function revalidateTeam(tenantId: string) {
@@ -170,33 +168,6 @@ export async function opsSetUserPhoneAction(input: z.infer<typeof phoneSchema>):
 }
 
 // ---------- Ops-only ----------
-
-const createTenantSchema = z.object({
-  name: z.string().min(2).max(80),
-  slug: z.string().max(50).optional(),
-  ownerEmail: z.string().email(),
-});
-
-export async function opsCreateTenantAction(input: z.infer<typeof createTenantSchema>): Promise<ActionResult> {
-  try {
-    await requireOps();
-    const parsed = createTenantSchema.parse(input);
-    const owner = await findUserByEmail(parsed.ownerEmail);
-    if (!owner) {
-      throw new Error(
-        "No account exists for that email. Ask them to sign up first — the onboarding wizard arrives in a later milestone.",
-      );
-    }
-    const slug = parsed.slug?.trim()
-      ? await uniqueSlug(parsed.slug)
-      : await uniqueSlug(parsed.name);
-    await createTenantWithOwner({ name: parsed.name, slug, ownerUserId: owner.id });
-    revalidateClientViews();
-    return { ok: true };
-  } catch (e) {
-    return fail(e);
-  }
-}
 
 export async function opsSetTenantStatusAction(
   tenantId: string,

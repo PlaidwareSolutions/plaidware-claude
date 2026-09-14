@@ -16,12 +16,13 @@ const nextConfig: NextConfig = {
       ],
     },
   },
-  // Ops IA moved to client-centric routes (2026-09). Temporary (307) until the
-  // new layout has settled — browsers cache 308s forever.
+  // Ops IA moved to client-centric routes (2026-09). The client routes are
+  // settled (308); the rest stay 307 until their boards finish landing —
+  // browsers cache 308s forever.
   async redirects() {
     return [
-      { source: "/ops/tenants", destination: "/ops/clients", permanent: false },
-      { source: "/ops/tenants/:id", destination: "/ops/clients/:id", permanent: false },
+      { source: "/ops/tenants", destination: "/ops/clients", permanent: true },
+      { source: "/ops/tenants/:id", destination: "/ops/clients/:id", permanent: true },
       { source: "/ops/subscriptions", destination: "/ops/billing/subscriptions", permanent: false },
       { source: "/ops/incidents", destination: "/ops/monitoring", permanent: false },
       { source: "/ops/contact-inbox", destination: "/ops/inbox/leads", permanent: false },

@@ -7,8 +7,7 @@ import { Elements } from "@stripe/react-stripe-js";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import type { SetupProposal } from "../service";
-import { completeSetupPasswordAction, finalizeSetupAction } from "../actions";
-import { createCheckoutAction } from "@/modules/billing/actions";
+import { completeSetupPasswordAction, finalizeSetupAction, startSetupCheckoutAction } from "../actions";
 import { PaymentForm } from "@/modules/billing/components/checkout-flow";
 import { authClient, useSession } from "@/lib/auth-client";
 import { formatCents } from "@/lib/money";
@@ -184,12 +183,7 @@ export function WelcomeFlow({
 
   async function startPayment() {
     setBusy(true);
-    const res = await createCheckoutAction({
-      productId: primary.productId,
-      componentIds: primary.componentIds,
-      tenantId: proposal.tenantId,
-      skipAutoPromos: true, // the quoted price is the final price
-    });
+    const res = await startSetupCheckoutAction(token);
     setBusy(false);
     if (!res.ok) {
       // Revisit after the primary was already paid — just resume the fan-out.

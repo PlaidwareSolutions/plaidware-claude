@@ -2,8 +2,15 @@
 
 import { revalidateClientViews } from "@/lib/ops-revalidate";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { db } from "../../db";
 import { requireOps, requireUser } from "../../policy";
+import { normalizePhone } from "../../lib/phone";
+import { user } from "../auth/schema";
+import { getUserTenants } from "../tenancy/queries";
+import { createCheckout, type CheckoutResult } from "../billing/service";
 import {
+  applyInvitePricing,
   completeSetupPassword,
   createClientSetup,
   getSetupByToken,
@@ -16,6 +23,11 @@ import {
 const createSchema = z.object({
   clientName: z.string().min(2).max(100),
   clientEmail: z.string().email(),
+  phone: z
+    .string()
+    .max(40)
+    .optional()
+    .refine((v) => !v || !!normalizePhone(v), "Enter a phone number with a country code"),
   tenantName: z.string().min(2).max(80),
   products: z
     .array(
@@ -50,6 +62,66 @@ export async function createClientSetupAction(
     return { ok: true, link: r.link, tenantId: r.tenantId };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Setup creation failed" };
+  }
+}
+
+/**
+ * Before the operator types a workspace name: does this email already have an
+ * account, and would the setup attach to an existing workspace?
+ */
+export async function lookupClientEmailAction(
+  email: string,
+): Promise<
+  | { ok: true; exists: false }
+  | { ok: true; exists: true; name: string; workspace: { id: string; name: string } | null }
+  | { ok: false; error: string }
+> {
+  try {
+    await requireOps();
+    const addr = z.string().email().parse(email.trim().toLowerCase());
+    const existing = await db.query.user.findFirst({ where: eq(user.email, addr) });
+    if (!existing) return { ok: true, exists: false };
+    const owned = (await getUserTenants(existing.id)).find((t) => t.role === "owner") ?? null;
+    return {
+      ok: true,
+      exists: true,
+      name: existing.name,
+      workspace: owned ? { id: owned.id, name: owned.name } : null,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Lookup failed" };
+  }
+}
+
+/**
+ * The client's "Continue to payment" on /welcome: commits the invite's held
+ * prices as tenant overrides, then opens the primary product's checkout at
+ * exactly the quoted amounts.
+ */
+export async function startSetupCheckoutAction(
+  token: string,
+): Promise<({ ok: true } & CheckoutResult) | { ok: false; error: string }> {
+  try {
+    const session = await requireUser();
+    const proposal = await getSetupByToken(token);
+    if (!proposal) throw new Error("Setup link not found");
+    if (proposal.status !== "pending") throw new Error("This setup link is no longer active");
+    if (proposal.clientEmail.toLowerCase() !== session.user.email.toLowerCase()) {
+      throw new Error("This setup belongs to a different account");
+    }
+    await applyInvitePricing(proposal.inviteId, session.user.id);
+    const primary = proposal.products[proposal.primaryIndex];
+    const result = await createCheckout({
+      tenantId: proposal.tenantId,
+      productId: primary.productId,
+      componentIds: primary.componentIds,
+      contact: { email: session.user.email, name: session.user.name },
+      skipAutoPromos: true, // the quoted price is the final price
+      userId: session.user.id,
+    });
+    return { ok: true, ...result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Checkout failed" };
   }
 }
 

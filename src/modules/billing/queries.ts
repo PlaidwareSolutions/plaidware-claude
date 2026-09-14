@@ -208,6 +208,8 @@ export type OpsSubscriptionDto = {
   currentPeriodEnd: string | null;
   subscribedAt: string;
   canceledAt: string | null;
+  monthlyHostingCents: number | null;
+  hostingBillingStartMonth: string | null;
 };
 
 export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
@@ -224,6 +226,8 @@ export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
       currentPeriodEnd: subscriptions.currentPeriodEnd,
       subscribedAt: subscriptions.subscribedAt,
       canceledAt: subscriptions.canceledAt,
+      monthlyHostingCents: subscriptions.monthlyHostingCents,
+      hostingBillingStartMonth: subscriptions.hostingBillingStartMonth,
     })
     .from(subscriptions)
     .innerJoin(products, eq(subscriptions.productId, products.id))
@@ -279,6 +283,8 @@ export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
       currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
       subscribedAt: s.subscribedAt.toISOString(),
       canceledAt: s.canceledAt?.toISOString() ?? null,
+      monthlyHostingCents: s.monthlyHostingCents,
+      hostingBillingStartMonth: s.hostingBillingStartMonth,
     };
   });
 }

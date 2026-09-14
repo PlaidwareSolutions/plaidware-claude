@@ -103,3 +103,32 @@ describe("pickPrimaryIndex", () => {
     expect(pickPrimaryIndex([entry("p1", ["hosting"])], isRecurring)).toBe(0);
   });
 });
+
+describe("invite-held pricing (items shape)", () => {
+  it("reads component ids from items, with legacy componentIds as fallback", async () => {
+    const { entryComponentIds, entryPriceMap } = await import("./proposal");
+    const modern: InviteProductEntry = {
+      productId: "p",
+      items: [
+        { componentId: "a", priceCents: null },
+        { componentId: "b", priceCents: 500 },
+      ],
+      domainUrl: null,
+    };
+    expect(entryComponentIds(modern)).toEqual(["a", "b"]);
+    expect([...entryPriceMap(modern)]).toEqual([["b", 500]]);
+    expect(entryComponentIds({ productId: "p", componentIds: ["z"], domainUrl: null })).toEqual(["z"]);
+  });
+
+  it("lets a held price beat a tenant override, which beats list", () => {
+    const comps = [comp({ id: "a", amountCents: 1000 }), comp({ id: "b", amountCents: 2000 }), comp({ id: "c", amountCents: 3000 })];
+    const p = buildProductProposal(
+      { productId: "p", items: [{ componentId: "a", priceCents: 100 }, { componentId: "b", priceCents: null }, { componentId: "c", priceCents: null }], domainUrl: null },
+      "P",
+      comps,
+      new Map([["a", 900], ["b", 1500]]),
+    );
+    expect(p.lines.map((l) => l.amountCents)).toEqual([100, 1500, 3000]);
+    expect(p.componentIds).toEqual(["a", "b", "c"]);
+  });
+});

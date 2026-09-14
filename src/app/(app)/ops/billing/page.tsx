@@ -8,6 +8,7 @@ import {
   listAllInvoicesOps,
   listAllSubscriptionsOps,
 } from "@/modules/billing/queries";
+import { getBillingPolicy } from "@/modules/billing/ar-service";
 import { BILLING_SCHEDULE, nextDailyRunUtc, nextMonthlyRunUtc } from "@/modules/billing/schedule";
 import { OpsBillingBoard } from "@/modules/billing/components/ops-billing-board";
 
@@ -17,13 +18,14 @@ export const dynamic = "force-dynamic";
 export default async function OpsBillingPage() {
   await requireOpsPage();
 
-  const [tenants, owners, subscriptions, invoices, stats, automation] = await Promise.all([
+  const [tenants, owners, subscriptions, invoices, stats, automation, policy] = await Promise.all([
     listAllTenants(),
     listTenantOwnerEmails(),
     listAllSubscriptionsOps(),
     listAllInvoicesOps(),
     getPlatformBillingStats(),
     getBillingAutomationStatus(), // live Stripe reads — never cached
+    getBillingPolicy(),
   ]);
 
   const now = new Date();
@@ -50,6 +52,12 @@ export default async function OpsBillingPage() {
       subscriptions={subscriptions}
       automation={automation}
       invoices={invoices}
+      policy={{
+        reminderDays: policy.reminderDays,
+        graceDays: policy.graceDays,
+        autoSuspend: policy.autoSuspend,
+        upcomingReminderDays: policy.upcomingReminderDays,
+      }}
       schedule={{
         dunningNextUtc: nextDailyRunUtc(BILLING_SCHEDULE.dunningSweep.hourUtc, now).toISOString(),
         hostingNextUtc: nextMonthlyRunUtc(

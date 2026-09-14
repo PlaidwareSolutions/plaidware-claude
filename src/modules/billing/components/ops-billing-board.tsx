@@ -23,7 +23,6 @@ import {
   runDunningSweepAction,
   sendCardSetupLinkAction,
   switchToAutoChargeAction,
-  toggleDunningPauseAction,
 } from "../ar-actions";
 import { formatCents } from "@/lib/money";
 import { formatDay, formatUtcHour } from "@/lib/dates";
@@ -58,11 +57,11 @@ import {
 import {
   HostingFeeDialog,
   NewInvoiceDialog,
-  RecordPaymentDialog,
   type HostingTarget,
-  type InvoiceTarget,
   type TenantTarget,
 } from "./ops-billing-dialogs";
+import { InvoicesTable } from "./invoices-table";
+import { BillingPolicyEditor, policySummary, type BillingPolicyDto } from "./billing-policy-editor";
 
 export type BillingTenantRow = {
   id: string;
@@ -90,6 +89,7 @@ export type BillingBoardProps = {
   subscriptions: OpsSubscriptionDto[];
   automation: SubscriptionAutomation[];
   invoices: OpsInvoiceDto[];
+  policy: BillingPolicyDto;
   schedule: { dunningNextUtc: string; hostingNextUtc: string };
 };
 
@@ -98,7 +98,6 @@ export function OpsBillingBoard(p: BillingBoardProps) {
   const { run, pending, isPending } = useAction();
   const confirm = useConfirm();
   const [invoiceFor, setInvoiceFor] = useState<TenantTarget | null>(null);
-  const [payFor, setPayFor] = useState<InvoiceTarget | null>(null);
   const [hostingFor, setHostingFor] = useState<HostingTarget | null>(null);
 
   const autoById = new Map(p.automation.map((a) => [a.subscriptionId, a]));
@@ -286,7 +285,11 @@ export function OpsBillingBoard(p: BillingBoardProps) {
       </div>
 
       {/* Automation health */}
-      <Section title="Billing automation">
+      <Section
+        title="Billing automation"
+        description={policySummary(p.policy)}
+        actions={<BillingPolicyEditor policy={p.policy} />}
+      >
         <div className="grid gap-4 md:grid-cols-3">
           {verdicts.map((v) => (
             <Card key={v.title}>
@@ -366,7 +369,19 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                         )}
                       </TableCell>
                       <TableCell>
-                        {s ? <StatusBadge kind="subscription" status={s.status} /> : <Badge variant="outline">not set up</Badge>}
+                        {s ? (
+                          <div className="flex flex-col items-start gap-1">
+                            <StatusBadge kind="subscription" status={s.status} />
+                            {a?.stripeStatus && a.stripeStatus.replace("_", " ") !== s.status.replace("_", " ") && (
+                              <span className="text-[10px] text-muted-foreground">Stripe: {a.stripeStatus.replace("_", " ")}</span>
+                            )}
+                            {a?.cancelAtPeriodEnd && (
+                              <Badge variant="warning" className="text-[10px]">cancels {formatDay(a.nextChargeAt)}</Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <Badge variant="outline">not set up</Badge>
+                        )}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {s && s.monthlyCents > 0 ? `${formatCents(s.monthlyCents)}/mo` : "—"}
@@ -406,7 +421,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuLabel className="font-normal text-muted-foreground">{s.productName}</DropdownMenuLabel>
-                                <DropdownMenuItem onSelect={() => setHostingFor({ id: s.id, productName: s.productName })}>
+                                <DropdownMenuItem onSelect={() => setHostingFor({ id: s.id, productName: s.productName, monthlyHostingCents: s.monthlyHostingCents, hostingBillingStartMonth: s.hostingBillingStartMonth })}>
                                   <Receipt className="size-4" /> Hosting fee…
                                 </DropdownMenuItem>
                                 {a && !a.error && a.collectionMethod === "send_invoice" && a.cardOnFile && (
@@ -497,113 +512,10 @@ export function OpsBillingBoard(p: BillingBoardProps) {
 
       {/* Payment history */}
       <Section title="Payment history" count={p.invoices.length}>
-        <DataTableShell>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden sm:table-cell">Due</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="hidden text-right md:table-cell">Paid</TableHead>
-                <TableHead className="w-40" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {p.invoices.length === 0 && (
-                <TableEmpty colSpan={7} icon={Receipt} title="No invoices yet" description="Stripe invoices sync here automatically; manual invoices appear the moment they're created." />
-              )}
-              {p.invoices.map((inv) => (
-                <TableRow key={inv.id}>
-                  <TableCell>
-                    <div className="font-mono text-xs text-heading">{inv.invoiceNumber}</div>
-                    <div className="mt-0.5 flex flex-wrap gap-1">
-                      <Badge variant="outline" className="text-[10px]">{inv.kind}</Badge>
-                      {inv.dunning && !inv.dunning.suspendedAt && (
-                        <StatusBadge kind="dunning" status="reminding" label={`dunning · ${inv.dunning.remindersSent} reminder${inv.dunning.remindersSent === 1 ? "" : "s"}`} className="text-[10px]" />
-                      )}
-                      {inv.dunning?.suspendedAt && <StatusBadge kind="dunning" status="suspended" className="text-[10px]" />}
-                      {inv.dunning?.paused && <StatusBadge kind="dunning" status="paused" label="dunning paused" className="text-[10px]" />}
-                    </div>
-                    {inv.payments.length > 0 && (
-                      <div className="mt-1 text-[11px] text-muted-foreground">
-                        {inv.payments.map((pay) => (
-                          <div key={pay.id}>
-                            {formatCents(pay.amountCents)} · {pay.method.replace("_", " ")}
-                            {pay.reference ? ` · ${pay.reference}` : ""} · {formatDay(pay.receivedAt)}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Link href={OPS.client(inv.tenantId)} className="hover:text-primary">{inv.tenantName}</Link>
-                    <div className="text-xs text-muted-foreground">{formatDay(inv.createdAt)}</div>
-                  </TableCell>
-                  <TableCell><StatusBadge kind="invoice" status={inv.status} /></TableCell>
-                  <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">{formatDay(inv.dueDate)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatCents(inv.amountDueCents)}</TableCell>
-                  <TableCell className="hidden text-right tabular-nums md:table-cell">
-                    {inv.amountPaidCents > 0 ? (
-                      <span className={inv.status === "paid" ? "text-success" : ""}>{formatCents(inv.amountPaidCents)}</span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      {inv.hostedInvoiceUrl && (
-                        <Button asChild variant="ghost" size="icon" title="Hosted invoice">
-                          <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer">
-                            <ExternalLink className="size-4" />
-                          </a>
-                        </Button>
-                      )}
-                      {!["paid", "void"].includes(inv.status) && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="gap-1"
-                          onClick={() =>
-                            setPayFor({
-                              id: inv.id,
-                              invoiceNumber: inv.invoiceNumber,
-                              amountDueCents: inv.amountDueCents,
-                              amountPaidCents: inv.amountPaidCents,
-                            })
-                          }
-                        >
-                          <HandCoins className="size-4" /> Record
-                        </Button>
-                      )}
-                      {inv.dunning && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={isPending(`dun:${inv.id}`)}
-                          onClick={() => {
-                            const d = inv.dunning!;
-                            void run(() => toggleDunningPauseAction(d.id, !d.paused), {
-                              key: `dun:${inv.id}`,
-                              success: d.paused ? "Dunning resumed" : "Dunning paused",
-                            });
-                          }}
-                        >
-                          {inv.dunning.paused ? "Resume" : "Pause"}
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </DataTableShell>
+        <InvoicesTable invoices={p.invoices} showClient />
       </Section>
 
       <NewInvoiceDialog key={invoiceFor?.id ?? "none"} target={invoiceFor} onOpenChange={(o) => !o && setInvoiceFor(null)} />
-      <RecordPaymentDialog key={payFor?.id ?? "none"} target={payFor} onOpenChange={(o) => !o && setPayFor(null)} />
       <HostingFeeDialog key={hostingFor?.id ?? "none"} target={hostingFor} onOpenChange={(o) => !o && setHostingFor(null)} />
     </div>
   );

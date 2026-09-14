@@ -3,13 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Building2, Plus } from "lucide-react";
+import { Building2 } from "lucide-react";
 import type { OpsTenantRow } from "../queries";
-import {
-  opsCreateTenantAction,
-  opsDeleteTenantAction,
-  opsSetTenantStatusAction,
-} from "../actions";
+import { opsDeleteTenantAction, opsSetTenantStatusAction } from "../actions";
 import { OPS } from "@/lib/routes";
 import { formatDate } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
@@ -23,10 +19,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,24 +38,9 @@ import {
 
 export function OpsClientsTable({ tenants }: { tenants: OpsTenantRow[] }) {
   const { run, isPending } = useAction();
-  const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", slug: "", ownerEmail: "" });
   const [busy, setBusy] = useState(false);
   const [deleteFor, setDeleteFor] = useState<OpsTenantRow | null>(null);
   const [confirmSlug, setConfirmSlug] = useState("");
-
-  async function create() {
-    setBusy(true);
-    const res = await opsCreateTenantAction(form);
-    setBusy(false);
-    if (res.ok) {
-      toast.success(`Workspace "${form.name}" created`);
-      setCreateOpen(false);
-      setForm({ name: "", slug: "", ownerEmail: "" });
-    } else {
-      toast.error(res.error ?? "Create failed");
-    }
-  }
 
   async function doDelete() {
     if (!deleteFor) return;
@@ -78,48 +57,9 @@ export function OpsClientsTable({ tenants }: { tenants: OpsTenantRow[] }) {
   }
 
   const toolbar = (
-    <>
-      <span className="text-sm text-muted-foreground">
-        {tenants.length} client{tenants.length === 1 ? "" : "s"}
-      </span>
-      <div className="ml-auto">
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-2">
-              <Plus className="size-4" /> Create workspace
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create a workspace</DialogTitle>
-              <DialogDescription>
-                For an owner who already has a Plaidware account. To set up a brand-new client
-                with products and a setup link, use Onboard client instead.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="t-name">Name</Label>
-                <Input id="t-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="t-slug">Slug (optional)</Label>
-                <Input id="t-slug" placeholder="derived from name" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="t-owner">Owner email</Label>
-                <Input id="t-owner" type="email" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button onClick={create} disabled={busy || !form.name || !form.ownerEmail}>
-                {busy ? "Creating…" : "Create workspace"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-    </>
+    <span className="text-sm text-muted-foreground">
+      {tenants.length} client{tenants.length === 1 ? "" : "s"}
+    </span>
   );
 
   return (

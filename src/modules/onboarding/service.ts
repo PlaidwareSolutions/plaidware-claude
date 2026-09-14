@@ -1,16 +1,18 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import { db } from "../../db";
 import { env } from "../../env";
 import { auth } from "../../lib/auth";
 import { getStripe } from "../../lib/stripe";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
 import { formatCents } from "../../lib/money";
+import { normalizePhone, PLACEHOLDER_PHONE } from "../../lib/phone";
 import { account, organization, user } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
 import { subscriptions, tenantPriceOverrides } from "../billing/schema";
 import { isRecurringKind, LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
 import { createCheckout, promoteDefaultPaymentMethod } from "../billing/service";
+import { setTenantPriceOverride } from "../billing/ar-service";
 import { createTenantWithOwner, uniqueSlug } from "../tenancy/service";
 import { getUserTenants } from "../tenancy/queries";
 import { setDomain } from "../provisioning/service";
@@ -21,6 +23,8 @@ import { onboardingInvites } from "./schema";
 import {
   buildProductProposal,
   combineTotals,
+  entryComponentIds,
+  entryPriceMap,
   pickPrimaryIndex,
   type InviteProductEntry,
   type ProposalProduct,
@@ -36,6 +40,8 @@ const INVITE_DAYS = 14;
 export async function createClientSetup(opts: {
   clientName: string;
   clientEmail: string;
+  /** Any format; normalised to E.164. Missing → placeholder flagged on the People tab. */
+  phone?: string | null;
   tenantName: string;
   /** Locked per-product selections; priceCents null = list price. */
   products: {
@@ -80,10 +86,12 @@ export async function createClientSetup(opts: {
         name: opts.clientName.trim(),
         firstName: first || "Client",
         lastName: rest.join(" ") || "-",
-        phone: "+10000000000", // placeholder; the client can update in Settings
+        phone: normalizePhone(opts.phone) ?? PLACEHOLDER_PHONE,
       },
     });
     clientUser = (await db.query.user.findFirst({ where: eq(user.email, email) }))!;
+  } else if (opts.phone && normalizePhone(opts.phone) && clientUser.phone === PLACEHOLDER_PHONE) {
+    await db.update(user).set({ phone: normalizePhone(opts.phone)! }).where(eq(user.id, clientUser.id));
   }
 
   // 2. Find their owned tenant, else create one.
@@ -99,35 +107,20 @@ export async function createClientSetup(opts: {
         })
       ).id;
 
-  // 3. Custom prices become tenant overrides (only where they differ from list).
-  for (const p of opts.products) {
-    for (const item of p.items) {
-      const comp = comps.find((c) => c.id === item.componentId);
-      if (!comp || item.priceCents == null || item.priceCents === comp.amountCents) continue;
-      await db
-        .insert(tenantPriceOverrides)
-        .values({
-          tenantId,
-          componentId: item.componentId,
-          amountCents: item.priceCents,
-          createdByUserId: opts.actorUserId,
-        })
-        .onConflictDoUpdate({
-          target: [tenantPriceOverrides.tenantId, tenantPriceOverrides.componentId],
-          set: {
-            amountCents: item.priceCents,
-            stripePriceId: null, // re-mint at next use
-            createdByUserId: opts.actorUserId,
-          },
-        });
-    }
-  }
-
-  // 4. Mint the single-use link.
+  // 3. Custom prices are held on the invite and become tenant overrides only
+  //    when the client commits (applyInvitePricing) — a link that is never
+  //    used leaves no pricing behind, and a price can't land on the wrong
+  //    product because it is tied to the invite's own product entry.
   const raw = randomBytes(24).toString("hex");
   const entries: InviteProductEntry[] = opts.products.map((p) => ({
     productId: p.productId,
-    componentIds: p.items.map((i) => i.componentId),
+    items: p.items.map((i) => {
+      const comp = comps.find((c) => c.id === i.componentId);
+      return {
+        componentId: i.componentId,
+        priceCents: i.priceCents == null || i.priceCents === comp?.amountCents ? null : i.priceCents,
+      };
+    }),
     domainUrl: p.domainUrl?.trim() || null,
   }));
   const [invite] = await db
@@ -208,7 +201,7 @@ async function assembleProposal(inviteId: string): Promise<SetupProposal | null>
     where: eq(onboardingInvites.id, inviteId),
   });
   if (!invite || invite.products.length === 0) return null;
-  const allComponentIds = invite.products.flatMap((p) => p.componentIds);
+  const allComponentIds = invite.products.flatMap(entryComponentIds);
   const [clientUser, productRows, comps, overrides, org] = await Promise.all([
     db.query.user.findFirst({ where: eq(user.id, invite.userId) }),
     db.query.products.findMany({
@@ -229,14 +222,15 @@ async function assembleProposal(inviteId: string): Promise<SetupProposal | null>
   if (!clientUser || productRows.length !== invite.products.length) return null;
 
   const overrideAmounts = new Map(overrides.map((o) => [o.componentId, o.amountCents]));
-  const proposalProducts = invite.products.map((entry) =>
-    buildProductProposal(
+  const proposalProducts = invite.products.map((entry) => {
+    const ids = entryComponentIds(entry);
+    return buildProductProposal(
       entry,
       productRows.find((p) => p.id === entry.productId)?.name ?? "Product",
-      comps.filter((c) => entry.componentIds.includes(c.id)),
+      comps.filter((c) => ids.includes(c.id)),
       overrideAmounts,
-    ),
-  );
+    );
+  });
   const recurringIds = new Set(comps.filter((c) => isRecurringKind(c.kind)).map((c) => c.id));
 
   return {
@@ -252,6 +246,52 @@ async function assembleProposal(inviteId: string): Promise<SetupProposal | null>
     primaryIndex: pickPrimaryIndex(invite.products, (id) => recurringIds.has(id)),
     ...combineTotals(proposalProducts),
   };
+}
+
+/**
+ * Commit the invite's held prices as tenant overrides (tagged with the invite
+ * so a later revoke/expiry can remove exactly these). Idempotent: rows that
+ * already match are skipped, so finalize re-runs don't spam the audit log.
+ */
+export async function applyInvitePricing(inviteId: string, actorUserId: string | null): Promise<number> {
+  const invite = await db.query.onboardingInvites.findFirst({ where: eq(onboardingInvites.id, inviteId) });
+  if (!invite) throw new Error("Setup not found");
+  const held = invite.products.flatMap((e) => [...entryPriceMap(e)]);
+  if (held.length === 0) return 0;
+  const existing = await db.query.tenantPriceOverrides.findMany({
+    where: and(
+      eq(tenantPriceOverrides.tenantId, invite.tenantId),
+      inArray(tenantPriceOverrides.componentId, held.map(([id]) => id)),
+    ),
+  });
+  let applied = 0;
+  for (const [componentId, amountCents] of held) {
+    const cur = existing.find((o) => o.componentId === componentId);
+    if (cur && cur.amountCents === amountCents && cur.sourceInviteId === invite.id) continue;
+    await setTenantPriceOverride({
+      tenantId: invite.tenantId,
+      componentId,
+      amountCents,
+      actorUserId: actorUserId ?? invite.createdByUserId ?? invite.userId,
+      sourceInviteId: invite.id,
+    });
+    applied++;
+  }
+  return applied;
+}
+
+/** Daily: pending links past their expiry flip to expired and drop any price they held. */
+export async function expirePendingInvites(now = new Date()): Promise<number> {
+  const rows = await db
+    .update(onboardingInvites)
+    .set({ status: "expired" })
+    .where(and(eq(onboardingInvites.status, "pending"), lt(onboardingInvites.expiresAt, now)))
+    .returning({ id: onboardingInvites.id, tenantId: onboardingInvites.tenantId });
+  for (const r of rows) {
+    await db.delete(tenantPriceOverrides).where(eq(tenantPriceOverrides.sourceInviteId, r.id));
+    await writeAudit({ tenantId: r.tenantId, kind: "client_setup_expired", payload: { inviteId: r.id } });
+  }
+  return rows.length;
 }
 
 export async function getSetupByToken(raw: string): Promise<SetupProposal | null> {
@@ -338,6 +378,10 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
   // `expired` proceeds only when the primary was already paid (money moved —
   // honor it); an untouched expired invite stays dead.
 
+  // The held prices must exist as overrides before any checkout in this run
+  // reads them (the primary checkout applies them too; this covers webhooks).
+  await applyInvitePricing(invite.id, null);
+
   const entries = invite.products;
   const entryProductIds = entries.map((e) => e.productId);
   const [subs, productRows, comps, clientUser, org] = await Promise.all([
@@ -350,7 +394,7 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
     }),
     db.query.products.findMany({ where: inArray(products.id, entryProductIds) }),
     db.query.productComponents.findMany({
-      where: inArray(productComponents.id, entries.flatMap((e) => e.componentIds)),
+      where: inArray(productComponents.id, entries.flatMap(entryComponentIds)),
     }),
     db.query.user.findFirst({ where: eq(user.id, invite.userId) }),
     db.query.organization.findFirst({ where: eq(organization.id, invite.tenantId) }),
@@ -441,7 +485,7 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
       const res = await createCheckout({
         tenantId: invite.tenantId,
         productId: entry.productId,
-        componentIds: entry.componentIds,
+        componentIds: entryComponentIds(entry),
         contact: { email: clientUser.email, name: clientUser.name },
         skipAutoPromos: true,
         userId: invite.userId,
