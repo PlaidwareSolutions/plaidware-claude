@@ -46,6 +46,8 @@ export type HostingTarget = {
   /** Current fee, so the dialog opens prefilled and "Remove fee" is explicit. */
   monthlyHostingCents?: number | null;
   hostingBillingStartMonth?: string | null;
+  /** Product's suggested fee: prefills an empty dialog, never applied on its own. */
+  suggestedCents?: number | null;
 };
 
 type DialogProps<T> = { target: T | null; onOpenChange: (open: boolean) => void };
@@ -227,7 +229,11 @@ export function HostingFeeDialog({ target, onOpenChange }: DialogProps<HostingTa
   const [busy, setBusy] = useState(false);
   const hasFee = target?.monthlyHostingCents != null && target.monthlyHostingCents > 0;
   const [form, setForm] = useState({
-    amount: hasFee ? (target!.monthlyHostingCents! / 100).toFixed(2) : "",
+    amount: hasFee
+      ? (target!.monthlyHostingCents! / 100).toFixed(2)
+      : target?.suggestedCents
+        ? (target.suggestedCents / 100).toFixed(2)
+        : "",
     startMonth: target?.hostingBillingStartMonth ?? new Date().toISOString().slice(0, 7),
   });
 
@@ -272,11 +278,17 @@ export function HostingFeeDialog({ target, onOpenChange }: DialogProps<HostingTa
           <DialogTitle>Hosting fee — {target?.productName}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
-          {hasFee && (
+          {hasFee ? (
             <p className="text-sm text-muted-foreground">
               Currently <span className="font-medium text-heading">${(target!.monthlyHostingCents! / 100).toFixed(2)}/mo</span>
               {target?.hostingBillingStartMonth ? ` since ${target.hostingBillingStartMonth}` : ""}.
             </p>
+          ) : (
+            target?.suggestedCents && (
+              <p className="text-sm text-muted-foreground">
+                The product suggests <span className="font-medium text-heading">${(target.suggestedCents / 100).toFixed(2)}/mo</span> — prefilled, nothing is charged until you save.
+              </p>
+            )
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">

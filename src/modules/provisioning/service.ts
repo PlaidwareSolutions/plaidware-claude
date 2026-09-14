@@ -21,9 +21,17 @@ export async function getOrCreateProvisioning(subscriptionId: string) {
     where: eq(subscriptionProvisioning.subscriptionId, subscriptionId),
   });
   if (existing) return existing;
+  // A new row starts from the product's DNS defaults (then the platform env).
+  const [product] = await db
+    .select({ defaultExpectedCname: products.defaultExpectedCname, defaultExpectedAIps: products.defaultExpectedAIps })
+    .from(subscriptions)
+    .innerJoin(products, eq(subscriptions.productId, products.id))
+    .where(eq(subscriptions.id, subscriptionId))
+    .limit(1);
+  const defaults = resolveDnsDefaults(product);
   const [row] = await db
     .insert(subscriptionProvisioning)
-    .values({ subscriptionId })
+    .values({ subscriptionId, expectedCname: defaults.expectedCname, expectedAIps: defaults.expectedAIps })
     .onConflictDoNothing({ target: subscriptionProvisioning.subscriptionId })
     .returning();
   return (

@@ -28,6 +28,11 @@ export const products = pgTable("products", {
   trialDays: integer("trial_days"),
   /** Telemetry freshness SLA in minutes; null = 24h default (PRD §4.8). */
   reporterQuietAfterMinutes: integer("reporter_quiet_after_minutes"),
+  /** Provisioning defaults seeded onto every new subscription of this product. */
+  defaultExpectedCname: text("default_expected_cname"),
+  defaultExpectedAIps: text("default_expected_a_ips"),
+  /** Suggested hosting fee (cents/month); shown in the dialog, never auto-applied. */
+  defaultMonthlyHostingCents: integer("default_monthly_hosting_cents"),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),

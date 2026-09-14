@@ -41,6 +41,8 @@ export type SubscriptionDto = {
   suspensionSource: string | null;
   suspendedAt: string | null;
   suspensionNote: string | null;
+  /** The product's suggested hosting fee — shown in the dialog, never auto-applied. */
+  defaultMonthlyHostingCents: number | null;
 };
 
 export async function listTenantSubscriptions(tenantId: string): Promise<SubscriptionDto[]> {
@@ -61,6 +63,7 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
       suspensionSource: subscriptions.suspensionSource,
       suspendedAt: subscriptions.suspendedAt,
       suspensionNote: subscriptions.suspensionNote,
+      defaultMonthlyHostingCents: products.defaultMonthlyHostingCents,
     })
     .from(subscriptions)
     .innerJoin(products, eq(subscriptions.productId, products.id))

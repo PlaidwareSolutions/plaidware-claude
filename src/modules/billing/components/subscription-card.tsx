@@ -124,6 +124,7 @@ export function SubscriptionCard({
                 productName: sub.productName,
                 monthlyHostingCents: sub.monthlyHostingCents,
                 hostingBillingStartMonth: sub.hostingBillingStartMonth,
+                suggestedCents: sub.defaultMonthlyHostingCents,
               })
             }
             onAddons={() => setAddonsOpen(true)}

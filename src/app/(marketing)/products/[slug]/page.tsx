@@ -4,19 +4,13 @@ import { notFound } from "next/navigation";
 import { Check } from "lucide-react";
 import { getProductBySlug } from "@/modules/catalog/queries";
 import { formatCents } from "@/lib/money";
+import { cadenceLabel } from "@/modules/catalog/pricing";
 import { hubUrl } from "@/lib/urls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
-
-const KIND_LABEL: Record<string, string> = {
-  one_time: "one-time",
-  recurring_monthly: "per month",
-  recurring_yearly: "per year",
-  metered: "per unit",
-};
 
 export async function generateMetadata({
   params,
@@ -81,7 +75,9 @@ export default async function ProductPage({
                   <div className="font-semibold tabular-nums text-heading">
                     {formatCents(c.amountCents)}
                   </div>
-                  <div className="text-xs text-muted-foreground">{KIND_LABEL[c.kind]}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {c.kind === "metered" ? "per unit" : cadenceLabel(c) === "one-time" ? "one-time" : `per ${cadenceLabel(c).replace("/", "").replace("mo", "month").replace("yr", "year").replace("wk", "week")}`}
+                  </div>
                 </div>
               </div>
             ))}

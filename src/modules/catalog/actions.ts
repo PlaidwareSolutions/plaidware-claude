@@ -6,6 +6,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { requireOps } from "../../policy";
+import { isMarketingSlug } from "../webhooks_out/logic";
+import { isProductIcon } from "./icons";
 import { productComponents, products } from "./schema";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -57,15 +59,26 @@ export async function createProductAction(
 
 const productSchema = z.object({
   id: z.string().uuid(),
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slugs are lowercase words joined by hyphens").max(60),
   name: z.string().min(2).max(80),
   category: z.string().min(2).max(60),
   tagline: z.string().max(140).optional(),
   description: z.string().min(10).max(2000),
   features: z.array(z.string().min(1).max(120)).max(20),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  icon: z.string().max(40).nullable().optional(),
   trialDays: z.number().int().min(0).max(90).nullable(),
+  reporterQuietAfterMinutes: z.number().int().min(5).max(20160).nullable(),
+  sortOrder: z.number().int().min(0).max(999),
   isActive: z.boolean(),
 });
+
+function revalidateProduct(id: string) {
+  revalidatePath(OPS.products);
+  revalidatePath(OPS.product(id), "layout");
+  revalidatePath("/products");
+  revalidatePath("/");
+}
 
 export async function updateProductAction(
   input: z.infer<typeof productSchema>,
@@ -73,21 +86,109 @@ export async function updateProductAction(
   try {
     await requireOps();
     const p = productSchema.parse(input);
+    const current = await db.query.products.findFirst({ where: eq(products.id, p.id) });
+    if (!current) throw new Error("Product not found");
+    if (p.slug !== current.slug) {
+      // marketing-* is the MHub contract: partner feed scope, lifecycle webhooks, handshake.
+      if (isMarketingSlug(current.slug) || isMarketingSlug(p.slug)) {
+        throw new Error("marketing-* slugs are part of the MHub contract and can't be renamed here");
+      }
+      const taken = await db.query.products.findFirst({ where: eq(products.slug, p.slug), columns: { id: true } });
+      if (taken) throw new Error(`The slug "${p.slug}" is already used by another product`);
+    }
+    if (p.icon && !isProductIcon(p.icon)) throw new Error("Pick an icon from the list");
     await db
       .update(products)
       .set({
+        slug: p.slug,
         name: p.name,
         category: p.category,
         tagline: p.tagline ?? null,
         description: p.description,
         features: p.features,
         color: p.color ?? null,
+        icon: p.icon ?? null,
         trialDays: p.trialDays === 0 ? null : p.trialDays,
+        reporterQuietAfterMinutes: p.reporterQuietAfterMinutes,
+        sortOrder: p.sortOrder,
         isActive: p.isActive,
       })
       .where(eq(products.id, p.id));
-    revalidatePath(OPS.products);
-    revalidatePath("/products");
+    revalidateProduct(p.id);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const defaultsSchema = z.object({
+  id: z.string().uuid(),
+  defaultExpectedCname: z.string().max(200).nullable(),
+  defaultExpectedAIps: z.string().max(300).nullable(),
+  defaultMonthlyHostingCents: z.number().int().min(0).max(100_000_000).nullable(),
+});
+
+/** Provisioning defaults for new subscriptions of this product (existing rows untouched). */
+export async function updateProductDefaultsAction(
+  input: z.infer<typeof defaultsSchema>,
+): Promise<ActionResult> {
+  try {
+    await requireOps();
+    const p = defaultsSchema.parse(input);
+    await db
+      .update(products)
+      .set({
+        defaultExpectedCname: p.defaultExpectedCname?.trim() || null,
+        defaultExpectedAIps: p.defaultExpectedAIps?.trim() || null,
+        defaultMonthlyHostingCents: p.defaultMonthlyHostingCents || null,
+      })
+      .where(eq(products.id, p.id));
+    revalidateProduct(p.id);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Make one component the product's main charge; every other one becomes an add-on. */
+export async function setBaseComponentAction(productId: string, componentId: string): Promise<ActionResult> {
+  try {
+    await requireOps();
+    z.string().uuid().parse(productId);
+    z.string().uuid().parse(componentId);
+    await db.transaction(async (tx) => {
+      const target = await tx.query.productComponents.findFirst({
+        where: and(eq(productComponents.id, componentId), eq(productComponents.productId, productId)),
+      });
+      if (!target) throw new Error("Component not found");
+      await tx
+        .update(productComponents)
+        .set({ role: "addon" })
+        .where(and(eq(productComponents.productId, productId), eq(productComponents.role, "base")));
+      await tx.update(productComponents).set({ role: "base", isRequired: true }).where(eq(productComponents.id, componentId));
+    });
+    revalidateProduct(productId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Persist a new display order for the product's components. */
+export async function reorderComponentsAction(productId: string, orderedIds: string[]): Promise<ActionResult> {
+  try {
+    await requireOps();
+    z.string().uuid().parse(productId);
+    z.array(z.string().uuid()).min(1).max(50).parse(orderedIds);
+    await db.transaction(async (tx) => {
+      for (const [i, id] of orderedIds.entries()) {
+        await tx
+          .update(productComponents)
+          .set({ sortOrder: i })
+          .where(and(eq(productComponents.id, id), eq(productComponents.productId, productId)));
+      }
+    });
+    revalidateProduct(productId);
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -163,6 +264,10 @@ export async function upsertComponentAction(
         })
         .where(eq(productComponents.id, c.id));
     } else {
+      const siblings = await db.query.productComponents.findMany({
+        where: eq(productComponents.productId, c.productId),
+        columns: { sortOrder: true },
+      });
       await db.insert(productComponents).values({
         productId: c.productId,
         kind: c.kind,
@@ -174,11 +279,10 @@ export async function upsertComponentAction(
         amountCents: c.amountCents,
         isRequired: c.isRequired,
         isActive: c.isActive,
-        sortOrder: 99,
+        sortOrder: siblings.length ? Math.max(...siblings.map((s) => s.sortOrder)) + 1 : 0,
       });
     }
-    revalidatePath(OPS.products);
-    revalidatePath("/products");
+    revalidateProduct(c.productId);
     return { ok: true };
   } catch (e) {
     return fail(e);

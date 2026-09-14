@@ -1,4 +1,5 @@
 export type ClientTab = "billing" | "provisioning" | "monitoring" | "people" | "activity";
+export type ProductTab = "pricing" | "kpis" | "defaults" | "subscribers";
 
 /**
  * Every internal path, in one place — used for <Link href> and for
@@ -15,6 +16,7 @@ export const OPS = {
   subscriptions: "/ops/billing/subscriptions",
   products: "/ops/products",
   product: (id: string) => `/ops/products/${id}`,
+  productTab: (id: string, tab: ProductTab) => `/ops/products/${id}/${tab}`,
   monitoring: "/ops/monitoring",
   inbox: "/ops/inbox",
   leads: "/ops/inbox/leads",

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { listActiveProducts } from "@/modules/catalog/queries";
 import { formatCents } from "@/lib/money";
+import { monthlyFromCents } from "@/modules/catalog/pricing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -89,7 +90,7 @@ export default async function HomePage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {products.slice(0, 6).map((p) => {
-            const monthly = p.components.find((c) => c.kind === "recurring_monthly");
+            const monthlyCents = monthlyFromCents(p.components);
             return (
               <Link key={p.id} href={`/products/${p.slug}`}>
                 <Card className="group h-full overflow-hidden pt-0 transition-all hover:border-primary/50 hover:shadow-lg">
@@ -109,9 +110,9 @@ export default async function HomePage() {
                   </CardHeader>
                   <CardContent className="flex flex-col gap-3">
                     <p className="text-sm text-muted-foreground">{p.tagline}</p>
-                    {monthly && (
+                    {monthlyCents > 0 && (
                       <p className="text-sm font-semibold text-heading">
-                        from {formatCents(monthly.amountCents)}/mo
+                        from {formatCents(monthlyCents)}/mo
                       </p>
                     )}
                   </CardContent>

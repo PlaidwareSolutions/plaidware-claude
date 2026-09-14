@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { listActiveProducts } from "@/modules/catalog/queries";
 import { formatCents } from "@/lib/money";
+import { cadenceLabel } from "@/modules/catalog/pricing";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -12,13 +13,6 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = "force-dynamic";
-
-const KIND_LABEL: Record<string, string> = {
-  one_time: "one-time",
-  recurring_monthly: "/mo",
-  recurring_yearly: "/yr",
-  metered: "/unit",
-};
 
 const PRODUCT_IMAGES: Record<string, string> = {
   "company-website": "/images/products/company-website.png",
@@ -72,7 +66,7 @@ export default async function ProductsPage() {
                     </span>
                     <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-heading">
                       {formatCents(c.amountCents)}
-                      <span className="text-xs font-normal text-muted-foreground"> {KIND_LABEL[c.kind]}</span>
+                      <span className="text-xs font-normal text-muted-foreground"> {c.kind === "metered" ? "/unit" : cadenceLabel(c)}</span>
                     </span>
                   </li>
                 ))}

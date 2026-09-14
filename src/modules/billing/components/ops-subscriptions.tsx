@@ -70,18 +70,21 @@ export function OpsSubscriptions({
   initialQuery = "",
   initialStatus = "live",
   initialProduct = "all",
+  fixedProductSlug,
 }: {
   rows: OpsSubscriptionDto[];
   /** Seeded from ?q= / ?status= / ?product= so other pages can deep-link a filtered view. */
   initialQuery?: string;
   initialStatus?: string;
   initialProduct?: string;
+  /** Embedded on a product page: rows are pre-scoped and the product column/filter hidden. */
+  fixedProductSlug?: string;
 }) {
   const [q, setQ] = useState(initialQuery);
   const [status, setStatus] = useState(
     STATUS_FILTERS.some((f) => f.value === initialStatus) ? initialStatus : "live",
   );
-  const [product, setProduct] = useState(initialProduct);
+  const [product, setProduct] = useState(fixedProductSlug ?? initialProduct);
   const [sort, setSort] = useState<Sort>({ key: "monthly", dir: "desc" });
 
   const productOptions = (() => {
@@ -168,15 +171,17 @@ export function OpsSubscriptions({
           ))}
         </SelectContent>
       </Select>
-      <Select value={product} onValueChange={setProduct}>
-        <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All products</SelectItem>
-          {productOptions.map(([slug, name]) => (
-            <SelectItem key={slug} value={slug}>{name}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {!fixedProductSlug && (
+        <Select value={product} onValueChange={setProduct}>
+          <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All products</SelectItem>
+            {productOptions.map(([slug, name]) => (
+              <SelectItem key={slug} value={slug}>{name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
       <p className="ml-auto text-sm text-muted-foreground">
         {filtered.length} subscription{filtered.length === 1 ? "" : "s"} · {tenantCount} client
         {tenantCount === 1 ? "" : "s"} · MRR{" "}
@@ -194,7 +199,7 @@ export function OpsSubscriptions({
         <TableHeader>
           <TableRow>
             {head("Client", "tenant")}
-            {head("Product", "product")}
+            {!fixedProductSlug && head("Product", "product")}
             {head("Status", "status")}
             {head("Monthly", "monthly", "text-right")}
             {head("One-time", "oneTime", "hidden text-right md:table-cell")}
@@ -206,7 +211,7 @@ export function OpsSubscriptions({
         <TableBody>
           {filtered.length === 0 && (
             <TableEmpty
-              colSpan={8}
+              colSpan={fixedProductSlug ? 7 : 8}
               icon={Receipt}
               title={rows.length === 0 ? "No subscriptions yet" : "No subscriptions match"}
               description={rows.length === 0 ? undefined : "Try another status, product, or search."}
@@ -220,9 +225,11 @@ export function OpsSubscriptions({
                 </Link>
                 <div className="text-xs text-muted-foreground">{r.tenantSlug}</div>
               </TableCell>
-              <TableCell>
-                <Link href={OPS.product(r.productId)} className="hover:text-primary">{r.productName}</Link>
-              </TableCell>
+              {!fixedProductSlug && (
+                <TableCell>
+                  <Link href={OPS.product(r.productId)} className="hover:text-primary">{r.productName}</Link>
+                </TableCell>
+              )}
               <TableCell>
                 <StatusBadge kind="subscription" status={r.status} />
               </TableCell>

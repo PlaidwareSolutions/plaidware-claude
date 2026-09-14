@@ -16,6 +16,7 @@ import {
   tenantPriceOverrides,
 } from "./schema";
 import {
+  itemMrrCents,
   isRecurringKind,
   LIVE_SUBSCRIPTION_STATUSES,
   mapStripeInvoiceStatus,
@@ -992,8 +993,8 @@ export async function sendTrialEndingReminder(stripeSub: Stripe.Subscription) {
     where: eq(subscriptionItems.subscriptionId, localSub.id),
   });
   const monthly = items
-    .filter((i) => i.kind === "recurring_monthly" && i.status === "active")
-    .reduce((s, i) => s + i.amountCents, 0);
+    .filter((i) => isRecurringKind(i.kind) && i.status === "active")
+    .reduce((s, i) => s + itemMrrCents(i, i.amountCents), 0);
   await sendEmail({
     to: owner[0].email,
     subject: `Your ${product.name} trial ends in 3 days`,

@@ -4,10 +4,18 @@ import { productComponents, products } from "./schema";
 import { productMetricDefinitions } from "../monitoring/schema";
 
 /** KPI contracts (PRD §4.8) — seeded for Company Website like the legacy app. */
-const METRIC_DEFS: Record<
-  string,
-  { key: string; label: string; unit?: string; valueType?: string; aggregation?: string; isPrimary?: boolean }[]
-> = {
+export type MetricTemplate = {
+  key: string;
+  label: string;
+  unit?: string;
+  valueType?: string;
+  aggregation?: string;
+  direction?: string;
+  isPrimary?: boolean;
+};
+
+/** Starter KPI sets per product slug — seeded once, and offered as "start from template" in ops. */
+export const METRIC_DEFS: Record<string, MetricTemplate[]> = {
   "company-website": [
     { key: "page_views", label: "Page views", unit: "views", isPrimary: true },
     { key: "leads_submitted", label: "Leads submitted", unit: "leads" },
@@ -36,6 +44,12 @@ export type SeedProduct = {
   features: string[];
   color: string;
   components: SeedComponent[];
+  /** Applied on first insert only — ops owns them afterwards. */
+  defaults?: {
+    expectedCname?: string;
+    expectedAIps?: string;
+    monthlyHostingCents?: number;
+  };
 };
 
 /** PRD §3 — today's catalog. Ops edits live data; the seed only reconciles
@@ -213,7 +227,18 @@ export async function upsertSeedProducts(
     };
     const productId = existing
       ? (await db.update(products).set(values).where(eq(products.id, existing.id)), existing.id)
-      : (await db.insert(products).values({ slug: p.slug, ...values }).returning({ id: products.id }))[0].id;
+      : (
+          await db
+            .insert(products)
+            .values({
+              slug: p.slug,
+              ...values,
+              defaultExpectedCname: p.defaults?.expectedCname ?? null,
+              defaultExpectedAIps: p.defaults?.expectedAIps ?? null,
+              defaultMonthlyHostingCents: p.defaults?.monthlyHostingCents ?? null,
+            })
+            .returning({ id: products.id })
+        )[0].id;
     idsBySlug.set(p.slug, productId);
 
     for (const [j, c] of p.components.entries()) {
@@ -270,6 +295,7 @@ export async function seedCatalog(db: Db): Promise<{ products: number; component
           unit: d.unit,
           valueType: d.valueType ?? "count",
           aggregation: d.aggregation ?? "sum",
+          direction: d.direction ?? "up_is_good",
           isPrimary: d.isPrimary ?? false,
           displayOrder: j,
         })
