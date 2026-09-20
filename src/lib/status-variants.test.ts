@@ -17,6 +17,8 @@ describe("status variants", () => {
     expect(statusVariant("platformRole", "customer").variant).toBe("secondary");
     expect(statusVariant("tenantRole", "owner")).toEqual({ variant: "secondary", label: "owner" });
     expect(statusVariant("tenantRole", "billing").label).toBe("billing");
+    expect(statusVariant("roleRequest", "pending").variant).toBe("warning");
+    expect(statusVariant("roleRequest", "denied").label).toBe("declined");
   });
 
   it("falls back gracefully for unknown or missing statuses", () => {

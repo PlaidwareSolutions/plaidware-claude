@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { invitation, member, organization, session, user } from "../auth/schema";
+import { roleRequests } from "./schema";
 import { subscriptions } from "../billing/schema";
 import { products } from "../catalog/schema";
 import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
@@ -215,4 +216,73 @@ export async function getClientHeader(tenantId: string): Promise<ClientHeader | 
     stripeCustomerId: org.stripeCustomerId,
     hasMarketing: marketing.some((m) => isMarketingSlug(m.slug)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Role requests (self-service role changes)
+// ---------------------------------------------------------------------------
+
+export type RoleRequestRow = {
+  id: string;
+  tenantId: string;
+  memberId: string;
+  userId: string;
+  requesterName: string;
+  requesterEmail: string;
+  /** Role held when the request was made … */
+  currentRole: string;
+  /** … and the role held now (differs when it changed by other means). */
+  liveRole: string;
+  requestedRole: string;
+  note: string | null;
+  status: string;
+  createdAt: Date;
+  decidedAt: Date | null;
+  decisionNote: string | null;
+};
+
+const roleRequestSelect = {
+  id: roleRequests.id,
+  tenantId: roleRequests.tenantId,
+  memberId: roleRequests.memberId,
+  userId: roleRequests.userId,
+  requesterName: user.name,
+  requesterEmail: user.email,
+  currentRole: roleRequests.currentRole,
+  liveRole: member.role,
+  requestedRole: roleRequests.requestedRole,
+  note: roleRequests.note,
+  status: roleRequests.status,
+  createdAt: roleRequests.createdAt,
+  decidedAt: roleRequests.decidedAt,
+  decisionNote: roleRequests.decisionNote,
+};
+
+export async function listPendingRoleRequests(tenantId: string): Promise<RoleRequestRow[]> {
+  return db
+    .select(roleRequestSelect)
+    .from(roleRequests)
+    .innerJoin(user, eq(roleRequests.userId, user.id))
+    .innerJoin(member, eq(roleRequests.memberId, member.id))
+    .where(and(eq(roleRequests.tenantId, tenantId), eq(roleRequests.status, "pending")))
+    .orderBy(roleRequests.createdAt);
+}
+
+export async function getOpenRoleRequestForUser(tenantId: string, userId: string): Promise<RoleRequestRow | null> {
+  const [row] = await db
+    .select(roleRequestSelect)
+    .from(roleRequests)
+    .innerJoin(user, eq(roleRequests.userId, user.id))
+    .innerJoin(member, eq(roleRequests.memberId, member.id))
+    .where(and(eq(roleRequests.tenantId, tenantId), eq(roleRequests.userId, userId), eq(roleRequests.status, "pending")))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function countPendingRoleRequests(tenantId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(roleRequests)
+    .where(and(eq(roleRequests.tenantId, tenantId), eq(roleRequests.status, "pending")));
+  return Number(row?.n ?? 0);
 }

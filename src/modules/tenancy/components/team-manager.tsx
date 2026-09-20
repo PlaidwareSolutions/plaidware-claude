@@ -1,16 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, MailPlus, Trash2, Users } from "lucide-react";
-import type { InviteRow, MemberRow } from "../queries";
+import { ArrowRight, Crown, MailPlus, Trash2, UserCog, Users } from "lucide-react";
+import type { InviteRow, MemberRow, RoleRequestRow } from "../queries";
 import {
   cancelInviteAction,
+  cancelRoleRequestAction,
   inviteMemberAction,
   removeMemberAction,
   transferOwnershipAction,
   updateMemberRoleAction,
 } from "../actions";
-import { formatDate } from "@/lib/dates";
+import { RoleRequestDialog } from "./role-request-dialog";
+import { RoleRequestsSection } from "./role-requests-section";
+import { formatDate, formatRelative } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
 import { useConfirm } from "@/components/confirm-dialog";
 import { PageHeader } from "@/components/page-header";
@@ -56,6 +59,12 @@ export function TeamManager({
   readOnlyReason = null,
   isOwner,
   selfUserId,
+  selfRole,
+  canRequest,
+  myRequest,
+  roleRequests,
+  canDecide,
+  initialRequestRole,
 }: {
   tenantId: string;
   tenantName: string;
@@ -66,10 +75,19 @@ export function TeamManager({
   readOnlyReason?: string | null;
   isOwner: boolean;
   selfUserId: string;
+  selfRole: string;
+  /** The viewer may ask for a different role (billing/member, workspace not inactive). */
+  canRequest: boolean;
+  myRequest: RoleRequestRow | null;
+  /** Open requests, for viewers who can decide them. */
+  roleRequests: RoleRequestRow[];
+  canDecide: boolean;
+  initialRequestRole?: AssignableTenantRole;
 }) {
   const { run, isPending, pending } = useAction();
   const confirm = useConfirm();
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(!!initialRequestRole);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<Role>("member");
 
@@ -103,19 +121,53 @@ export function TeamManager({
     if (ok) void run(() => removeMemberAction(tenantId, m.memberId), { key: `remove:${m.memberId}`, success: `${m.name} removed` });
   }
 
+  async function withdraw(r: RoleRequestRow) {
+    const ok = await confirm({ title: "Withdraw your role request?", confirmLabel: "Withdraw" });
+    if (ok) void run(() => cancelRoleRequestAction({ tenantId, requestId: r.id }), { key: "withdraw", success: "Request withdrawn" });
+  }
+
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8">
       <PageHeader
         title="Team"
         description={readOnlyReason ?? `People with access to ${tenantName}.`}
         actions={
-          canManage ? (
-            <Button className="gap-2" onClick={() => setInviteOpen(true)}>
-              <MailPlus className="size-4" /> Invite member
-            </Button>
-          ) : null
+          <div className="flex flex-wrap gap-2">
+            {canRequest && !myRequest && (
+              <Button variant="outline" className="gap-2" onClick={() => setRequestOpen(true)}>
+                <UserCog className="size-4" /> Request a role change
+              </Button>
+            )}
+            {canManage && (
+              <Button className="gap-2" onClick={() => setInviteOpen(true)}>
+                <MailPlus className="size-4" /> Invite member
+              </Button>
+            )}
+          </div>
         }
       />
+
+      {myRequest && (
+        <Section title="Your role request" icon={UserCog} card>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="inline-flex items-center gap-1.5">
+              <StatusBadge kind="tenantRole" status={myRequest.currentRole} />
+              <ArrowRight className="size-3 text-muted-foreground" />
+              <StatusBadge kind="tenantRole" status={myRequest.requestedRole} />
+            </span>
+            <StatusBadge kind="roleRequest" status={myRequest.status} />
+            {myRequest.note && <span className="italic text-muted-foreground">“{myRequest.note}”</span>}
+            <span className="text-xs text-muted-foreground">sent {formatRelative(myRequest.createdAt)} · waiting on a workspace owner or admin</span>
+            <Button size="sm" variant="ghost" className="ml-auto" disabled={isPending("withdraw")} onClick={() => void withdraw(myRequest)}>
+              Withdraw
+            </Button>
+          </div>
+        </Section>
+      )}
+
+      {canDecide || roleRequests.length > 0 ? (
+        <RoleRequestsSection tenantId={tenantId} requests={roleRequests} canDecide={canDecide} readOnlyReason={readOnlyReason} />
+      ) : null}
 
       <Section title="Members" icon={Users} count={members.length}>
         <DataTableShell>
@@ -212,6 +264,14 @@ export function TeamManager({
           </div>
         </Section>
       )}
+
+      <RoleRequestDialog
+        tenantId={tenantId}
+        currentRole={selfRole}
+        open={requestOpen}
+        onOpenChange={setRequestOpen}
+        initialRole={initialRequestRole}
+      />
 
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent>

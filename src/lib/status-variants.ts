@@ -23,7 +23,8 @@ export type StatusKind =
   | "tenantRole"
   | "platformRole"
   | "verification"
-  | "invite";
+  | "invite"
+  | "roleRequest";
 
 type Entry = { variant: BadgeVariant; label?: string };
 
@@ -126,6 +127,12 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
     accepted: { variant: "success" },
     expired: { variant: "warning" },
     revoked: { variant: "outline" },
+  },
+  roleRequest: {
+    pending: { variant: "warning" },
+    approved: { variant: "success" },
+    denied: { variant: "destructive", label: "declined" },
+    canceled: { variant: "outline", label: "withdrawn" },
   },
 };
 

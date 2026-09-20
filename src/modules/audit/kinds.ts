@@ -45,6 +45,10 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   member_removed: { label: "Member removed", group: "people" },
   member_phone_updated: { label: "Member phone updated", group: "people" },
   ownership_transferred: { label: "Ownership transferred", group: "people" },
+  role_requested: { label: "Role change requested", group: "people" },
+  role_request_approved: { label: "Role request approved", group: "people" },
+  role_request_denied: { label: "Role request declined", group: "people" },
+  role_request_canceled: { label: "Role request withdrawn", group: "people" },
   platform_role_changed: { label: "Platform role changed", group: "platform" },
   workspace_status_changed: { label: "Workspace status changed", group: "workspace" },
   incident_acknowledged: { label: "Incident acknowledged", group: "monitoring" },
@@ -100,6 +104,17 @@ export function describeAudit(
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
     case "invite_canceled":
       return str(payload.email);
+    case "role_requested":
+      return `${str(payload.before) ?? "?"} → ${str(payload.requested) ?? "?"}${str(payload.note) ? ` — ${payload.note}` : ""}`;
+    case "role_request_approved":
+      return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
+    case "role_request_denied":
+      return `${str(payload.requested) ?? "?"}${str(payload.note) ? ` — ${payload.note}` : ""}`;
+    case "role_request_canceled": {
+      const why = str(payload.reason);
+      const label = why === "requester" ? "withdrawn by requester" : why === "role_changed" ? "role changed directly" : why === "decider" ? "dismissed" : why;
+      return `${str(payload.requested) ?? "?"}${label ? ` · ${label}` : ""}`;
+    }
     case "ownership_transferred":
       return `${str(payload.fromEmail) ?? "?"} → ${str(payload.toEmail) ?? "?"}`;
     case "platform_role_changed": {

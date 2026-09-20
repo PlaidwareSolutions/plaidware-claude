@@ -17,3 +17,4 @@ export * from "../modules/costs/schema";
 export * from "../modules/onboarding/schema";
 export * from "../modules/webhooks_out/schema";
 export * from "../modules/partners/schema";
+export * from "../modules/tenancy/schema";

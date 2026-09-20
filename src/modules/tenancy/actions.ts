@@ -16,11 +16,16 @@ import {
   opsInviteMember,
   opsRemoveMember,
   opsSetUserPhone,
-  opsUpdateMemberRole,
+  approveRoleRequest,
+  cancelRoleRequest,
+  createRoleRequest,
+  denyRoleRequest,
   setTenantStatus,
   transferOwnership,
+  updateMemberRole,
   type DeleteTenantPreview,
 } from "./service";
+import { cancelRoleRequestSchema, decideRoleRequestSchema, requestRoleChangeSchema } from "./contracts";
 import { listMembers } from "./queries";
 import { ASSIGNABLE_TENANT_ROLES } from "@/lib/roles";
 
@@ -93,18 +98,10 @@ const roleSchema = z.object({
 export async function updateMemberRoleAction(input: z.infer<typeof roleSchema>): Promise<ActionResult> {
   try {
     const parsed = roleSchema.parse(input);
-    const { session, role } = await requireMembership(parsed.tenantId, "team");
-    if (role === "ops") {
-      await opsUpdateMemberRole({ ...parsed, actorUserId: session.user.id });
-    } else {
-      const target = (await listMembers(parsed.tenantId)).find((m) => m.memberId === parsed.memberId);
-      if (!target) throw new Error("Member not found");
-      assertNotOwner(target.role, "given a different role");
-      await auth.api.updateMemberRole({
-        headers: await headers(),
-        body: { organizationId: parsed.tenantId, memberId: parsed.memberId, role: parsed.role },
-      });
-    }
+    // One writer for both sides: policy (team capability + status) and the
+    // owner guard decide; the service emits to MHub and audits.
+    const { session } = await requireMembership(parsed.tenantId, "team");
+    await updateMemberRole({ ...parsed, actorUserId: session.user.id });
     revalidateTeam(parsed.tenantId);
     return { ok: true };
   } catch (e) {
@@ -141,6 +138,62 @@ export async function transferOwnershipAction(tenantId: string, toUserId: string
     }
     await transferOwnership(tenantId, toUserId, session.user.id);
     revalidateTeam(tenantId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---------- Role requests ----------
+
+function revalidateRoleRequests(tenantId: string) {
+  revalidateTeam(tenantId);
+  revalidatePath(TENANT.billing); // the member explainer offers "Request billing access"
+}
+
+export async function requestRoleChangeAction(input: z.infer<typeof requestRoleChangeSchema>): Promise<ActionResult> {
+  try {
+    const p = requestRoleChangeSchema.parse(input);
+    const { session, role } = await requireMembership(p.tenantId, "read");
+    if (role === "ops") throw new Error("Ops accounts don't hold workspace roles.");
+    await createRoleRequest({ tenantId: p.tenantId, userId: session.user.id, requestedRole: p.role, note: p.note || null });
+    revalidateRoleRequests(p.tenantId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function approveRoleRequestAction(input: z.infer<typeof decideRoleRequestSchema>): Promise<ActionResult> {
+  try {
+    const p = decideRoleRequestSchema.parse(input);
+    const { session, role } = await requireMembership(p.tenantId, "team");
+    await approveRoleRequest({ tenantId: p.tenantId, requestId: p.requestId, actorUserId: session.user.id, actorRole: role });
+    revalidateRoleRequests(p.tenantId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function denyRoleRequestAction(input: z.infer<typeof decideRoleRequestSchema>): Promise<ActionResult> {
+  try {
+    const p = decideRoleRequestSchema.parse(input);
+    const { session, role } = await requireMembership(p.tenantId, "team");
+    await denyRoleRequest({ tenantId: p.tenantId, requestId: p.requestId, actorUserId: session.user.id, actorRole: role, note: p.note || null });
+    revalidateRoleRequests(p.tenantId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function cancelRoleRequestAction(input: z.infer<typeof cancelRoleRequestSchema>): Promise<ActionResult> {
+  try {
+    const p = cancelRoleRequestSchema.parse(input);
+    const { session, role } = await requireMembership(p.tenantId, "read");
+    await cancelRoleRequest({ tenantId: p.tenantId, requestId: p.requestId, actorUserId: session.user.id, actorRole: role });
+    revalidateRoleRequests(p.tenantId);
     return { ok: true };
   } catch (e) {
     return fail(e);
