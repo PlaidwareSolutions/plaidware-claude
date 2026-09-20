@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { isNavActive, OPS_NAV, type NavItem, type OpsNavCounts } from "@/components/ops-nav";
 import { OPS, TENANT } from "@/lib/routes";
+import { roleHasCapability } from "@/policy/capabilities";
 import { authClient } from "@/lib/auth-client";
 import { setActiveTenantAction } from "@/modules/tenancy/actions";
 import type { TenantSummary } from "@/modules/tenancy/queries";
@@ -42,7 +43,7 @@ import { TenantStatusBanner } from "@/components/tenant-status-banner";
 const TENANT_NAV: NavItem[] = [
   { href: TENANT.dashboard, label: "Home", icon: Home, exact: true },
   { href: TENANT.monitoring, label: "Monitoring", icon: Activity },
-  { href: TENANT.billing, label: "Billing", icon: Receipt },
+  { href: TENANT.billing, label: "Billing", icon: Receipt, cap: "billing" },
   { href: TENANT.inbox, label: "Messages", icon: MessageSquare },
   { href: TENANT.team, label: "Team", icon: Users },
   { href: TENANT.settings, label: "Settings", icon: Settings },
@@ -68,8 +69,10 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const inOps = isNavActive(OPS.home, pathname);
-  const nav = inOps ? OPS_NAV : TENANT_NAV;
   const active = tenants.find((t) => t.id === activeTenantId) ?? null;
+  const nav = (inOps ? OPS_NAV : TENANT_NAV).filter(
+    (item) => !item.cap || user.isOps || (active !== null && roleHasCapability(active.role, item.cap)),
+  );
 
   function switchTenant(id: string) {
     if (id === activeTenantId) return;

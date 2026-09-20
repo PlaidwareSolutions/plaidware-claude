@@ -8,6 +8,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { OPS } from "@/lib/routes";
+import type { TenantCapability } from "@/policy/tenant-status";
 
 export type NavItem = {
   href: string;
@@ -17,6 +18,8 @@ export type NavItem = {
   exact?: boolean;
   /** Which nav count renders as a pill on this item. */
   countKey?: keyof OpsNavCounts;
+  /** Tenant nav: shown only to roles holding this capability (ops see all). */
+  cap?: TenantCapability;
 };
 
 /** Attention counts shown as pills in the ops sidebar. */

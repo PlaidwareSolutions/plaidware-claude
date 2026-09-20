@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Activity, Package, Receipt, Users } from "lucide-react";
-import { getTenantContext, tenantStatusAllows } from "@/policy";
+import { getTenantContext } from "@/policy";
 import { TENANT } from "@/lib/routes";
 import { listMembers } from "@/modules/tenancy/queries";
 import { listTenantInvoices, listTenantSubscriptions } from "@/modules/billing/queries";
@@ -19,9 +19,9 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   // Ops accounts without a workspace are sent to the ops portal by getTenantContext().
-  const { active } = await getTenantContext();
+  const { active, caps } = await getTenantContext();
 
-  if (!active) {
+  if (!active || !caps) {
     return (
       <EmptyState
         icon={Package}
@@ -56,7 +56,7 @@ export default async function DashboardPage() {
     const h = health.get(s.id);
     return h && h.status !== "healthy";
   }).length;
-  const canBuy = tenantStatusAllows(active.status, "write");
+  const canBuy = caps.can("write"); // role and workspace status
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
