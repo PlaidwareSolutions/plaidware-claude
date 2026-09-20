@@ -33,7 +33,7 @@ export default async function OpsHomePage() {
   const [tenants, users, newLeads, products, billing, incidents, quiet, inboxUnread, deadLetters, subs, openInvites, margins] =
     await Promise.all([
       listAllTenants(),
-      listPlatformUsers(),
+      listPlatformUsers({}, 1000).then((r) => r.users),
       countNewContactSubmissions(),
       listActiveProducts(),
       getPlatformBillingStats(),

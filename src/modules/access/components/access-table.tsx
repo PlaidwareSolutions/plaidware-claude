@@ -3,27 +3,16 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { Mail, Search, Users } from "lucide-react";
 import type { PlatformUserRow } from "../queries";
-import { sendPasswordSetupAction, setPlatformRoleAction } from "../actions";
+import { sendPasswordSetupAction } from "../actions";
 import { AddStaffDialog } from "./add-staff-dialog";
-import {
-  GRANTABLE_PLATFORM_ROLES,
-  canChangePlatformRole,
-  platformRoleChangeConfirm,
-  typedEmailMatches,
-} from "../rules";
-import {
-  PLATFORM_ROLES,
-  PLATFORM_ROLE_META,
-  normalizePlatformRole,
-  type PlatformRole,
-} from "@/lib/roles";
+import { PlatformRoleSelect } from "./platform-role-select";
+import { PLATFORM_ROLES, PLATFORM_ROLE_META, normalizePlatformRole } from "@/lib/roles";
+import { accountStatusOf } from "@/lib/account-status";
 import { OPS, withQuery } from "@/lib/routes";
 import { formatDate, formatRelative } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
-import { useConfirm } from "@/components/confirm-dialog";
 import { useOpsAccess } from "@/components/ops-access";
 import { FilterChip } from "@/components/filter-chip";
 import { StatusBadge } from "@/components/status-badge";
@@ -46,74 +35,39 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+export type AccessFilter = { q?: string; role?: string; status?: string };
+
 export function AccessTable({
   users,
+  hasMore,
   selfUserId,
   opsAdminCount,
   filter,
 }: {
   users: PlatformUserRow[];
+  /** More rows exist beyond the query limit — the footer asks for a narrower search. */
+  hasMore: boolean;
   selfUserId: string;
   opsAdminCount: number;
-  filter: { q?: string; role?: string };
+  filter: AccessFilter;
 }) {
   const router = useRouter();
-  const confirm = useConfirm();
   const { run, isPending } = useAction();
   const { canMutate } = useOpsAccess();
   const [q, setQ] = useState(filter.q ?? "");
 
-  function push(next: { q?: string; role?: string }) {
-    router.push(
-      withQuery(OPS.access, { q: filter.q, role: filter.role, ...next }),
-    );
+  function push(next: AccessFilter) {
+    router.push(withQuery(OPS.access, { q: filter.q, role: filter.role, status: filter.status, ...next }));
   }
 
-  async function change(u: PlatformUserRow, next: PlatformRole) {
-    const before = normalizePlatformRole(u.platformRole);
-    const verdict = canChangePlatformRole({
-      actorUserId: selfUserId,
-      targetUserId: u.id,
-      targetEmailVerified: u.emailVerified,
-      current: before,
-      next,
-      opsAdminCount,
-    });
-    if (!verdict.ok) {
-      toast.error(verdict.reason);
-      return;
-    }
-    const c = platformRoleChangeConfirm({
-      before,
-      after: next,
-      name: u.name,
-      email: u.email,
-    });
-    const ok = await confirm({
-      title: c.title,
-      description: c.description,
-      destructive: c.destructive,
-      confirmLabel: c.destructive ? "Revoke" : "Grant",
-      field: c.typedEmail
-        ? {
-            label: "Type the email address to confirm",
-            placeholder: u.email,
-            required: true,
-          }
-        : undefined,
-    });
-    if (!ok) return;
-    if (c.typedEmail && !typedEmailMatches(ok.value, u.email)) {
-      toast.error("The email address didn't match.");
-      return;
-    }
-    await run(() => setPlatformRoleAction({ userId: u.id, role: next }), {
-      key: `role:${u.id}`,
-      success: `${u.name} is now ${PLATFORM_ROLE_META[next].label}`,
-    });
-  }
-
-  const filtered = !!(filter.q || filter.role);
+  const filtered = !!(filter.q || filter.role || filter.status);
+  const chip = [
+    filter.q ? `“${filter.q}”` : null,
+    filter.role ? PLATFORM_ROLE_META[normalizePlatformRole(filter.role)].label : null,
+    filter.status ? filter.status : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <DataTableShell
@@ -136,15 +90,8 @@ export function AccessTable({
                 aria-label="Search accounts"
               />
             </div>
-            <Select
-              value={filter.role ?? "all"}
-              onValueChange={(v) => push({ role: v === "all" ? undefined : v })}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-36"
-                aria-label="Platform role"
-              >
+            <Select value={filter.role ?? "all"} onValueChange={(v) => push({ role: v === "all" ? undefined : v })}>
+              <SelectTrigger size="sm" className="w-36" aria-label="Platform role">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -156,31 +103,29 @@ export function AccessTable({
                 ))}
               </SelectContent>
             </Select>
-            {filtered && (
-              <FilterChip
-                label={[
-                  filter.q ? `“${filter.q}”` : null,
-                  filter.role
-                    ? PLATFORM_ROLE_META[normalizePlatformRole(filter.role)]
-                        .label
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-                clearHref={OPS.access}
-              />
-            )}
+            <Select value={filter.status ?? "all"} onValueChange={(v) => push({ status: v === "all" ? undefined : v })}>
+              <SelectTrigger size="sm" className="w-32" aria-label="Account status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any status</SelectItem>
+                <SelectItem value="active">active</SelectItem>
+                <SelectItem value="disabled">disabled</SelectItem>
+              </SelectContent>
+            </Select>
+            {filtered && <FilterChip label={chip} clearHref={OPS.access} />}
           </form>
           {canMutate && <AddStaffDialog />}
         </div>
       }
-      footer={`${users.length} account${users.length === 1 ? "" : "s"}${filtered ? " matching" : ""} — every sign-in on the platform, with workspace memberships. ${opsAdminCount} ops admin${opsAdminCount === 1 ? "" : "s"}.`}
+      footer={`${hasMore ? `Showing the first ${users.length} accounts — refine your search. ` : `${users.length} account${users.length === 1 ? "" : "s"}${filtered ? " matching" : ""} — `}every sign-in on the platform, with workspace memberships. ${opsAdminCount} ops admin${opsAdminCount === 1 ? "" : "s"}.`}
     >
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>User</TableHead>
             <TableHead>Platform role</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead className="hidden sm:table-cell">Verified</TableHead>
             <TableHead className="hidden md:table-cell">Workspaces</TableHead>
             <TableHead className="hidden lg:table-cell">Last seen</TableHead>
@@ -189,81 +134,26 @@ export function AccessTable({
         </TableHeader>
         <TableBody>
           {users.length === 0 && (
-            <TableEmpty
-              colSpan={6}
-              icon={Users}
-              title={filtered ? "No accounts match" : "No accounts yet"}
-            />
+            <TableEmpty colSpan={7} icon={Users} title={filtered ? "No accounts match" : "No accounts yet"} />
           )}
           {users.map((u) => {
-            const role = normalizePlatformRole(u.platformRole);
             const self = u.id === selfUserId;
+            const disabled = !!u.disabledAt;
             return (
               <TableRow key={u.id}>
                 <TableCell>
                   <div className="font-medium text-heading">
-                    {u.name}
-                    {self && (
-                      <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        (you)
-                      </span>
-                    )}
+                    <Link href={OPS.user(u.id)} className="hover:text-primary">
+                      {u.name}
+                    </Link>
+                    {self && <span className="ml-1 text-xs font-normal text-muted-foreground">(you)</span>}
                   </div>
                   <div className="text-xs text-muted-foreground">{u.email}</div>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    {self || !canMutate ? (
-                      <span
-                        title={
-                          self
-                            ? "Ask another ops admin to change your role"
-                            : undefined
-                        }
-                      >
-                        <StatusBadge kind="platformRole" status={role} />
-                      </span>
-                    ) : (
-                      <Select
-                        value={role}
-                        disabled={isPending(`role:${u.id}`)}
-                        onValueChange={(v) => void change(u, v as PlatformRole)}
-                      >
-                        <SelectTrigger
-                          size="sm"
-                          className="w-32"
-                          aria-label={`Platform role for ${u.name}`}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {GRANTABLE_PLATFORM_ROLES.map((r) => {
-                            const verdict =
-                              r === role
-                                ? { ok: true as const }
-                                : canChangePlatformRole({
-                                    actorUserId: selfUserId,
-                                    targetUserId: u.id,
-                                    targetEmailVerified: u.emailVerified,
-                                    current: role,
-                                    next: r,
-                                    opsAdminCount,
-                                  });
-                            return (
-                              <SelectItem
-                                key={r}
-                                value={r}
-                                disabled={!verdict.ok}
-                                title={verdict.ok ? undefined : verdict.reason}
-                              >
-                                {PLATFORM_ROLE_META[r].label}
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {canMutate && !self && role !== "customer" && (
+                    <PlatformRoleSelect user={u} selfUserId={selfUserId} opsAdminCount={opsAdminCount} />
+                    {canMutate && !self && !disabled && (
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -283,11 +173,11 @@ export function AccessTable({
                     )}
                   </div>
                 </TableCell>
+                <TableCell>
+                  <StatusBadge kind="accountStatus" status={accountStatusOf(u.disabledAt)} />
+                </TableCell>
                 <TableCell className="hidden sm:table-cell">
-                  <StatusBadge
-                    kind="verification"
-                    status={u.emailVerified ? "verified" : "pending"}
-                  />
+                  <StatusBadge kind="verification" status={u.emailVerified ? "verified" : "pending"} />
                 </TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
                   {u.tenants.length === 0
@@ -295,10 +185,7 @@ export function AccessTable({
                     : u.tenants.map((t, i) => (
                         <span key={t.id}>
                           {i > 0 && ", "}
-                          <Link
-                            href={OPS.client(t.id)}
-                            className="hover:text-primary"
-                          >
+                          <Link href={OPS.client(t.id)} className="hover:text-primary">
                             {t.name}
                           </Link>
                         </span>
@@ -308,11 +195,7 @@ export function AccessTable({
                   className="hidden text-sm text-muted-foreground lg:table-cell"
                   title={u.lastSeenAt ? formatDate(u.lastSeenAt) : undefined}
                 >
-                  {u.lastSeenAt ? (
-                    formatRelative(u.lastSeenAt)
-                  ) : (
-                    <span className="text-warning">never</span>
-                  )}
+                  {u.lastSeenAt ? formatRelative(u.lastSeenAt) : <span className="text-warning">never</span>}
                 </TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
                   {formatDate(u.createdAt)}

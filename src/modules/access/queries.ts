@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { member, organization, session, user } from "../auth/schema";
 import { isPlatformRole, type PlatformRole } from "@/lib/roles";
@@ -11,13 +11,21 @@ export type PlatformUserRow = {
   emailVerified: boolean;
   createdAt: Date;
   lastSeenAt: Date | null;
+  disabledAt: Date | null;
   tenants: { id: string; name: string }[];
 };
 
-export type PlatformUserFilter = { q?: string; role?: string };
+export type PlatformUserFilter = { q?: string; role?: string; status?: string };
 
-/** Every account on the platform with its memberships, for the Access tab. */
-export async function listPlatformUsers(filter: PlatformUserFilter = {}): Promise<PlatformUserRow[]> {
+/**
+ * Accounts on the platform with their memberships, for the Access tab.
+ * Server-side filtered and capped (no pagination anywhere in the app): when
+ * `hasMore` is true the table asks for a narrower search.
+ */
+export async function listPlatformUsers(
+  filter: PlatformUserFilter = {},
+  limit = 200,
+): Promise<{ users: PlatformUserRow[]; hasMore: boolean }> {
   const conds = [];
   const q = filter.q?.trim();
   if (q) conds.push(or(ilike(user.name, `%${q}%`), ilike(user.email, `%${q}%`)));
@@ -25,11 +33,16 @@ export async function listPlatformUsers(filter: PlatformUserFilter = {}): Promis
     const role: PlatformRole = filter.role;
     conds.push(role === "customer" ? or(eq(user.platformRole, role), isNull(user.platformRole)) : eq(user.platformRole, role));
   }
-  const users = await db.query.user.findMany({
+  if (filter.status === "disabled") conds.push(isNotNull(user.disabledAt));
+  else if (filter.status === "active") conds.push(isNull(user.disabledAt));
+  const rows = await db.query.user.findMany({
     where: conds.length ? and(...conds) : undefined,
     orderBy: [desc(user.createdAt)],
+    limit: limit + 1,
   });
-  if (users.length === 0) return [];
+  const hasMore = rows.length > limit;
+  const users = rows.slice(0, limit);
+  if (users.length === 0) return { users: [], hasMore: false };
   const ids = users.map((u) => u.id);
   const [memberships, seen] = await Promise.all([
     db
@@ -48,16 +61,20 @@ export async function listPlatformUsers(filter: PlatformUserFilter = {}): Promis
     byUser.set(m.userId, [...(byUser.get(m.userId) ?? []), { id: m.orgId, name: m.orgName }]);
   }
   const lastSeen = new Map(seen.map((s) => [s.userId, s.lastSeenAt]));
-  return users.map((u) => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    platformRole: u.platformRole ?? "customer",
-    emailVerified: u.emailVerified,
-    createdAt: u.createdAt,
-    lastSeenAt: lastSeen.get(u.id) ?? null,
-    tenants: byUser.get(u.id) ?? [],
-  }));
+  return {
+    users: users.map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      platformRole: u.platformRole ?? "customer",
+      emailVerified: u.emailVerified,
+      createdAt: u.createdAt,
+      lastSeenAt: lastSeen.get(u.id) ?? null,
+      disabledAt: u.disabledAt ?? null,
+      tenants: byUser.get(u.id) ?? [],
+    })),
+    hasMore,
+  };
 }
 
 export async function countOpsAdmins(): Promise<number> {
