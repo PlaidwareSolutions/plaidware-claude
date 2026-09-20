@@ -38,7 +38,9 @@ export class PolicyError extends Error {
 }
 
 export async function getSession() {
-  return auth.api.getSession({ headers: await headers() });
+  const s = await auth.api.getSession({ headers: await headers() });
+  // Disabling revokes every session; this refuses any straggler as well.
+  return s && s.user.disabledAt ? null : s;
 }
 
 export type AppSession = NonNullable<Awaited<ReturnType<typeof getSession>>>;

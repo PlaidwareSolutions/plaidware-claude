@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { OPS } from "@/lib/routes";
+import { revalidateUserViews } from "@/lib/ops-revalidate";
 import { PLATFORM_ROLES } from "@/lib/roles";
 import { requireOps } from "../../policy";
-import { createDeveloperAccount, sendPasswordSetup, setPlatformRole } from "./service";
+import { createDeveloperAccount, sendPasswordSetup, setAccountDisabled, setPlatformRole } from "./service";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: e instanceof Error ? e.message : "Failed" });
@@ -39,6 +40,24 @@ export async function sendPasswordSetupAction(userId: string): Promise<ActionRes
   try {
     await requireOps();
     await sendPasswordSetup({ userId: z.string().min(1).parse(userId) });
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const disableSchema = z.object({
+  userId: z.string().min(1),
+  disabled: z.boolean(),
+  reason: z.string().trim().max(500).optional(),
+});
+
+export async function setAccountDisabledAction(input: z.infer<typeof disableSchema>): Promise<ActionResult> {
+  try {
+    const session = await requireOps();
+    const p = disableSchema.parse(input);
+    await setAccountDisabled({ ...p, reason: p.reason ?? null, actorUserId: session.user.id });
+    revalidateUserViews(p.userId);
     return { ok: true };
   } catch (e) {
     return fail(e);

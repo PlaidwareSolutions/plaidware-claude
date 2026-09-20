@@ -8,8 +8,8 @@ import { env } from "../../env";
 import { session, user } from "../auth/schema";
 import { writeAudit } from "../audit/service";
 import { PLATFORM_ROLE_META, isDowngrade, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
-import { countOpsAdmins } from "./queries";
-import { canChangePlatformRole } from "./rules";
+import { countActiveOpsAdmins, countOpsAdmins } from "./queries";
+import { canChangePlatformRole, canSendPasswordSetup, canSetAccountDisabled } from "./rules";
 
 /**
  * Platform roles are written only here (and read by src/policy). The
@@ -54,8 +54,51 @@ export async function setPlatformRole(opts: {
   return { before, after: opts.role, sessionsRevoked };
 }
 
-export async function revokeUserSessions(userId: string): Promise<void> {
-  await db.delete(session).where(eq(session.userId, userId));
+export async function revokeUserSessions(userId: string): Promise<number> {
+  const rows = await db.delete(session).where(eq(session.userId, userId)).returning({ id: session.id });
+  return rows.length;
+}
+
+/**
+ * Disable or re-enable an account. Disabling signs the person out everywhere
+ * and src/lib/auth.ts refuses every new session or reset/magic-link mail
+ * while `disabledAt` is set; roles, memberships and history are untouched.
+ */
+export async function setAccountDisabled(opts: {
+  userId: string;
+  disabled: boolean;
+  reason?: string | null;
+  actorUserId: string | null;
+}): Promise<{ sessionsRevoked: number }> {
+  const target = await db.query.user.findFirst({
+    where: eq(user.id, opts.userId),
+    columns: { id: true, email: true, platformRole: true, disabledAt: true },
+  });
+  if (!target) throw new Error("User not found");
+  const role = normalizePlatformRole(target.platformRole);
+  const verdict = canSetAccountDisabled({
+    actorUserId: opts.actorUserId,
+    targetUserId: target.id,
+    targetRole: role,
+    currentlyDisabled: !!target.disabledAt,
+    disabled: opts.disabled,
+    activeOpsAdminCount: await countActiveOpsAdmins(),
+  });
+  if (!verdict.ok) throw new Error(verdict.reason);
+
+  const reason = opts.reason?.trim() || null;
+  await db
+    .update(user)
+    .set(opts.disabled ? { disabledAt: new Date(), disabledReason: reason } : { disabledAt: null, disabledReason: null })
+    .where(eq(user.id, target.id));
+  const sessionsRevoked = opts.disabled ? await revokeUserSessions(target.id) : 0;
+  await writeAudit({
+    tenantId: null,
+    actorUserId: opts.actorUserId,
+    kind: opts.disabled ? "account_disabled" : "account_enabled",
+    payload: { targetUserId: target.id, targetEmail: target.email, role, reason, sessionsRevoked },
+  });
+  return { sessionsRevoked };
 }
 
 /**
@@ -117,9 +160,11 @@ export async function createDeveloperAccount(opts: {
 export async function sendPasswordSetup(opts: { userId: string }): Promise<{ email: string }> {
   const target = await db.query.user.findFirst({
     where: eq(user.id, opts.userId),
-    columns: { email: true, platformRole: true },
+    columns: { email: true, platformRole: true, disabledAt: true },
   });
   if (!target) throw new Error("User not found");
+  const allowed = canSendPasswordSetup({ targetDisabled: !!target.disabledAt });
+  if (!allowed.ok) throw new Error(allowed.reason);
   if (normalizePlatformRole(target.platformRole) === "customer") {
     throw new Error("Customers reset their own password from the login page.");
   }

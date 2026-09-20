@@ -51,6 +51,8 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   role_request_canceled: { label: "Role request withdrawn", group: "people" },
   platform_role_changed: { label: "Platform role changed", group: "platform" },
   platform_account_created: { label: "Account created by ops", group: "platform" },
+  account_disabled: { label: "Account disabled", group: "platform" },
+  account_enabled: { label: "Account re-enabled", group: "platform" },
   workspace_status_changed: { label: "Workspace status changed", group: "workspace" },
   incident_acknowledged: { label: "Incident acknowledged", group: "monitoring" },
 };
@@ -121,6 +123,13 @@ export function describeAudit(
     case "platform_role_changed": {
       const role = (v: unknown) => (str(v) ? PLATFORM_ROLE_META[normalizePlatformRole(str(v))].label : "?");
       return `${str(payload.targetEmail) ?? "?"}: ${role(payload.before)} → ${role(payload.after)}${payload.sessionsRevoked ? " · signed out" : ""}`;
+    }
+    case "account_disabled":
+    case "account_enabled": {
+      const n = num(payload.sessionsRevoked);
+      return [str(payload.targetEmail) ?? "?", str(payload.reason) ? `— ${payload.reason}` : null, n ? `· ${n} session${n === 1 ? "" : "s"} revoked` : null]
+        .filter(Boolean)
+        .join(" ");
     }
     case "platform_account_created":
       return str(payload.targetEmail) ? `${payload.targetEmail} · ${str(payload.role) ?? "developer"}` : null;

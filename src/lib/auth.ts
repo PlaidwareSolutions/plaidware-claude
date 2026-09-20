@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink, organization } from "better-auth/plugins";
 import { db } from "../db";
@@ -8,6 +8,8 @@ import { sendEmail, emailShell, emailButton } from "./email";
 import { sendInvitationEmail } from "./invite-email";
 import { ac, orgRoles } from "./org-roles";
 import { disabledOrgPaths } from "./org-http-surface";
+import { ACCOUNT_DISABLED_CODE, ACCOUNT_DISABLED_MESSAGE } from "./account-status";
+import { AUTH, withQuery } from "./routes";
 import { orgMutationBlockReason } from "../policy/org-guards";
 import {
   emitMembershipChanged,
@@ -17,6 +19,12 @@ import {
 function forbidIf(reason: string | null): void {
   if (reason) throw new APIError("FORBIDDEN", { message: reason });
 }
+
+const accountDisabledError = () =>
+  new APIError("FORBIDDEN", { message: ACCOUNT_DISABLED_MESSAGE, code: ACCOUNT_DISABLED_CODE });
+
+/** The internal adapter types users without additional fields; we only need this one. */
+const isDisabled = (u: unknown) => !!(u as { disabledAt?: Date | null } | null | undefined)?.disabledAt;
 
 /**
  * Tenant = Better Auth organization. Instantiated once so the HTTP surface
@@ -179,7 +187,40 @@ export const auth = betterAuth({
       phone: { type: "string", required: true },
       // PLATFORM_ROLES (src/lib/roles.ts) — never settable from client input
       platformRole: { type: "string", defaultValue: "customer", input: false },
+      // Account lifecycle (src/lib/account-status.ts); written only by src/modules/access
+      disabledAt: { type: "date", required: false, input: false },
+      disabledReason: { type: "string", required: false, input: false },
     },
+  },
+
+  // A disabled account never gets a session, whichever door it uses:
+  // password, magic link, verification auto-sign-in or password reset all end
+  // in createSession. The magic-link verifier renders a thrown APIError as
+  // JSON, so that path is bounced to the login page instead.
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session, ctx) => {
+          if (!ctx) return;
+          const u = await ctx.context.internalAdapter.findUserById(session.userId);
+          if (!isDisabled(u)) return;
+          if (ctx.path === "/magic-link/verify") {
+            throw ctx.redirect(`${env.APP_BASE_URL}${withQuery(AUTH.login, { error: ACCOUNT_DISABLED_CODE })}`);
+          }
+          throw accountDisabledError();
+        },
+      },
+    },
+  },
+  // …and no mail goes out to one either (runs for HTTP and auth.api alike).
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/request-password-reset" && ctx.path !== "/sign-in/magic-link") return;
+      const email = (ctx.body as { email?: unknown } | undefined)?.email;
+      if (typeof email !== "string") return;
+      const found = await ctx.context.internalAdapter.findUserByEmail(email);
+      if (isDisabled(found?.user)) throw accountDisabledError();
+    }),
   },
 
   plugins: [

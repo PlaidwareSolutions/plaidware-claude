@@ -68,6 +68,60 @@ export function platformRoleChangeConfirm(i: {
       };
 }
 
+// ---------------------------------------------------------------------------
+// Account lifecycle
+// ---------------------------------------------------------------------------
+
+export type AccountDisableChange = {
+  /** Null for a script: no self guard applies. */
+  actorUserId: string | null;
+  targetUserId: string;
+  targetRole: PlatformRole;
+  currentlyDisabled: boolean;
+  disabled: boolean;
+  /** Ops admins that are currently active (the target included when it is one). */
+  activeOpsAdminCount: number;
+};
+
+export function canSetAccountDisabled(i: AccountDisableChange): RuleVerdict {
+  if (i.actorUserId !== null && i.actorUserId === i.targetUserId) {
+    return { ok: false, reason: "You can't disable your own account. Ask another ops admin." };
+  }
+  if (i.currentlyDisabled === i.disabled) {
+    return { ok: false, reason: i.disabled ? "Already disabled." : "Already active." };
+  }
+  if (i.disabled && i.targetRole === "ops_admin" && i.activeOpsAdminCount <= 1) {
+    return { ok: false, reason: "This is the last active ops admin. Grant someone else ops admin first." };
+  }
+  return { ok: true };
+}
+
+export function accountDisableConfirm(i: {
+  name: string;
+  email: string;
+  role: PlatformRole;
+  disabled: boolean;
+}): PlatformRoleConfirm {
+  return i.disabled
+    ? {
+        title: `Disable ${i.name}'s account?`,
+        description: `${i.email} is signed out everywhere and can't sign in, request a magic link or reset a password until re-enabled. Workspaces, roles and history are kept.`,
+        destructive: true,
+        typedEmail: i.role !== "customer",
+      }
+    : {
+        title: `Re-enable ${i.name}'s account?`,
+        description: `${i.email} can sign in again with their existing password or a magic link.`,
+        destructive: false,
+        typedEmail: false,
+      };
+}
+
+export function canSendPasswordSetup(i: { targetDisabled: boolean }): RuleVerdict {
+  if (i.targetDisabled) return { ok: false, reason: "This account is disabled. Re-enable it first." };
+  return { ok: true };
+}
+
 export function typedEmailMatches(value: string | undefined, email: string): boolean {
   return (value ?? "").trim().toLowerCase() === email.trim().toLowerCase();
 }

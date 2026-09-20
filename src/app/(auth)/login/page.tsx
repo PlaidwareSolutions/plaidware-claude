@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AUTH, withQuery } from "@/lib/routes";
+import { ACCOUNT_DISABLED_CODE, ACCOUNT_DISABLED_MESSAGE } from "@/lib/account-status";
 
 function LoginForm() {
   const router = useRouter();
@@ -22,7 +23,11 @@ function LoginForm() {
   const [linkSent, setLinkSent] = useState(false);
   const [error, setError] = useState<string | null>(
     // The magic-link verify endpoint bounces failures back here with ?error=.
-    params.get("error") ? "That sign-in link is invalid or has expired. Request a new one below." : null,
+    params.get("error") === ACCOUNT_DISABLED_CODE
+      ? ACCOUNT_DISABLED_MESSAGE
+      : params.get("error")
+        ? "That sign-in link is invalid or has expired. Request a new one below."
+        : null,
   );
   const [busy, setBusy] = useState(false);
 
@@ -51,7 +56,7 @@ function LoginForm() {
         router.push(withQuery(AUTH.checkEmail, { email }));
         return;
       }
-      setError(error.message ?? "Sign in failed");
+      setError(error.code === ACCOUNT_DISABLED_CODE ? ACCOUNT_DISABLED_MESSAGE : (error.message ?? "Sign in failed"));
       return;
     }
     if (dest.external) {

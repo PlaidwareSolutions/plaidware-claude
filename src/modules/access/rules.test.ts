@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { canChangePlatformRole, platformRoleChangeConfirm, typedEmailMatches } from "./rules";
+import {
+  accountDisableConfirm,
+  canChangePlatformRole,
+  canSendPasswordSetup,
+  canSetAccountDisabled,
+  platformRoleChangeConfirm,
+  typedEmailMatches,
+} from "./rules";
 
 const base = {
   actorUserId: "actor",
@@ -89,5 +96,49 @@ describe("typedEmailMatches", () => {
     expect(typedEmailMatches(" A@B.co ", "a@b.co")).toBe(true);
     expect(typedEmailMatches("a@b.com", "a@b.co")).toBe(false);
     expect(typedEmailMatches(undefined, "a@b.co")).toBe(false);
+  });
+});
+
+describe("canSetAccountDisabled", () => {
+  const base = {
+    actorUserId: "actor",
+    targetUserId: "target",
+    targetRole: "customer" as const,
+    currentlyDisabled: false,
+    disabled: true,
+    activeOpsAdminCount: 2,
+  };
+  it("disables an active customer", () => {
+    expect(canSetAccountDisabled(base)).toEqual({ ok: true });
+  });
+  it("never lets an admin disable themselves, but a script may", () => {
+    expect(canSetAccountDisabled({ ...base, actorUserId: "target" })).toMatchObject({ reason: expect.stringMatching(/own account/) });
+    expect(canSetAccountDisabled({ ...base, actorUserId: null, targetUserId: "target" })).toEqual({ ok: true });
+  });
+  it("refuses a no-op in either direction", () => {
+    expect(canSetAccountDisabled({ ...base, currentlyDisabled: true })).toMatchObject({ reason: "Already disabled." });
+    expect(canSetAccountDisabled({ ...base, disabled: false })).toMatchObject({ reason: "Already active." });
+  });
+  it("protects the last active ops admin, and only on disable", () => {
+    const admin = { ...base, targetRole: "ops_admin" as const };
+    expect(canSetAccountDisabled({ ...admin, activeOpsAdminCount: 1 })).toMatchObject({ reason: expect.stringMatching(/last active ops admin/) });
+    expect(canSetAccountDisabled({ ...admin, activeOpsAdminCount: 2 })).toEqual({ ok: true });
+    expect(canSetAccountDisabled({ ...admin, currentlyDisabled: true, disabled: false, activeOpsAdminCount: 0 })).toEqual({ ok: true });
+  });
+});
+
+describe("accountDisableConfirm", () => {
+  const who = { name: "Ada", email: "ada@x.co" };
+  it("is destructive and asks staff to be retyped on disable", () => {
+    expect(accountDisableConfirm({ ...who, role: "ops_support", disabled: true })).toMatchObject({ destructive: true, typedEmail: true });
+    expect(accountDisableConfirm({ ...who, role: "customer", disabled: true })).toMatchObject({ destructive: true, typedEmail: false });
+    expect(accountDisableConfirm({ ...who, role: "ops_admin", disabled: false })).toMatchObject({ destructive: false, typedEmail: false });
+  });
+});
+
+describe("canSendPasswordSetup", () => {
+  it("refuses disabled accounts", () => {
+    expect(canSendPasswordSetup({ targetDisabled: true })).toMatchObject({ ok: false });
+    expect(canSendPasswordSetup({ targetDisabled: false })).toEqual({ ok: true });
   });
 });

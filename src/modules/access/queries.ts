@@ -67,3 +67,12 @@ export async function countOpsAdmins(): Promise<number> {
     .where(eq(user.platformRole, "ops_admin"));
   return Number(row?.n ?? 0);
 }
+
+/** Ops admins who can actually sign in — the guard for disabling one. */
+export async function countActiveOpsAdmins(): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(user)
+    .where(and(eq(user.platformRole, "ops_admin"), isNull(user.disabledAt)));
+  return Number(row?.n ?? 0);
+}

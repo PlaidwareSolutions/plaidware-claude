@@ -16,6 +16,13 @@ describe("audit kinds", () => {
       describeAudit("platform_role_changed", { targetEmail: "a@x.co", before: "customer", after: "ops_admin", sessionsRevoked: false }, fmt),
     ).toBe("a@x.co: customer → ops admin");
   });
+  it("describes account disable and re-enable", () => {
+    expect(auditGroup("account_disabled")).toBe("platform");
+    expect(describeAudit("account_disabled", { targetEmail: "a@x.co", reason: "left the company", sessionsRevoked: 2 }, fmt)).toBe(
+      "a@x.co — left the company · 2 sessions revoked",
+    );
+    expect(describeAudit("account_enabled", { targetEmail: "a@x.co", reason: null, sessionsRevoked: 0 }, fmt)).toBe("a@x.co");
+  });
   it("describes an ownership transfer", () => {
     expect(auditGroup("ownership_transferred")).toBe("people");
     expect(describeAudit("ownership_transferred", { fromEmail: "a@x.co", toEmail: "b@x.co" }, fmt)).toBe("a@x.co → b@x.co");
