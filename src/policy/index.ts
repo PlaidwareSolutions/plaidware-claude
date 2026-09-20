@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { AUTH, OPS, TENANT, withQuery } from "../lib/routes";
+import { hasOpsLevel, opsLevelOf, type OpsLevel } from "../lib/roles";
 import { auth } from "../lib/auth";
 import { db } from "../db";
 import { member, organization } from "../modules/auth/schema";
@@ -48,13 +49,28 @@ export async function requireUser() {
   return session;
 }
 
-export function isOps(session: { user: { platformRole?: string | null } }) {
-  return session.user.platformRole === "ops_admin";
+type SessionLike = { user: { platformRole?: string | null } };
+
+export function opsLevel(session: SessionLike): OpsLevel | null {
+  return opsLevelOf(session.user.platformRole);
 }
 
-export async function requireOps() {
+/** Any ops account (support or admin): may open the ops portal. */
+export function isOps(session: SessionLike) {
+  return hasOpsLevel(session.user.platformRole, "support");
+}
+
+/** Full operational control — the only level that bypasses tenant membership and status. */
+export function isOpsAdmin(session: SessionLike) {
+  return hasOpsLevel(session.user.platformRole, "admin");
+}
+
+/** Ops-only server actions; admin unless the action is explicitly open to support. */
+export async function requireOps(min: OpsLevel = "admin") {
   const session = await requireUser();
-  if (!isOps(session)) throw new PolicyError(403, "Ops access required");
+  if (!hasOpsLevel(session.user.platformRole, min)) {
+    throw new PolicyError(403, min === "admin" ? "Ops admin access required" : "Ops access required");
+  }
   return session;
 }
 
@@ -62,23 +78,25 @@ export async function requireOps() {
  * Page/layout variant of requireOps(): redirects instead of throwing. Called
  * by the ops layout (hard loads) AND by every ops page — layouts don't re-run
  * on client-side navigation, so the page check is the one that always holds.
+ * Ops pages pass "support" (read mode); pure-mutation pages keep the default.
  */
-export async function requireOpsPage() {
+export async function requireOpsPage(min: OpsLevel = "admin") {
   const session = await getSession();
   if (!session) redirect(AUTH.login);
-  if (!isOps(session)) redirect(TENANT.dashboard);
+  if (!hasOpsLevel(session.user.platformRole, min)) redirect(isOps(session) ? OPS.home : TENANT.dashboard);
   return session;
 }
 
 /**
  * Caller must be an ops admin OR hold `cap` in the tenant, AND the workspace's
  * lifecycle status must still allow `cap` (suspended → read + billing only;
- * inactive → read only). Ops admins bypass the status gate. Returns the
- * session plus the resolved membership role ("ops" for platform admins).
+ * inactive → read only). Ops admins bypass the status gate; ops support has
+ * no bypass (they work through the ops pages). Returns the session plus the
+ * resolved membership role ("ops" for platform admins).
  */
 export async function requireMembership(tenantId: string, cap: TenantCapability) {
   const session = await requireUser();
-  if (isOps(session)) return { session, role: "ops" as const };
+  if (isOpsAdmin(session)) return { session, role: "ops" as const };
 
   const [m] = await db
     .select({ role: member.role, status: organization.status })
@@ -98,6 +116,7 @@ export async function requireMembership(tenantId: string, cap: TenantCapability)
 
 export type TenantContext = {
   session: AppSession;
+  /** Ops admin: every capability, never gated by workspace status. */
   ops: boolean;
   tenants: TenantSummary[];
   /** The workspace the user is acting in; null for a user with none yet. */
@@ -116,9 +135,9 @@ export type TenantContext = {
 export async function getTenantContext(opts: { returnTo?: string } = {}): Promise<TenantContext> {
   const session = await getSession();
   if (!session) redirect(withQuery(AUTH.login, { redirect: opts.returnTo }));
-  const ops = isOps(session);
+  const ops = isOpsAdmin(session);
   const tenants = await getUserTenants(session.user.id);
-  if (ops && tenants.length === 0) redirect(OPS.home);
+  if (isOps(session) && tenants.length === 0) redirect(OPS.home);
   const active = pickActiveTenant(tenants, session.session.activeOrganizationId);
   return {
     session,

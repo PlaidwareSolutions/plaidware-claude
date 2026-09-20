@@ -11,7 +11,7 @@ export default async function OpsMonitoringPage({
 }: {
   searchParams: Promise<{ product?: string; tenant?: string; status?: string; q?: string }>;
 }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
   const filter = await searchParams;
   const board = await getMonitoringBoard(filter);
 

@@ -8,7 +8,7 @@ export const metadata = { title: "Products" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsProductsPage() {
-  await requireOpsPage();
+  await requireOpsPage("support");
   const rows = await listProductsBoardOps();
 
   return (

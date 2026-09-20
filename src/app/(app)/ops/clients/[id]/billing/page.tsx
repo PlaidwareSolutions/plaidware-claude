@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function ClientBillingPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
   const { id } = await params;
   const client = await loadClient(id);
   if (!client) notFound();

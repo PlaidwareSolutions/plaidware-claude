@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
 const CLOSED = new Set(["canceled", "expired"]);
 
 export default async function OpsHomePage() {
-  await requireOpsPage();
+  await requireOpsPage("support");
 
   const [tenants, users, newLeads, products, billing, incidents, quiet, inboxUnread, deadLetters, subs, openInvites, margins] =
     await Promise.all([

@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { HostingFeeDialog, type HostingTarget } from "./ops-billing-dialogs";
 import { ManageAddonsDialog } from "./manage-addons-dialog";
+import { useOpsAccess } from "@/components/ops-access";
 
 const CLOSED = new Set(["canceled", "expired"]);
 
@@ -62,6 +63,7 @@ export function SubscriptionCard({
   addonOptions: AddonOption[];
   stripeTestMode: boolean;
 }) {
+  const { canMutate } = useOpsAccess();
   const [hostingFor, setHostingFor] = useState<HostingTarget | null>(null);
   const [addonsOpen, setAddonsOpen] = useState(false);
   const live = !CLOSED.has(sub.status);
@@ -112,7 +114,7 @@ export function SubscriptionCard({
             </p>
           )}
         </div>
-        {live && (
+        {live && canMutate && (
           <SubscriptionActionsMenu
             tenant={tenant}
             sub={sub}

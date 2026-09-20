@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ClientTabs } from "./client-tabs";
+import { useOpsAccess } from "@/components/ops-access";
 
 type Preview = {
   members: number;
@@ -65,6 +66,7 @@ export function ClientHeader({
   const router = useRouter();
   const { run, pending } = useAction();
   const confirm = useConfirm();
+  const { canMutate } = useOpsAccess();
   const [preview, setPreview] = useState<Preview | null>(null);
   const [confirmSlug, setConfirmSlug] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -171,6 +173,7 @@ export function ClientHeader({
                 </a>
               </Button>
             )}
+            {canMutate && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="size-8 p-0" aria-label="Workspace actions" disabled={pending}>
@@ -194,6 +197,7 @@ export function ClientHeader({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
           </>
         }
       >

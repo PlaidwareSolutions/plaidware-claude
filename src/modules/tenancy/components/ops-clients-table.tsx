@@ -35,9 +35,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOpsAccess } from "@/components/ops-access";
 
 export function OpsClientsTable({ tenants }: { tenants: OpsTenantRow[] }) {
   const { run, isPending } = useAction();
+  const { canMutate } = useOpsAccess();
   const [busy, setBusy] = useState(false);
   const [deleteFor, setDeleteFor] = useState<OpsTenantRow | null>(null);
   const [confirmSlug, setConfirmSlug] = useState("");
@@ -100,6 +102,7 @@ export function OpsClientsTable({ tenants }: { tenants: OpsTenantRow[] }) {
                   {formatDate(t.createdAt)}
                 </TableCell>
                 <TableCell className="text-right">
+                  {canMutate ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="sm" disabled={isPending(`status:${t.id}`)}>
@@ -142,6 +145,11 @@ export function OpsClientsTable({ tenants }: { tenants: OpsTenantRow[] }) {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  ) : (
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href={OPS.client(t.id)}>Open</Link>
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

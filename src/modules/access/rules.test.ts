@@ -37,6 +37,18 @@ describe("canChangePlatformRole", () => {
   });
 });
 
+describe("ops_support transitions", () => {
+  it("needs a verified email like any ops role", () => {
+    expect(canChangePlatformRole({ ...base, next: "ops_support", targetEmailVerified: false })).toMatchObject({ ok: false });
+    expect(canChangePlatformRole({ ...base, next: "ops_support" })).toEqual({ ok: true });
+  });
+  it("counts support → admin as a grant, admin → support as a downgrade", () => {
+    expect(platformRoleChangeConfirm({ before: "ops_support", after: "ops_admin", name: "A", email: "a@x.co" })).toMatchObject({ typedEmail: true, destructive: false });
+    expect(platformRoleChangeConfirm({ before: "ops_admin", after: "ops_support", name: "A", email: "a@x.co" })).toMatchObject({ typedEmail: true, destructive: true });
+    expect(canChangePlatformRole({ ...base, current: "ops_admin", next: "ops_support", opsAdminCount: 1 })).toMatchObject({ reason: expect.stringMatching(/last ops admin/) });
+  });
+});
+
 describe("platformRoleChangeConfirm", () => {
   const who = { name: "Ada", email: "ada@x.co" };
   it("asks for a typed email whenever ops admin is involved", () => {

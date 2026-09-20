@@ -60,7 +60,7 @@ export async function setContactStatusAction(
   status: "new" | "contacted" | "archived",
 ): Promise<ActionResult> {
   try {
-    const { user } = await requireOps();
+    const { user } = await requireOps("support"); // lead triage
     await db
       .update(contactSubmissions)
       .set({

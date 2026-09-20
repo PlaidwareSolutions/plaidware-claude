@@ -164,7 +164,7 @@ export async function ackIncidentAction(
   note?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const session = await requireOps();
+    const session = await requireOps("support"); // first-responder triage
     await acknowledgeIncident(healthCheckId, subscriptionId, session.user.id, note);
     revalidatePath(OPS.monitoring);
     return { ok: true };

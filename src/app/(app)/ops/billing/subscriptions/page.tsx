@@ -10,7 +10,7 @@ export default async function OpsSubscriptionsPage({
 }: {
   searchParams: Promise<{ q?: string; status?: string; product?: string }>;
 }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
 
   const [{ q, status, product }, rows] = await Promise.all([searchParams, listAllSubscriptionsOps()]);
   return (

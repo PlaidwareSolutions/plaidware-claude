@@ -6,7 +6,7 @@ export const metadata = { title: "Webhooks · System" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsWebhooksPage() {
-  await requireOpsPage();
+  await requireOpsPage("support");
 
   const [dead, recent] = await Promise.all([listDeadDeliveries(), listRecentDeliveries(50)]);
   return <OpsWebhooksView dead={dead} recent={recent} />;

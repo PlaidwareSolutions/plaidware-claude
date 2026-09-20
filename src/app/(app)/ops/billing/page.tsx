@@ -16,7 +16,7 @@ export const metadata = { title: "Board · Billing" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsBillingPage() {
-  await requireOpsPage();
+  await requireOpsPage("support");
 
   const [tenants, owners, subscriptions, invoices, stats, automation, policy] = await Promise.all([
     listAllTenants(),

@@ -46,6 +46,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ASSIGNABLE_TENANT_ROLES, TENANT_ROLE_META, normalizePlatformRole, type AssignableTenantRole } from "@/lib/roles";
+import { useOpsAccess } from "@/components/ops-access";
 
 type Role = AssignableTenantRole;
 
@@ -59,6 +60,7 @@ export function ClientPeople({
   invites: InviteRow[];
 }) {
   const { run, isPending, pending } = useAction();
+  const { canMutate } = useOpsAccess();
   const confirm = useConfirm();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteForm, setInviteForm] = useState<{ email: string; role: Role }>({ email: "", role: "member" });
@@ -114,9 +116,11 @@ export function ClientPeople({
         count={members.length}
         description={statusNote || undefined}
         actions={
-          <Button size="sm" className="gap-1.5" onClick={() => setInviteOpen(true)}>
-            <MailPlus className="size-4" /> Invite
-          </Button>
+          canMutate ? (
+            <Button size="sm" className="gap-1.5" onClick={() => setInviteOpen(true)}>
+              <MailPlus className="size-4" /> Invite
+            </Button>
+          ) : undefined
         }
       >
         <DataTableShell>
@@ -148,8 +152,8 @@ export function ClientPeople({
                     </div>
                   </TableCell>
                   <TableCell>
-                    {m.role === "owner" ? (
-                      <StatusBadge kind="tenantRole" status="owner" />
+                    {m.role === "owner" || !canMutate ? (
+                      <StatusBadge kind="tenantRole" status={m.role} />
                     ) : (
                       <Select
                         value={m.role}
@@ -171,8 +175,9 @@ export function ClientPeople({
                   <TableCell className="hidden text-sm md:table-cell">
                     <button
                       type="button"
-                      className={`inline-flex items-center gap-1 hover:text-primary ${isPlaceholderPhone(m.phone) ? "text-warning" : "text-muted-foreground"}`}
-                      title="Edit phone"
+                      className={`inline-flex items-center gap-1 ${canMutate ? "hover:text-primary" : "cursor-default"} ${isPlaceholderPhone(m.phone) ? "text-warning" : "text-muted-foreground"}`}
+                      title={canMutate ? "Edit phone" : undefined}
+                      disabled={!canMutate}
                       onClick={() => {
                         setPhoneFor(m);
                         setPhone(isPlaceholderPhone(m.phone) ? "" : m.phone);
@@ -191,12 +196,12 @@ export function ClientPeople({
                   <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">{formatDate(m.joinedAt)}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
-                      {m.role !== "owner" && (
+                      {canMutate && m.role !== "owner" && (
                         <Button variant="ghost" size="icon" title="Transfer ownership" disabled={pending} onClick={() => void transfer(m)}>
                           <Crown className="size-4" />
                         </Button>
                       )}
-                      {m.role !== "owner" && (
+                      {canMutate && m.role !== "owner" && (
                         <Button variant="ghost" size="icon" title="Remove member" disabled={pending} onClick={() => void remove(m)}>
                           <Trash2 className="size-4 text-destructive" />
                         </Button>
@@ -222,15 +227,17 @@ export function ClientPeople({
                 <span className="text-xs text-muted-foreground">
                   expires {formatDate(inv.expiresAt)}{inv.inviterName ? ` · invited by ${inv.inviterName}` : ""}
                 </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="ml-auto"
-                  disabled={isPending(`cancel:${inv.id}`)}
-                  onClick={() => void run(() => cancelInviteAction(tenant.id, inv.id), { key: `cancel:${inv.id}`, success: "Invitation canceled" })}
-                >
-                  Cancel
-                </Button>
+                {canMutate && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="ml-auto"
+                    disabled={isPending(`cancel:${inv.id}`)}
+                    onClick={() => void run(() => cancelInviteAction(tenant.id, inv.id), { key: `cancel:${inv.id}`, success: "Invitation canceled" })}
+                  >
+                    Cancel
+                  </Button>
+                )}
               </div>
             ))}
           </div>

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OpsPromosPage() {
   if (env.PROMOS_ENABLED !== "true") redirect(OPS.access);
-  await requireOpsPage();
+  await requireOpsPage("support");
 
   const [promos, tenants, products] = await Promise.all([
     listPromos(),

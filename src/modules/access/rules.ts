@@ -5,8 +5,8 @@ import { PLATFORM_ROLE_META, isDowngrade, type PlatformRole } from "@/lib/roles"
  * Pure so the Access table can pre-validate and the service can enforce.
  */
 
-/** Roles the Access tab can assign. ops_support joins once policy honours it. */
-export const GRANTABLE_PLATFORM_ROLES = ["customer", "ops_admin"] as const satisfies readonly PlatformRole[];
+/** Roles the Access tab can assign. */
+export const GRANTABLE_PLATFORM_ROLES = ["customer", "ops_support", "ops_admin"] as const satisfies readonly PlatformRole[];
 
 export type PlatformRoleChange = {
   /** Null for the bootstrap script: no self or last-admin guard applies. */

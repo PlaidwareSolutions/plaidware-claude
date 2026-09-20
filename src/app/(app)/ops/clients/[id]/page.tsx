@@ -38,7 +38,7 @@ const TONE = {
 } as const;
 
 export default async function ClientOverviewPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
   const { id } = await params;
   const client = await loadClient(id);
   if (!client) notFound();

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession, isOps } from "@/policy";
+import { getSession, isOps, opsLevel } from "@/policy";
 import { getUserTenants } from "@/modules/tenancy/queries";
 import { pickActiveTenant } from "@/modules/tenancy/active-tenant";
 import { unreadCount } from "@/modules/messaging/service";
@@ -26,6 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         name: session.user.name,
         email: session.user.email,
         isOps: ops,
+        opsLevel: opsLevel(session),
       }}
       tenants={tenants}
       activeTenantId={activeTenantId}

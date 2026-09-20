@@ -6,7 +6,7 @@ export const metadata = { title: "Leads · Inbox" };
 export const dynamic = "force-dynamic";
 
 export default async function ContactInboxPage() {
-  await requireOpsPage();
+  await requireOpsPage("support");
 
   const submissions = await listContactSubmissions();
   return (

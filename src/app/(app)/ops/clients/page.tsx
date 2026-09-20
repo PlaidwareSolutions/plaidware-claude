@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
-import { requireOpsPage } from "@/policy";
+import { isOpsAdmin, requireOpsPage } from "@/policy";
 import { listAllTenants } from "@/modules/tenancy/queries";
 import { listOpenSetupInvites } from "@/modules/onboarding/queries";
 import { OpsClientsTable } from "@/modules/tenancy/components/ops-clients-table";
@@ -13,7 +13,7 @@ export const metadata = { title: "Clients" };
 export const dynamic = "force-dynamic";
 
 export default async function OpsClientsPage() {
-  await requireOpsPage();
+  const session = await requireOpsPage("support");
   const [tenants, openInvites] = await Promise.all([listAllTenants(), listOpenSetupInvites()]);
   return (
     <div className="flex flex-col gap-8">
@@ -21,11 +21,13 @@ export default async function OpsClientsPage() {
         title="Clients"
         description="Every customer workspace on the platform."
         actions={
-          <Button asChild className="gap-2">
-            <Link href={OPS.clientNew}>
-              <UserPlus className="size-4" /> Onboard client
-            </Link>
-          </Button>
+          isOpsAdmin(session) ? (
+            <Button asChild className="gap-2">
+              <Link href={OPS.clientNew}>
+                <UserPlus className="size-4" /> Onboard client
+              </Link>
+            </Button>
+          ) : null
         }
       />
       <OpsClientsTable tenants={tenants} />

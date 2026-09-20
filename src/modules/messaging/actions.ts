@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { OPS, TENANT } from "@/lib/routes";
 import { z } from "zod";
-import { requireMembership, requireOps } from "../../policy";
+import { isOps, requireMembership, requireOps, requireUser } from "../../policy";
 import { closeThread, createThread, getThreadTenantId, replyToThread } from "./service";
 
 type R = { ok: boolean; error?: string };
@@ -20,14 +20,16 @@ export async function createThreadAction(input: z.infer<typeof createSchema>): P
   try {
     const p = createSchema.parse(input);
     // Messaging support is a read-level right: every member, in any
-    // workspace status, can ask Plaidware for help.
-    const { session, role } = await requireMembership(p.tenantId, "read");
+    // workspace status, can ask Plaidware for help. Any ops level answers.
+    const session = await requireUser();
+    const ops = isOps(session);
+    if (!ops) await requireMembership(p.tenantId, "read");
     await createThread({
       tenantId: p.tenantId,
       subject: p.subject,
       body: p.body,
       senderUserId: session.user.id,
-      senderRole: role === "ops" ? "ops" : "tenant",
+      senderRole: ops ? "ops" : "tenant",
       subscriptionId: p.subscriptionId,
     });
     revalidatePath(TENANT.inbox);
@@ -42,12 +44,14 @@ export async function replyAction(threadId: string, body: string): Promise<R> {
   try {
     const tenantId = await getThreadTenantId(threadId);
     if (!tenantId) throw new Error("Thread not found");
-    const { session, role } = await requireMembership(tenantId, "read");
+    const session = await requireUser();
+    const ops = isOps(session);
+    if (!ops) await requireMembership(tenantId, "read");
     await replyToThread({
       threadId,
       body: z.string().min(1).max(5000).parse(body),
       senderUserId: session.user.id,
-      senderRole: role === "ops" ? "ops" : "tenant",
+      senderRole: ops ? "ops" : "tenant",
     });
     revalidatePath(TENANT.inbox);
     revalidatePath(OPS.inbox);
@@ -59,7 +63,7 @@ export async function replyAction(threadId: string, body: string): Promise<R> {
 
 export async function closeThreadAction(threadId: string): Promise<R> {
   try {
-    await requireOps();
+    await requireOps("support");
     await closeThread(threadId);
     revalidatePath(OPS.inbox);
     return { ok: true };

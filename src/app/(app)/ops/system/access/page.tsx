@@ -12,7 +12,7 @@ export default async function OpsAccessPage({
 }: {
   searchParams: Promise<{ q?: string; role?: string }>;
 }) {
-  const session = await requireOpsPage();
+  const session = await requireOpsPage("support");
   const filter = await searchParams;
   const [users, opsAdminCount, timeline] = await Promise.all([
     listPlatformUsers(filter),

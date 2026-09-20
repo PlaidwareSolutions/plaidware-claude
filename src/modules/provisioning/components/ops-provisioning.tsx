@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useOpsAccess } from "@/components/ops-access";
 
 export type { ProvisioningView };
 
@@ -69,6 +70,7 @@ export function OpsProvisioning({
 }) {
   const { run, isPending } = useAction();
   const confirm = useConfirm();
+  const { canMutate } = useOpsAccess();
   const [credFor, setCredFor] = useState<{ subscriptionId: string; cred?: Cred } | null>(null);
   const [credForm, setCredForm] = useState({ kind: "hosting", label: "", url: "", username: "", secret: "" });
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -120,6 +122,7 @@ export function OpsProvisioning({
               <ProvisioningCard
                 key={item.subscriptionId}
                 tenantId={tenantId}
+                readOnly={!canMutate}
                 item={item}
                 revealed={revealed}
                 pending={(k) => isPending(`${k}:${item.subscriptionId}`)}
@@ -197,7 +200,7 @@ export function OpsProvisioning({
                   <span className="font-medium text-heading">{d.event}</span>
                   <span className="text-xs text-muted-foreground">attempt {d.attemptCount} · {formatDateTime(d.createdAt)}</span>
                   {d.lastError && <span className="text-xs text-destructive">{d.lastError}</span>}
-                  {(d.status === "dead" || d.status === "disabled") && (
+                  {canMutate && (d.status === "dead" || d.status === "disabled") && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -269,6 +272,7 @@ export function OpsProvisioning({
 
 function ProvisioningCard({
   item,
+  readOnly,
   revealed,
   pending,
   onSaveDomain,
@@ -282,6 +286,8 @@ function ProvisioningCard({
 }: {
   tenantId: string;
   item: ProvisioningView;
+  /** ops_support: show everything, change nothing. */
+  readOnly: boolean;
   revealed: Record<string, string>;
   pending: (key: string) => boolean;
   onSaveDomain: (value: string) => void;
@@ -338,21 +344,25 @@ function ProvisioningCard({
             <div className="flex flex-wrap items-end gap-2">
               <div className="grid min-w-64 flex-1 gap-2">
                 <Label htmlFor={`domain-${item.subscriptionId}`}>Live domain</Label>
-                <Input id={`domain-${item.subscriptionId}`} value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="https://customer-site.com" />
+                <Input id={`domain-${item.subscriptionId}`} value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="https://customer-site.com" disabled={readOnly} />
               </div>
-              <Button variant="outline" disabled={pending("domain") || domain.trim() === (item.domainUrl ?? "")} onClick={() => onSaveDomain(domain.trim())}>
-                {pending("domain") ? "Saving…" : "Save domain"}
-              </Button>
-              {item.state === "unconfigured" ? (
-                <Button className="gap-1" disabled={pending("configure")} onClick={onConfigure}>
-                  <ShieldCheck className="size-4" /> {pending("configure") ? "Configuring…" : "Configure verification"}
-                </Button>
-              ) : (
-                item.domainUrl && (
-                  <Button className="gap-1" disabled={pending("verify")} onClick={onVerify}>
-                    <ShieldCheck className="size-4" /> {pending("verify") ? "Checking…" : "Verify DNS"}
+              {!readOnly && (
+                <>
+                  <Button variant="outline" disabled={pending("domain") || domain.trim() === (item.domainUrl ?? "")} onClick={() => onSaveDomain(domain.trim())}>
+                    {pending("domain") ? "Saving…" : "Save domain"}
                   </Button>
-                )
+                  {item.state === "unconfigured" ? (
+                    <Button className="gap-1" disabled={pending("configure")} onClick={onConfigure}>
+                      <ShieldCheck className="size-4" /> {pending("configure") ? "Configuring…" : "Configure verification"}
+                    </Button>
+                  ) : (
+                    item.domainUrl && (
+                      <Button className="gap-1" disabled={pending("verify")} onClick={onVerify}>
+                        <ShieldCheck className="size-4" /> {pending("verify") ? "Checking…" : "Verify DNS"}
+                      </Button>
+                    )
+                  )}
+                </>
               )}
             </div>
 
@@ -412,9 +422,11 @@ function ProvisioningCard({
                     <Input value={config.ips} onChange={(e) => setConfig({ ...config, ips: e.target.value })} placeholder="1.2.3.4, 5.6.7.8" />
                   </div>
                 </div>
-                <Button size="sm" className="w-fit" disabled={pending("config")} onClick={() => onSaveConfig(config)}>
-                  Save settings
-                </Button>
+                {!readOnly && (
+                  <Button size="sm" className="w-fit" disabled={pending("config")} onClick={() => onSaveConfig(config)}>
+                    Save settings
+                  </Button>
+                )}
               </div>
             )}
           </>
@@ -425,9 +437,11 @@ function ProvisioningCard({
             <span className="flex items-center gap-1.5 text-sm font-medium text-heading">
               <KeyRound className="size-4" /> Credentials
             </span>
-            <Button variant="outline" size="sm" className="gap-1" onClick={onAddCred}>
-              <Plus className="size-4" /> Add
-            </Button>
+            {!readOnly && (
+              <Button variant="outline" size="sm" className="gap-1" onClick={onAddCred}>
+                <Plus className="size-4" /> Add
+              </Button>
+            )}
           </div>
           {item.credentials.length === 0 && <p className="text-xs text-muted-foreground">None stored.</p>}
           <div className="flex flex-col gap-1.5">
@@ -446,15 +460,19 @@ function ProvisioningCard({
                       <a href={c.url} target="_blank" rel="noreferrer">Open</a>
                     </Button>
                   )}
-                  {c.hasSecret && !revealed[c.id] && (
-                    <Button variant="ghost" size="icon" title="Reveal (audited)" onClick={() => onReveal(c.id)}>
-                      <Eye className="size-4" />
-                    </Button>
+                  {!readOnly && (
+                    <>
+                      {c.hasSecret && !revealed[c.id] && (
+                        <Button variant="ghost" size="icon" title="Reveal (audited)" onClick={() => onReveal(c.id)}>
+                          <Eye className="size-4" />
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={() => onEditCred(c)}>Edit</Button>
+                      <Button variant="ghost" size="icon" disabled={pending(`delcred:${c.id}`)} onClick={() => onDeleteCred(c)}>
+                        <Trash2 className="size-4 text-destructive" />
+                      </Button>
+                    </>
                   )}
-                  <Button variant="ghost" size="sm" onClick={() => onEditCred(c)}>Edit</Button>
-                  <Button variant="ghost" size="icon" disabled={pending(`delcred:${c.id}`)} onClick={() => onDeleteCred(c)}>
-                    <Trash2 className="size-4 text-destructive" />
-                  </Button>
                 </div>
               </div>
             ))}

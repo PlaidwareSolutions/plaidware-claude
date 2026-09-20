@@ -7,6 +7,7 @@ import { formatUtcHour } from "@/lib/dates";
 import { Section } from "@/components/section";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
+import { useOpsAccess } from "@/components/ops-access";
 import { NewInvoiceDialog, type TenantTarget } from "./ops-billing-dialogs";
 import { SubscriptionCard } from "./subscription-card";
 import { InvoicesTable } from "./invoices-table";
@@ -35,6 +36,7 @@ export function OpsClientBilling({
   stripeTestMode: boolean;
 }) {
   const [invoiceFor, setInvoiceFor] = useState<TenantTarget | null>(null);
+  const { canMutate } = useOpsAccess();
   const autoById = new Map(automation.map((a) => [a.subscriptionId, a]));
   const open = subscriptions.filter((s) => !["canceled", "expired"].includes(s.status));
   const closed = subscriptions.filter((s) => ["canceled", "expired"].includes(s.status));
@@ -79,21 +81,25 @@ export function OpsClientBilling({
         count={invoices.length}
         description={pastDue > 0 ? `${pastDue} past due — dunning handles reminders and suspension` : undefined}
         actions={
-          <Button size="sm" className="gap-2" onClick={() => setInvoiceFor({ id: tenant.id, name: tenant.name })}>
-            <FilePlus2 className="size-4" /> New invoice
-          </Button>
+          canMutate ? (
+            <Button size="sm" className="gap-2" onClick={() => setInvoiceFor({ id: tenant.id, name: tenant.name })}>
+              <FilePlus2 className="size-4" /> New invoice
+            </Button>
+          ) : undefined
         }
       >
         <InvoicesTable invoices={invoices} />
       </Section>
 
-      <OpsCustomPricing tenantId={tenant.id} rows={pricingRows} subscribedProductIds={open.map((s) => s.productId)} />
+      {canMutate && (
+        <OpsCustomPricing tenantId={tenant.id} rows={pricingRows} subscribedProductIds={open.map((s) => s.productId)} />
+      )}
 
       <Section
         title="Dunning & policy"
         icon={Timer}
         description={`Next sweep ${formatUtcHour(nextSweepUtc)}`}
-        actions={<BillingPolicyEditor policy={policy} />}
+        actions={canMutate ? <BillingPolicyEditor policy={policy} /> : undefined}
         card
       >
         <p className="text-sm text-muted-foreground">

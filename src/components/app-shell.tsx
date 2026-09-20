@@ -23,6 +23,7 @@ import {
 import { isNavActive, OPS_NAV, type NavItem, type OpsNavCounts } from "@/components/ops-nav";
 import { AUTH, OPS, TENANT } from "@/lib/routes";
 import { roleHasCapability } from "@/policy/capabilities";
+import type { OpsLevel } from "@/lib/roles";
 import { authClient } from "@/lib/auth-client";
 import { setActiveTenantAction } from "@/modules/tenancy/actions";
 import type { TenantSummary } from "@/modules/tenancy/queries";
@@ -56,7 +57,7 @@ export function AppShell({
   counts,
   children,
 }: {
-  user: { name: string; email: string; isOps: boolean };
+  user: { name: string; email: string; isOps: boolean; opsLevel?: OpsLevel | null };
   tenants: TenantSummary[];
   activeTenantId: string | null;
   counts?: { tenantUnread: number; ops?: OpsNavCounts };
@@ -147,7 +148,9 @@ export function AppShell({
             <span className="text-primary">WARE</span>
           </span>
           {inOps && (
-            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">OPS</span>
+            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+              OPS{user.opsLevel === "support" ? " · SUPPORT" : ""}
+            </span>
           )}
         </div>
         {sidebar}

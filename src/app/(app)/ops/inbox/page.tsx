@@ -11,7 +11,7 @@ export default async function OpsInboxPage({
 }: {
   searchParams: Promise<{ thread?: string; tenant?: string }>;
 }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
 
   const { thread: threadId, tenant: tenantId } = await searchParams;
   const [threads, scopedTenant] = await Promise.all([

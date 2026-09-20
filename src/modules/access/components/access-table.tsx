@@ -18,6 +18,7 @@ import { OPS, withQuery } from "@/lib/routes";
 import { formatDate, formatRelative } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
 import { useConfirm } from "@/components/confirm-dialog";
+import { useOpsAccess } from "@/components/ops-access";
 import { FilterChip } from "@/components/filter-chip";
 import { StatusBadge } from "@/components/status-badge";
 import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
@@ -52,6 +53,7 @@ export function AccessTable({
   const router = useRouter();
   const confirm = useConfirm();
   const { run, isPending } = useAction();
+  const { canMutate } = useOpsAccess();
   const [q, setQ] = useState(filter.q ?? "");
 
   function push(next: { q?: string; role?: string }) {
@@ -162,8 +164,8 @@ export function AccessTable({
                   <div className="text-xs text-muted-foreground">{u.email}</div>
                 </TableCell>
                 <TableCell>
-                  {self ? (
-                    <span title="Ask another ops admin to change your role">
+                  {self || !canMutate ? (
+                    <span title={self ? "Ask another ops admin to change your role" : undefined}>
                       <StatusBadge kind="platformRole" status={role} />
                     </span>
                   ) : (

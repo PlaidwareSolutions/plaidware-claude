@@ -62,6 +62,7 @@ import {
 } from "./ops-billing-dialogs";
 import { InvoicesTable } from "./invoices-table";
 import { BillingPolicyEditor, policySummary, type BillingPolicyDto } from "./billing-policy-editor";
+import { useOpsAccess } from "@/components/ops-access";
 
 export type BillingTenantRow = {
   id: string;
@@ -96,6 +97,7 @@ export type BillingBoardProps = {
 const CLOSED = new Set(["canceled", "expired"]);
 export function OpsBillingBoard(p: BillingBoardProps) {
   const { run, pending, isPending } = useAction();
+  const { canMutate } = useOpsAccess();
   const confirm = useConfirm();
   const [invoiceFor, setInvoiceFor] = useState<TenantTarget | null>(null);
   const [hostingFor, setHostingFor] = useState<HostingTarget | null>(null);
@@ -222,6 +224,8 @@ export function OpsBillingBoard(p: BillingBoardProps) {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap justify-end gap-2">
+        {canMutate && (
+          <>
           <Button
             variant="outline"
             className="gap-2"
@@ -260,6 +264,8 @@ export function OpsBillingBoard(p: BillingBoardProps) {
           >
             <Receipt className="size-4" /> {isPending("hosting") ? "Generating…" : "Generate hosting invoices"}
           </Button>
+          </>
+        )}
           <Button variant="outline" className="gap-2" onClick={exportCsv}>
             <Download className="size-4" /> Export CSV
           </Button>
@@ -403,6 +409,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                         {i === 0 ? formatCents(collectedByTenant.get(t.id) ?? 0) : ""}
                       </TableCell>
                       <TableCell>
+                        {canMutate ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm" className="size-8 p-0" aria-label={`Actions for ${t.name}`}>
@@ -473,6 +480,11 @@ export function OpsBillingBoard(p: BillingBoardProps) {
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        ) : (
+                          <Button variant="ghost" size="sm" asChild>
+                            <Link href={OPS.client(t.id)}>Open</Link>
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

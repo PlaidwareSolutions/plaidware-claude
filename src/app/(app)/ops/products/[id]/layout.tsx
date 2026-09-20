@@ -17,7 +17,7 @@ export default async function ProductLayout({
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
   const { id } = await params;
   const data = await loadProduct(id);
   if (!data) notFound();

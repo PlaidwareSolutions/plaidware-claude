@@ -17,7 +17,7 @@ export default async function ProductSubscribersPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ status?: string; q?: string }>;
 }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
   const [{ id }, { status, q }] = await Promise.all([params, searchParams]);
   const data = await loadProduct(id);
   if (!data) notFound();

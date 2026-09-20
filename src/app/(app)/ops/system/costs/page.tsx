@@ -28,7 +28,7 @@ export default async function OpsCostsPage({
 }: {
   searchParams: Promise<{ month?: string }>;
 }) {
-  await requireOpsPage();
+  await requireOpsPage("support");
   const { month: requested } = await searchParams;
   const months = recentMonths(12);
   const month = requested && /^\d{4}-\d{2}$/.test(requested) ? requested : currentMonth();
