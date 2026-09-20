@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Mail, MoreHorizontal, ShieldBan, ShieldCheck } from "lucide-react";
+import { LogOut, Mail, MoreHorizontal, ShieldBan, ShieldCheck } from "lucide-react";
 import type { PlatformUserDetail } from "../queries";
-import { sendPasswordSetupAction, setAccountDisabledAction } from "../actions";
+import { revokeAllSessionsAction, sendPasswordSetupAction, setAccountDisabledAction } from "../actions";
 import { accountDisableConfirm } from "../rules";
 import { OPS } from "@/lib/routes";
 import { formatDate, formatRelative } from "@/lib/dates";
@@ -33,6 +33,20 @@ export function UserHeader({ user, selfUserId }: { user: PlatformUserDetail; sel
   const self = user.id === selfUserId;
   const disabled = !!user.disabledAt;
   const role = normalizePlatformRole(user.platformRole);
+
+  async function revokeAll() {
+    const ok = await confirm({
+      title: `Sign ${user.name} out everywhere?`,
+      description: `${user.activeSessionCount} active session${user.activeSessionCount === 1 ? "" : "s"} end on their next request. The account stays active.`,
+      confirmLabel: "Revoke all sessions",
+      destructive: true,
+    });
+    if (!ok) return;
+    void run(() => revokeAllSessionsAction(user.id), {
+      key: "revoke-all",
+      success: (r) => `${r.count} session${r.count === 1 ? "" : "s"} revoked`,
+    });
+  }
 
   async function enable() {
     const c = accountDisableConfirm({ name: user.name, email: user.email, role, disabled: false });
@@ -83,6 +97,11 @@ export function UserHeader({ user, selfUserId }: { user: PlatformUserDetail; sel
                     }
                   >
                     <Mail className="size-4" /> Send set-password link
+                  </DropdownMenuItem>
+                )}
+                {user.activeSessionCount > 0 && (
+                  <DropdownMenuItem onSelect={() => void revokeAll()}>
+                    <LogOut className="size-4" /> Revoke all sessions…
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />

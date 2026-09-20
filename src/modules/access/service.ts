@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { auth } from "../../lib/auth";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
@@ -9,7 +9,14 @@ import { session, user } from "../auth/schema";
 import { writeAudit } from "../audit/service";
 import { PLATFORM_ROLE_META, isDowngrade, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
 import { countActiveOpsAdmins, countOpsAdmins } from "./queries";
-import { canChangePlatformRole, canSendPasswordSetup, canSetAccountDisabled, type StaffRole } from "./rules";
+import {
+  canChangePlatformRole,
+  canRevokeAllSessions,
+  canRevokeSession,
+  canSendPasswordSetup,
+  canSetAccountDisabled,
+  type StaffRole,
+} from "./rules";
 
 /**
  * Platform roles are written only here (and read by src/policy). The
@@ -57,6 +64,46 @@ export async function setPlatformRole(opts: {
 export async function revokeUserSessions(userId: string): Promise<number> {
   const rows = await db.delete(session).where(eq(session.userId, userId)).returning({ id: session.id });
   return rows.length;
+}
+
+/** Ops signs a person out of one device (audited). */
+export async function revokeSession(opts: { userId: string; sessionId: string; actorUserId: string; currentSessionId: string }) {
+  const verdict = canRevokeSession({
+    actorUserId: opts.actorUserId,
+    targetUserId: opts.userId,
+    sessionId: opts.sessionId,
+    currentSessionId: opts.currentSessionId,
+  });
+  if (!verdict.ok) throw new Error(verdict.reason);
+  const target = await db.query.user.findFirst({ where: eq(user.id, opts.userId), columns: { email: true } });
+  if (!target) throw new Error("User not found");
+  const rows = await db
+    .delete(session)
+    .where(and(eq(session.id, opts.sessionId), eq(session.userId, opts.userId)))
+    .returning({ id: session.id });
+  if (rows.length === 0) throw new Error("That session is already gone.");
+  await writeAudit({
+    tenantId: null,
+    actorUserId: opts.actorUserId,
+    kind: "sessions_revoked",
+    payload: { targetUserId: opts.userId, targetEmail: target.email, count: 1, sessionId: opts.sessionId, all: false },
+  });
+}
+
+/** Ops signs a person out everywhere (audited). */
+export async function revokeAllSessions(opts: { userId: string; actorUserId: string }): Promise<{ count: number }> {
+  const verdict = canRevokeAllSessions({ actorUserId: opts.actorUserId, targetUserId: opts.userId });
+  if (!verdict.ok) throw new Error(verdict.reason);
+  const target = await db.query.user.findFirst({ where: eq(user.id, opts.userId), columns: { email: true } });
+  if (!target) throw new Error("User not found");
+  const count = await revokeUserSessions(opts.userId);
+  await writeAudit({
+    tenantId: null,
+    actorUserId: opts.actorUserId,
+    kind: "sessions_revoked",
+    payload: { targetUserId: opts.userId, targetEmail: target.email, count, all: true },
+  });
+  return { count };
 }
 
 /**

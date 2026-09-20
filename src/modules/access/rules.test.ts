@@ -4,6 +4,8 @@ import {
   STAFF_ROLES,
   accountDisableConfirm,
   canChangePlatformRole,
+  canRevokeAllSessions,
+  canRevokeSession,
   canSendPasswordSetup,
   canSetAccountDisabled,
   platformRoleChangeConfirm,
@@ -148,5 +150,17 @@ describe("canSendPasswordSetup", () => {
   it("refuses disabled accounts", () => {
     expect(canSendPasswordSetup({ targetDisabled: true })).toMatchObject({ ok: false });
     expect(canSendPasswordSetup({ targetDisabled: false })).toEqual({ ok: true });
+  });
+});
+
+describe("session revocation", () => {
+  it("never revokes the actor's own current session", () => {
+    expect(canRevokeSession({ actorUserId: "a", targetUserId: "a", sessionId: "s1", currentSessionId: "s1" })).toMatchObject({ ok: false });
+    expect(canRevokeSession({ actorUserId: "a", targetUserId: "a", sessionId: "s2", currentSessionId: "s1" })).toEqual({ ok: true });
+    expect(canRevokeSession({ actorUserId: "a", targetUserId: "b", sessionId: "s1", currentSessionId: "s1" })).toEqual({ ok: true });
+  });
+  it("refuses revoke-all on yourself", () => {
+    expect(canRevokeAllSessions({ actorUserId: "a", targetUserId: "a" })).toMatchObject({ ok: false });
+    expect(canRevokeAllSessions({ actorUserId: "a", targetUserId: "b" })).toEqual({ ok: true });
   });
 });

@@ -124,6 +124,20 @@ export function accountDisableConfirm(i: {
       };
 }
 
+/** Ops may sign a person out of one device — never the device the actor is using right now. */
+export function canRevokeSession(i: { actorUserId: string; targetUserId: string; sessionId: string; currentSessionId: string }): RuleVerdict {
+  if (i.actorUserId === i.targetUserId && i.sessionId === i.currentSessionId) {
+    return { ok: false, reason: "That's the session you're using — sign out instead." };
+  }
+  return { ok: true };
+}
+
+/** Signing yourself out everywhere is Sign out's job, not an ops action. */
+export function canRevokeAllSessions(i: { actorUserId: string; targetUserId: string }): RuleVerdict {
+  if (i.actorUserId === i.targetUserId) return { ok: false, reason: "Use Sign out to end your own sessions." };
+  return { ok: true };
+}
+
 export function canSendPasswordSetup(i: { targetDisabled: boolean }): RuleVerdict {
   if (i.targetDisabled) return { ok: false, reason: "This account is disabled. Re-enable it first." };
   return { ok: true };

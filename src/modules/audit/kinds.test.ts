@@ -23,6 +23,10 @@ describe("audit kinds", () => {
     );
     expect(describeAudit("account_enabled", { targetEmail: "a@x.co", reason: null, sessionsRevoked: 0 }, fmt)).toBe("a@x.co");
   });
+  it("describes session revocation", () => {
+    expect(describeAudit("sessions_revoked", { targetEmail: "a@x.co", count: 3, all: true }, fmt)).toBe("a@x.co · all 3 sessions");
+    expect(describeAudit("sessions_revoked", { targetEmail: "a@x.co", count: 1, all: false }, fmt)).toBe("a@x.co · one device");
+  });
   it("describes an ownership transfer", () => {
     expect(auditGroup("ownership_transferred")).toBe("people");
     expect(describeAudit("ownership_transferred", { fromEmail: "a@x.co", toEmail: "b@x.co" }, fmt)).toBe("a@x.co → b@x.co");

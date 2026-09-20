@@ -5,9 +5,16 @@ import { z } from "zod";
 import { OPS } from "@/lib/routes";
 import { revalidateUserViews } from "@/lib/ops-revalidate";
 import { PLATFORM_ROLES } from "@/lib/roles";
-import { requireOps } from "../../policy";
+import { getSession, requireOps } from "../../policy";
 import { STAFF_ROLES } from "./rules";
-import { createStaffAccount, sendPasswordSetup, setAccountDisabled, setPlatformRole } from "./service";
+import {
+  createStaffAccount,
+  revokeAllSessions,
+  revokeSession,
+  sendPasswordSetup,
+  setAccountDisabled,
+  setPlatformRole,
+} from "./service";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: e instanceof Error ? e.message : "Failed" });
@@ -61,6 +68,31 @@ export async function setAccountDisabledAction(input: z.infer<typeof disableSche
     await setAccountDisabled({ ...p, reason: p.reason ?? null, actorUserId: session.user.id });
     revalidateUserViews(p.userId);
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function revokeSessionAction(input: { userId: string; sessionId: string }): Promise<ActionResult> {
+  try {
+    const actor = await requireOps();
+    const p = z.object({ userId: z.string().min(1), sessionId: z.string().min(1) }).parse(input);
+    const current = await getSession();
+    await revokeSession({ ...p, actorUserId: actor.user.id, currentSessionId: current?.session.id ?? "" });
+    revalidateUserViews(p.userId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function revokeAllSessionsAction(userId: string): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  try {
+    const actor = await requireOps();
+    const id = z.string().min(1).parse(userId);
+    const { count } = await revokeAllSessions({ userId: id, actorUserId: actor.user.id });
+    revalidateUserViews(id);
+    return { ok: true, count };
   } catch (e) {
     return fail(e);
   }
