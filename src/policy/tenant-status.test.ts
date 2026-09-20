@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { normalizeTenantStatus, tenantStatusAllows, tenantStatusMessage } from "./tenant-status";
+import {
+  TENANT_CAPABILITIES,
+  TENANT_STATUSES,
+  normalizeTenantStatus,
+  statusCapabilityMatrix,
+  tenantStatusAllows,
+  tenantStatusMessage,
+} from "./tenant-status";
 
 describe("tenantStatusAllows", () => {
   it("lets active workspaces do everything their role allows", () => {
@@ -21,6 +28,13 @@ describe("tenantStatusAllows", () => {
     expect(normalizeTenantStatus(null)).toBe("active");
     expect(normalizeTenantStatus("weird")).toBe("active");
     expect(tenantStatusAllows(undefined, "team")).toBe(true);
+  });
+  it("publishes the same matrix the gate enforces", () => {
+    const m = statusCapabilityMatrix();
+    for (const s of TENANT_STATUSES) {
+      for (const c of TENANT_CAPABILITIES) expect(m[s].includes(c)).toBe(tenantStatusAllows(s, c));
+    }
+    expect(m.suspended).toEqual(["read", "billing"]);
   });
   it("explains the block", () => {
     expect(tenantStatusMessage("suspended")).toMatch(/billing remains available/);
