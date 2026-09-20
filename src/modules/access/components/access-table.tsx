@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Mail, Search, Users } from "lucide-react";
 import type { PlatformUserRow } from "../queries";
 import { sendPasswordSetupAction, setPlatformRoleAction } from "../actions";
-import { AddDeveloperDialog } from "./add-developer-dialog";
+import { AddStaffDialog } from "./add-staff-dialog";
 import {
   GRANTABLE_PLATFORM_ROLES,
   canChangePlatformRole,
@@ -171,7 +171,7 @@ export function AccessTable({
               />
             )}
           </form>
-          {canMutate && <AddDeveloperDialog />}
+          {canMutate && <AddStaffDialog />}
         </div>
       }
       footer={`${users.length} account${users.length === 1 ? "" : "s"}${filtered ? " matching" : ""} — every sign-in on the platform, with workspace memberships. ${opsAdminCount} ops admin${opsAdminCount === 1 ? "" : "s"}.`}

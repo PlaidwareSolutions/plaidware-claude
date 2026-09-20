@@ -9,7 +9,7 @@ import { session, user } from "../auth/schema";
 import { writeAudit } from "../audit/service";
 import { PLATFORM_ROLE_META, isDowngrade, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
 import { countActiveOpsAdmins, countOpsAdmins } from "./queries";
-import { canChangePlatformRole, canSendPasswordSetup, canSetAccountDisabled } from "./rules";
+import { canChangePlatformRole, canSendPasswordSetup, canSetAccountDisabled, type StaffRole } from "./rules";
 
 /**
  * Platform roles are written only here (and read by src/policy). The
@@ -102,17 +102,18 @@ export async function setAccountDisabled(opts: {
 }
 
 /**
- * Ops creates a developer account. The row is inserted directly (not via
- * signUpEmail, which would mail a verification link and auto-sign-in a
- * passwordless account) as a verified customer, then promoted through
- * setPlatformRole so the usual guards and the platform audit trail apply.
- * No password exists until the person follows the set-password link: Better
- * Auth's reset flow creates the credential account on first use.
+ * Ops creates a staff account (developer, ops support or ops admin). The row
+ * is inserted directly (not via signUpEmail, which would mail a verification
+ * link and auto-sign-in a passwordless account) as a verified customer, then
+ * promoted through setPlatformRole so the usual guards and the platform audit
+ * trail apply. No password exists until the person follows the set-password
+ * link: Better Auth's reset flow creates the credential account on first use.
  */
-export async function createDeveloperAccount(opts: {
+export async function createStaffAccount(opts: {
   email: string;
   firstName: string;
   lastName: string;
+  role: StaffRole;
   actorUserId: string;
 }): Promise<{ userId: string }> {
   const email = opts.email.trim().toLowerCase();
@@ -135,19 +136,20 @@ export async function createDeveloperAccount(opts: {
     createdAt: now,
     updatedAt: now,
   });
-  await setPlatformRole({ userId, role: "developer", actorUserId: opts.actorUserId });
+  await setPlatformRole({ userId, role: opts.role, actorUserId: opts.actorUserId });
   await writeAudit({
     tenantId: null,
     actorUserId: opts.actorUserId,
     kind: "platform_account_created",
-    payload: { targetUserId: userId, targetEmail: email, role: "developer" },
+    payload: { targetUserId: userId, targetEmail: email, role: opts.role },
   });
+  const meta = PLATFORM_ROLE_META[opts.role];
   await sendEmail({
     to: email,
-    subject: "Welcome to the Plaidware work area",
+    subject: "Welcome to Plaidware Hub",
     html: emailShell(
-      "You've been added as a developer",
-      `<p>Hi ${firstName}, an ops admin added ${email} to Plaidware Hub's work area — product boards, backlogs and sprints.</p>` +
+      `You've been added as ${meta.label}`,
+      `<p>Hi ${firstName}, an ops admin added ${email} to Plaidware Hub as <strong>${meta.label}</strong>: ${meta.description.toLowerCase()}.</p>` +
         `<p>A second email carries your set-password link (valid for one hour). After that you can also sign in any time with a magic link from the login page.</p>` +
         emailButton(`${env.APP_BASE_URL}${AUTH.login}`, "Open Plaidware Hub"),
     ),
@@ -156,7 +158,11 @@ export async function createDeveloperAccount(opts: {
   return { userId };
 }
 
-/** (Re)send the set-password link — for staff accounts created here, or anyone who lost theirs. */
+/**
+ * (Re)send the set-password link: staff accounts created here, or a client
+ * whose setup link died. The mail only ever reaches the account's own inbox
+ * (the same one forgot-password sends), so any non-disabled account may get it.
+ */
 export async function sendPasswordSetup(opts: { userId: string }): Promise<{ email: string }> {
   const target = await db.query.user.findFirst({
     where: eq(user.id, opts.userId),
@@ -165,9 +171,6 @@ export async function sendPasswordSetup(opts: { userId: string }): Promise<{ ema
   if (!target) throw new Error("User not found");
   const allowed = canSendPasswordSetup({ targetDisabled: !!target.disabledAt });
   if (!allowed.ok) throw new Error(allowed.reason);
-  if (normalizePlatformRole(target.platformRole) === "customer") {
-    throw new Error("Customers reset their own password from the login page.");
-  }
   // Better Auth mails the link through sendResetPassword (src/lib/auth.ts).
   await auth.api.requestPasswordReset({ body: { email: target.email, redirectTo: AUTH.resetPassword } });
   console.log(`[access] set-password link sent to ${target.email} (${PLATFORM_ROLE_META[normalizePlatformRole(target.platformRole)].label})`);

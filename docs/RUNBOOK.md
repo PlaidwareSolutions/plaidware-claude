@@ -71,18 +71,20 @@ tab's "Platform activity" feed:
 - **Bootstrap** — `scripts/create-ops-admin.ts <email>` (see its header for
   the Railway invocation) for the first admin in a fresh environment.
 
-### Add a developer
+### Add staff (developer, ops support, ops admin)
 
 Developers see only the work area (`/work`): product boards, backlogs,
 sprints and items. They never see clients, billing or monitoring, and a
 developer's item payloads carry no client reference (the "Requesting client"
 field is stripped server-side for them).
 
-- **/ops/system/access → Add developer** — an ops admin enters a name and
-  email. The account is created verified with the `developer` role (audited as
-  "Account created by ops"), a welcome email goes out, and Better Auth mails a
-  set-password link (1 hour). The row's envelope button re-sends that link.
-  Promoting an existing account to `developer` works from the same table.
+- **/ops/system/access → Add staff** — an ops admin enters a name, email
+  and role (ops admin needs the email typed twice). The account is created
+  verified with that role (audited as "Account created by ops"), a welcome
+  email goes out, and Better Auth mails a set-password link (1 hour). The
+  row's envelope button re-sends that link to any non-disabled account —
+  including a client whose setup link died. Promoting an existing account
+  works from the same table.
 - **CLI** — `node --env-file=.env --import tsx scripts/set-platform-role.ts
   dev@plaidware.com developer` (Railway invocation in the script header).
   Works for any role; creates the account if needed.

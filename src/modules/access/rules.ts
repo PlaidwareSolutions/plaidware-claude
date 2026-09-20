@@ -8,6 +8,13 @@ import { PLATFORM_ROLE_META, isDowngrade, type PlatformRole } from "@/lib/roles"
 /** Roles the Access tab can assign. */
 export const GRANTABLE_PLATFORM_ROLES = ["customer", "developer", "ops_support", "ops_admin"] as const satisfies readonly PlatformRole[];
 
+/** Roles a staff account can be created with (every role that grants something). */
+export const STAFF_ROLES = ["developer", "ops_support", "ops_admin"] as const satisfies readonly PlatformRole[];
+export type StaffRole = (typeof STAFF_ROLES)[number];
+export function isStaffRole(v: unknown): v is StaffRole {
+  return typeof v === "string" && (STAFF_ROLES as readonly string[]).includes(v);
+}
+
 export type PlatformRoleChange = {
   /** Null for the bootstrap script: no self or last-admin guard applies. */
   actorUserId: string | null;

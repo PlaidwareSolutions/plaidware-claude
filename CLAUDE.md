@@ -32,7 +32,7 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   support = read ops portal + messaging/triage + work; admin = everything,
   bypasses membership). `org-roles.ts` derives Better Auth's statements from
   it. Platform roles are granted only via /ops/system/access (audited; "Add
-  developer" creates accounts there) or scripts/{create-ops-admin,set-platform-role}.ts.
+  staff" creates accounts there) or scripts/{create-ops-admin,set-platform-role}.ts.
   Members request tenant role changes from /team; owners/admins/ops decide.
 - **Auth**: Better Auth + organization plugin (tenants = organizations).
   Every `/api/auth/organization/*` route except accept-invitation is disabled

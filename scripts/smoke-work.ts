@@ -10,7 +10,7 @@ import { db, pool } from "../src/db";
 import { organization, user } from "../src/modules/auth/schema";
 import { products } from "../src/modules/catalog/schema";
 import { auditLogs } from "../src/modules/audit/schema";
-import { createDeveloperAccount } from "../src/modules/access/service";
+import { createStaffAccount } from "../src/modules/access/service";
 import * as svc from "../src/modules/work/service";
 import * as q from "../src/modules/work/queries";
 import { workBoards, workItems, workSprints } from "../src/modules/work/schema";
@@ -141,7 +141,7 @@ async function main() {
     assert((await q.getItem(board.id, a.number, dev))!.comments.length === 0, "comment deleted");
 
     console.log("7) ops creates a developer account (audited, mail logged)…");
-    const created = await createDeveloperAccount({ email: `NewDev_${stamp}@Example.com`, firstName: "New", lastName: "Dev", actorUserId: opsId });
+    const created = await createStaffAccount({ email: `NewDev_${stamp}@Example.com`, firstName: "New", lastName: "Dev", role: "developer", actorUserId: opsId });
     devAccountId = created.userId;
     const nd = await db.query.user.findFirst({ where: eq(user.id, created.userId) });
     assert(nd?.platformRole === "developer" && nd.emailVerified && nd.email === `newdev_${stamp}@example.com`, "developer row");

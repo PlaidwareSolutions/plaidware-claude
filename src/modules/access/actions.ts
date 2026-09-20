@@ -6,7 +6,8 @@ import { OPS } from "@/lib/routes";
 import { revalidateUserViews } from "@/lib/ops-revalidate";
 import { PLATFORM_ROLES } from "@/lib/roles";
 import { requireOps } from "../../policy";
-import { createDeveloperAccount, sendPasswordSetup, setAccountDisabled, setPlatformRole } from "./service";
+import { STAFF_ROLES } from "./rules";
+import { createStaffAccount, sendPasswordSetup, setAccountDisabled, setPlatformRole } from "./service";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 const fail = (e: unknown): { ok: false; error: string } => ({ ok: false, error: e instanceof Error ? e.message : "Failed" });
@@ -16,19 +17,20 @@ const setRoleSchema = z.object({
   role: z.enum(PLATFORM_ROLES),
 });
 
-const addDeveloperSchema = z.object({
+const addStaffSchema = z.object({
   email: z.email().transform((s) => s.trim().toLowerCase()),
   firstName: z.string().trim().min(1).max(60),
   lastName: z.string().trim().min(1).max(60),
+  role: z.enum(STAFF_ROLES),
 });
 
-export async function addDeveloperAction(
-  input: z.input<typeof addDeveloperSchema>,
+export async function addStaffAction(
+  input: z.input<typeof addStaffSchema>,
 ): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
   try {
     const session = await requireOps();
-    const p = addDeveloperSchema.parse(input);
-    const { userId } = await createDeveloperAccount({ ...p, actorUserId: session.user.id });
+    const p = addStaffSchema.parse(input);
+    const { userId } = await createStaffAccount({ ...p, actorUserId: session.user.id });
     revalidatePath(OPS.access);
     return { ok: true, userId };
   } catch (e) {

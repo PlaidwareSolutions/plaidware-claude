@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { PLATFORM_ROLES, PLATFORM_ROLE_META } from "@/lib/roles";
 import {
+  STAFF_ROLES,
   accountDisableConfirm,
   canChangePlatformRole,
   canSendPasswordSetup,
@@ -96,6 +98,12 @@ describe("typedEmailMatches", () => {
     expect(typedEmailMatches(" A@B.co ", "a@b.co")).toBe(true);
     expect(typedEmailMatches("a@b.com", "a@b.co")).toBe(false);
     expect(typedEmailMatches(undefined, "a@b.co")).toBe(false);
+  });
+});
+
+describe("STAFF_ROLES", () => {
+  it("is every platform role that grants something", () => {
+    expect([...STAFF_ROLES]).toEqual(PLATFORM_ROLES.filter((r) => PLATFORM_ROLE_META[r].grants.length > 0));
   });
 });
 
