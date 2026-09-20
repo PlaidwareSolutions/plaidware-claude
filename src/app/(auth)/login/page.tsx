@@ -17,7 +17,7 @@ function LoginForm() {
   // Sanitized: same-app paths, or https *.plaidware.com (MHub hand-off).
   const dest = resolveRedirect(params.get("redirect"));
   const redirect = dest.url;
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(params.get("email")?.trim().toLowerCase() ?? "");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"password" | "magic-link">("password");
   const [linkSent, setLinkSent] = useState(false);
@@ -53,7 +53,7 @@ function LoginForm() {
     setBusy(false);
     if (error) {
       if (error.code === "EMAIL_NOT_VERIFIED") {
-        router.push(withQuery(AUTH.checkEmail, { email }));
+        router.push(withQuery(AUTH.checkEmail, { email, redirect: params.get("redirect") }));
         return;
       }
       setError(error.code === ACCOUNT_DISABLED_CODE ? ACCOUNT_DISABLED_MESSAGE : (error.message ?? "Sign in failed"));
@@ -117,7 +117,7 @@ function LoginForm() {
       </button>
       <p className="text-center text-sm text-muted-foreground">
         New to Plaidware?{" "}
-        <Link href={withQuery(AUTH.signup, { redirect })} className="text-primary hover:underline">
+        <Link href={withQuery(AUTH.signup, { redirect, email: email || undefined })} className="text-primary hover:underline">
           Create an account
         </Link>
       </p>

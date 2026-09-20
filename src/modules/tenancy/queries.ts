@@ -332,3 +332,41 @@ export async function countMembersByTenantRole(): Promise<Record<TenantRole, num
   for (const r of rows) if (isTenantRole(r.role)) out[r.role] += Number(r.n);
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Invitation link preview (the /invite/[id] page, signed in or not)
+// ---------------------------------------------------------------------------
+
+export type InvitationPreview = {
+  id: string;
+  email: string;
+  role: string | null;
+  status: string;
+  expiresAt: Date;
+  organizationName: string;
+  inviterName: string | null;
+};
+
+/**
+ * What the invitation email already told the recipient (org, address, role,
+ * who), keyed by the id that is the secret in the link. Never the slug, the
+ * inviter's email or any ids beyond the invitation's own.
+ */
+export async function getInvitationPreview(id: string): Promise<InvitationPreview | null> {
+  const [row] = await db
+    .select({
+      id: invitation.id,
+      email: invitation.email,
+      role: invitation.role,
+      status: invitation.status,
+      expiresAt: invitation.expiresAt,
+      organizationName: organization.name,
+      inviterName: user.name,
+    })
+    .from(invitation)
+    .innerJoin(organization, eq(invitation.organizationId, organization.id))
+    .leftJoin(user, eq(invitation.inviterId, user.id))
+    .where(eq(invitation.id, id))
+    .limit(1);
+  return row ? { ...row, inviterName: row.inviterName ?? null } : null;
+}

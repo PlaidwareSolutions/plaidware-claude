@@ -17,10 +17,12 @@ function SignupForm() {
   // Rides the verification email as callbackURL; the server additionally
   // checks it against trustedOrigins.
   const redirect = resolveRedirect(params.get("redirect")).url;
+  // An invitation link arrives with the invited address: it must match at accept time.
+  const lockedEmail = params.get("email")?.trim().toLowerCase() ?? "";
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
-    email: "",
+    email: lockedEmail,
     phone: "",
     password: "",
   });
@@ -53,7 +55,7 @@ function SignupForm() {
       setError(error.message ?? "Sign up failed");
       return;
     }
-    router.push(withQuery(AUTH.checkEmail, { email: form.email }));
+    router.push(withQuery(AUTH.checkEmail, { email: form.email, redirect: params.get("redirect") }));
   }
 
   return (
@@ -71,7 +73,16 @@ function SignupForm() {
       </div>
       <div className="grid gap-2">
         <Label htmlFor="email">Work email</Label>
-        <Input id="email" type="email" autoComplete="email" required value={form.email} onChange={(e) => set("email", e.target.value)} />
+        <Input
+          id="email"
+          type="email"
+          autoComplete="email"
+          required
+          readOnly={!!lockedEmail}
+          value={form.email}
+          onChange={(e) => set("email", e.target.value)}
+        />
+        {lockedEmail && <p className="text-xs text-muted-foreground">Invitations are tied to this address.</p>}
       </div>
       <div className="grid gap-2">
         <Label htmlFor="phone">Phone</Label>
@@ -88,7 +99,7 @@ function SignupForm() {
       </Button>
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href={withQuery(AUTH.login, { redirect })} className="text-primary hover:underline">
+        <Link href={withQuery(AUTH.login, { redirect, email: lockedEmail || undefined })} className="text-primary hover:underline">
           Sign in
         </Link>
       </p>

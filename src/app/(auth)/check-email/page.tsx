@@ -3,18 +3,21 @@
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { resolveRedirect } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/button";
-import { TENANT } from "@/lib/routes";
 
 function CheckEmail() {
-  const email = useSearchParams().get("email") ?? "";
+  const params = useSearchParams();
+  const email = params.get("email") ?? "";
+  // The verification link returns wherever signup was headed (an invitation, say) — not always the dashboard.
+  const callbackURL = resolveRedirect(params.get("redirect")).url;
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function resend() {
     if (!email) return;
     setBusy(true);
-    await authClient.sendVerificationEmail({ email, callbackURL: TENANT.dashboard });
+    await authClient.sendVerificationEmail({ email, callbackURL });
     setBusy(false);
     setSent(true);
   }

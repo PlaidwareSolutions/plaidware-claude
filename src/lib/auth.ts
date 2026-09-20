@@ -43,6 +43,9 @@ const orgPlugin = organization({
   disableOrganizationDeletion: true,
   // The email promises 7 days; Better Auth's default was 48 hours.
   invitationExpiresIn: INVITATION_DAYS * 86_400,
+  // Explicit: an unverified session may not accept (sign-in already requires
+  // verification; the derived default here would have been false).
+  requireEmailVerificationOnInvitation: true,
   schema: {
     organization: {
       additionalFields: {
