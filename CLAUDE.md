@@ -39,6 +39,9 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   over HTTP (`src/lib/org-http-surface.ts`); org mutations go through server
   actions + `auth.api.*`, guarded by before-hooks (status gate, unique owner).
   Signup is email-verification-gated; login before verify → EMAIL_NOT_VERIFIED.
+  `/settings` is the self-service account page (`src/modules/account`: profile,
+  email change with one confirmation link to the new address, own sessions);
+  `/update-user` and `/change-email` are disabled over HTTP.
 - **DB**: Postgres + Drizzle. Schema barrel: `src/db/schema.ts` re-exports every
   module schema; migrations committed in `drizzle/`. Money = integer cents
   (`src/lib/money.ts`); statuses = pg enums; ids = uuid (Better Auth tables use text).

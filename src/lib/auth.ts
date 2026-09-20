@@ -6,6 +6,7 @@ import { db } from "../db";
 import { env } from "../env";
 import { sendEmail, emailShell, emailButton } from "./email";
 import { sendInvitationEmail } from "./invite-email";
+import { sendAccountVerificationEmail } from "./account-email";
 import { ac, orgRoles } from "./org-roles";
 import { disabledOrgPaths } from "./org-http-surface";
 import { ACCOUNT_DISABLED_CODE, ACCOUNT_DISABLED_MESSAGE } from "./account-status";
@@ -131,7 +132,10 @@ export const auth = betterAuth({
   // Org mutations are server-side only (src/lib/org-http-surface.ts): every
   // /organization/* route except accept-invitation is 404 over HTTP.
   // auth.api.* calls skip the router, so server actions are unaffected.
-  disabledPaths: disabledOrgPaths(Object.values(orgPlugin.endpoints).map((e) => e.path)),
+  // Profile and email changes go through src/modules/account (server-side
+  // phone normalisation, a notice to the old address, an audit row), so the
+  // raw routes are closed too.
+  disabledPaths: [...disabledOrgPaths(Object.values(orgPlugin.endpoints).map((e) => e.path)), "/update-user", "/change-email"],
 
   advanced: {
     // Session shared with sibling apps (marketing.plaidware.com) via
@@ -167,17 +171,9 @@ export const auth = betterAuth({
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     expiresIn: 60 * 60 * 24, // 24h, matching the old app's contract
-    sendVerificationEmail: async ({ user, url }) => {
-      await sendEmail({
-        to: user.email,
-        subject: "Confirm your Plaidware email",
-        html: emailShell(
-          "Confirm your email",
-          `<p>Welcome to Plaidware. Confirm your email address to activate your account.</p>` +
-            emailButton(url, "Confirm email"),
-        ),
-      });
-    },
+    // Signup verification and change-email confirmation share this callback
+    // (src/lib/account-email.ts tells them apart by user.emailVerified).
+    sendVerificationEmail: async ({ user, url }) => sendAccountVerificationEmail({ user, url }),
   },
 
   user: {
@@ -191,6 +187,10 @@ export const auth = betterAuth({
       disabledAt: { type: "date", required: false, input: false },
       disabledReason: { type: "string", required: false, input: false },
     },
+    // One confirmation link to the NEW address (a two-step flow would strand
+    // anyone whose old mailbox is gone); the account module mails the old
+    // address a notice instead.
+    changeEmail: { enabled: true },
   },
 
   // A disabled account never gets a session, whichever door it uses:

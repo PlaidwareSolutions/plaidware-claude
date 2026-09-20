@@ -88,3 +88,14 @@ field is stripped server-side for them).
 - **CLI** — `node --env-file=.env --import tsx scripts/set-platform-role.ts
   dev@plaidware.com developer` (Railway invocation in the script header).
   Works for any role; creates the account if needed.
+
+## Self-service account (/settings)
+
+Every signed-in user (clients, staff, developers) edits their own name and
+phone there (`src/modules/account`; phones are normalised server-side and the
+placeholder refused — this is how ops-created staff fix "not on file"), lists
+and revokes their sessions, and changes their sign-in email. The email change
+is single-step: one confirmation link goes to the NEW address (locally it
+appears in the `[email:dev]` log) and a notice goes to the old one; the audit
+row `email_change_requested` lands in the Access tab's Platform activity.
+Better Auth's raw `/update-user` and `/change-email` routes are disabled.

@@ -27,6 +27,9 @@ describe("audit kinds", () => {
     expect(describeAudit("sessions_revoked", { targetEmail: "a@x.co", count: 3, all: true }, fmt)).toBe("a@x.co · all 3 sessions");
     expect(describeAudit("sessions_revoked", { targetEmail: "a@x.co", count: 1, all: false }, fmt)).toBe("a@x.co · one device");
   });
+  it("describes an email change request", () => {
+    expect(describeAudit("email_change_requested", { from: "a@x.co", to: "b@x.co" }, fmt)).toBe("a@x.co → b@x.co");
+  });
   it("describes an ownership transfer", () => {
     expect(auditGroup("ownership_transferred")).toBe("people");
     expect(describeAudit("ownership_transferred", { fromEmail: "a@x.co", toEmail: "b@x.co" }, fmt)).toBe("a@x.co → b@x.co");

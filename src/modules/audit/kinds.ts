@@ -54,6 +54,7 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   account_disabled: { label: "Account disabled", group: "platform" },
   account_enabled: { label: "Account re-enabled", group: "platform" },
   sessions_revoked: { label: "Sessions revoked by ops", group: "platform" },
+  email_change_requested: { label: "Email change requested", group: "platform" },
   workspace_status_changed: { label: "Workspace status changed", group: "workspace" },
   incident_acknowledged: { label: "Incident acknowledged", group: "monitoring" },
 };
@@ -136,6 +137,8 @@ export function describeAudit(
       const n = num(payload.count) ?? 0;
       return `${str(payload.targetEmail) ?? "?"} · ${payload.all ? `all ${n} session${n === 1 ? "" : "s"}` : "one device"}`;
     }
+    case "email_change_requested":
+      return `${str(payload.from) ?? "?"} → ${str(payload.to) ?? "?"}`;
     case "platform_account_created":
       return str(payload.targetEmail) ? `${payload.targetEmail} · ${str(payload.role) ?? "developer"}` : null;
     case "client_setup_created":

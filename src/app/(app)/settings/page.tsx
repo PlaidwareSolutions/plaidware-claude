@@ -8,8 +8,9 @@ import { pickActiveTenant } from "@/modules/tenancy/active-tenant";
 import { listOwnSessions } from "@/modules/account/queries";
 import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/section";
-import { StatusBadge } from "@/components/status-badge";
 import { ProfileForm } from "@/components/account/profile-form";
+import { EmailForm } from "@/components/account/email-form";
+import { SettingsNotices } from "@/components/account/settings-notices";
 import { ChangePasswordForm } from "@/components/account/change-password-form";
 import { SessionsPanel } from "@/components/account/sessions-panel";
 import { AccessPanel } from "@/components/account/access-panel";
@@ -18,8 +19,12 @@ export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
 /** The signed-in user's own account — reachable by customers, ops and developers alike. */
-export default async function SettingsPage() {
-  const session = await getSession();
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ email?: string; error?: string }>;
+}) {
+  const [session, notices] = await Promise.all([getSession(), searchParams]);
   if (!session) redirect(AUTH.login);
   const u = session.user;
   const dev = isDeveloper(session);
@@ -32,6 +37,7 @@ export default async function SettingsPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-8">
       <PageHeader title="Settings" description="Your account." />
+      <SettingsNotices email={notices.email} error={notices.error} />
 
       <Section title="Profile" description={`Member since ${formatDate(u.createdAt)}.`} card>
         <ProfileForm
@@ -40,11 +46,8 @@ export default async function SettingsPage() {
         />
       </Section>
 
-      <Section title="Email" card>
-        <div className="flex items-center gap-2 text-sm text-heading">
-          {u.email}
-          <StatusBadge kind="verification" status={u.emailVerified ? "verified" : "pending"} className="text-[10px]" />
-        </div>
+      <Section title="Email" description="Changing it sends a confirmation link to the new address." card>
+        <EmailForm email={u.email} emailVerified={u.emailVerified} />
       </Section>
 
       <Section title="Password" description="Changing it signs out your other sessions." card>

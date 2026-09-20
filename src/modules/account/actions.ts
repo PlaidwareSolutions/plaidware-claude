@@ -5,8 +5,8 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { TENANT } from "@/lib/routes";
 import { requireUser } from "../../policy";
-import { profileSchema, type ProfileInput } from "./contracts";
-import { revokeOtherOwnSessions, revokeOwnSession, updateProfile } from "./service";
+import { emailChangeSchema, profileSchema, type ProfileInput } from "./contracts";
+import { requestEmailChange, revokeOtherOwnSessions, revokeOwnSession, updateProfile } from "./service";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -49,6 +49,18 @@ export async function revokeOtherSessionsAction(): Promise<{ ok: true; revoked: 
     const { revoked } = await revokeOtherOwnSessions({ userId: s.user.id, currentSessionId: s.session.id });
     revalidatePath(TENANT.settings);
     return { ok: true, revoked };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function requestEmailChangeAction(input: { newEmail: string }): Promise<ActionResult> {
+  try {
+    const s = await requireUser();
+    const { newEmail } = emailChangeSchema.parse(input);
+    if (newEmail === s.user.email.toLowerCase()) throw new Error("That's already your email address.");
+    await requestEmailChange({ userId: s.user.id, currentEmail: s.user.email, newEmail, headers: await headers() });
+    return { ok: true };
   } catch (e) {
     return fail(e);
   }
