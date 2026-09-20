@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink, organization } from "better-auth/plugins";
 import { db } from "../db";
@@ -7,10 +8,15 @@ import { sendEmail, emailShell, emailButton } from "./email";
 import { sendInvitationEmail } from "./invite-email";
 import { ac, orgRoles } from "./org-roles";
 import { disabledOrgPaths } from "./org-http-surface";
+import { orgMutationBlockReason } from "../policy/org-guards";
 import {
   emitMembershipChanged,
   emitOrganizationUpdated,
 } from "../modules/webhooks_out/service";
+
+function forbidIf(reason: string | null): void {
+  if (reason) throw new APIError("FORBIDDEN", { message: reason });
+}
 
 /**
  * Tenant = Better Auth organization. Instantiated once so the HTTP surface
@@ -40,6 +46,25 @@ const orgPlugin = organization({
   // org holds a live marketing-* subscription, and never throw.
   // Direct-Drizzle mutations (transferOwnership) emit at their own sites.
   organizationHooks: {
+    // Defense in depth for the auth.api paths and the one browser route
+    // (accept-invitation): the tenant-status gate and the unique-owner rule
+    // hold even if a caller skips src/policy. Ops paths in tenancy/service
+    // write directly and are unaffected — ops must act on suspended tenants.
+    beforeCreateInvitation: async ({ invitation, organization: org }) => {
+      forbidIf(orgMutationBlockReason("invite", { status: org.status }, { role: invitation.role }));
+    },
+    beforeAddMember: async ({ member, organization: org }) => {
+      forbidIf(orgMutationBlockReason("add", { status: org.status }, { role: member.role }));
+    },
+    beforeAcceptInvitation: async ({ invitation, organization: org }) => {
+      forbidIf(orgMutationBlockReason("accept", { status: org.status }, { role: invitation.role }));
+    },
+    beforeUpdateMemberRole: async ({ member, newRole, organization: org }) => {
+      forbidIf(orgMutationBlockReason("update-role", { status: org.status }, { role: member.role, newRole }));
+    },
+    beforeRemoveMember: async ({ member, organization: org }) => {
+      forbidIf(orgMutationBlockReason("remove", { status: org.status }, { role: member.role }));
+    },
     afterUpdateOrganization: async ({ organization: org }) => {
       if (org) await emitOrganizationUpdated(org.id);
     },
