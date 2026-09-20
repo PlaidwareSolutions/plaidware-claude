@@ -1,9 +1,7 @@
 import { redirect } from "next/navigation";
-import { getSession, tenantStatusAllows } from "@/policy";
-import { AUTH } from "@/lib/routes";
+import { getTenantContext } from "@/policy";
 import { getProductBySlug } from "@/modules/catalog/queries";
 import { getTenantOverrides } from "@/modules/billing/service";
-import { getUserTenants } from "@/modules/tenancy/queries";
 import { CheckoutFlow } from "@/modules/billing/components/checkout-flow";
 
 export const metadata = { title: "Checkout" };
@@ -14,19 +12,16 @@ export default async function CheckoutPage({
 }: {
   searchParams: Promise<{ product?: string }>;
 }) {
-  const session = await getSession();
   const { product: slug } = await searchParams;
   if (!slug) redirect("/products");
-  if (!session) redirect(`${AUTH.login}?redirect=${encodeURIComponent(`/checkout?product=${slug}`)}`);
+  // A user with no workspace yet must still get here: the first purchase creates one.
+  const { active, caps } = await getTenantContext({ returnTo: `/checkout?product=${slug}` });
 
   const product = await getProductBySlug(slug);
   if (!product) redirect("/products");
 
+  if (active && caps?.readOnlyReason) redirect("/billing"); // suspended: pay, don't buy
   // Tenant-negotiated prices show at checkout (billing v2).
-  const tenants = await getUserTenants(session.user.id);
-  const active =
-    tenants.find((t) => t.id === session.session.activeOrganizationId) ?? tenants[0];
-  if (active && !tenantStatusAllows(active.status, "write")) redirect("/billing"); // suspended: pay, don't buy
   if (active) {
     const overrides = await getTenantOverrides(active.id, product.components.map((c) => c.id));
     product.components = product.components.map((c) => ({

@@ -1,7 +1,4 @@
-import { redirect } from "next/navigation";
-import { getSession, isOps, roleHasCapability, tenantStatusAllows, tenantStatusMessage } from "@/policy";
-import { AUTH, TENANT } from "@/lib/routes";
-import { getUserTenants } from "@/modules/tenancy/queries";
+import { requireTenantPage } from "@/policy";
 import {
   listAddonOptions,
   listTenantInvoices,
@@ -14,15 +11,8 @@ export const metadata = { title: "Billing" };
 export const dynamic = "force-dynamic";
 
 export default async function BillingPage() {
-  const session = await getSession();
-  if (!session) redirect(AUTH.login);
-
-  const tenants = await getUserTenants(session.user.id);
-  const active =
-    tenants.find((t) => t.id === session.session.activeOrganizationId) ?? tenants[0];
-  if (!active) redirect(TENANT.dashboard);
-  const ops = isOps(session);
-  if (!roleHasCapability(active.role, "billing") && !ops) {
+  const { active, caps } = await requireTenantPage();
+  if (!caps.roleCan("billing")) {
     return (
       <EmptyState
         className="mx-auto mt-16 max-w-md"
@@ -40,12 +30,11 @@ export default async function BillingPage() {
   const addonOptions = await listAddonOptions(active.id, subscriptions);
 
   // A suspended workspace can still pay (billing) but not change anything (write).
-  const statusAllowsWrite = ops || tenantStatusAllows(active.status, "write");
   return (
     <BillingView
       tenantId={active.id}
-      canWrite={(ops || roleHasCapability(active.role, "write")) && statusAllowsWrite}
-      readOnlyReason={statusAllowsWrite ? null : tenantStatusMessage(active.status)}
+      canWrite={caps.can("write")}
+      readOnlyReason={caps.readOnlyReason}
       subscriptions={subscriptions}
       invoices={invoices}
       addonOptions={addonOptions}

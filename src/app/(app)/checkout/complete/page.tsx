@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
-import { getSession } from "@/policy";
-import { getUserTenants } from "@/modules/tenancy/queries";
+import { getTenantContext } from "@/policy";
 import { getSubscriptionForTenant } from "@/modules/billing/queries";
 import { Button } from "@/components/ui/button";
 
@@ -14,12 +13,10 @@ export default async function CheckoutCompletePage({
 }: {
   searchParams: Promise<{ subscription?: string }>;
 }) {
-  const session = await getSession();
-  if (!session) redirect("/login");
   const { subscription: subscriptionId } = await searchParams;
   if (!subscriptionId) redirect("/billing");
 
-  const tenants = await getUserTenants(session.user.id);
+  const { tenants } = await getTenantContext();
   let sub = null;
   for (const t of tenants) {
     sub = await getSubscriptionForTenant(subscriptionId, t.id);

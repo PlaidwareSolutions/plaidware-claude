@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Activity, Package, Receipt, Users } from "lucide-react";
-import { getSession, isOps, tenantStatusAllows } from "@/policy";
-import { AUTH, OPS, TENANT } from "@/lib/routes";
-import { getUserTenants, listMembers } from "@/modules/tenancy/queries";
+import { getTenantContext, tenantStatusAllows } from "@/policy";
+import { OPS, TENANT } from "@/lib/routes";
+import { listMembers } from "@/modules/tenancy/queries";
 import { listTenantInvoices, listTenantSubscriptions } from "@/modules/billing/queries";
 import { latestHealthBySubscription } from "@/modules/monitoring/service";
 import { formatCents } from "@/lib/money";
@@ -19,13 +19,9 @@ export const metadata = { title: "Home" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const session = await getSession();
-  if (!session) redirect(AUTH.login);
-  if (isOps(session)) redirect(OPS.home);
-
-  const tenants = await getUserTenants(session.user.id);
-  const active =
-    tenants.find((t) => t.id === session.session.activeOrganizationId) ?? tenants[0];
+  const { ops, active } = await getTenantContext();
+  // Ops accounts land on the ops portal; their workspace (if any) is reachable from there.
+  if (ops) redirect(OPS.home);
 
   if (!active) {
     return (

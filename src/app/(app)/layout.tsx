@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession, isOps } from "@/policy";
 import { getUserTenants } from "@/modules/tenancy/queries";
+import { pickActiveTenant } from "@/modules/tenancy/active-tenant";
 import { unreadCount } from "@/modules/messaging/service";
 import { AppShell } from "@/components/app-shell";
 import { AUTH } from "@/lib/routes";
@@ -11,10 +12,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session) redirect(AUTH.login);
 
   const tenants = await getUserTenants(session.user.id);
-  const activeTenantId =
-    tenants.find((t) => t.id === session.session.activeOrganizationId)?.id ??
-    tenants[0]?.id ??
-    null;
+  const activeTenantId = pickActiveTenant(tenants, session.session.activeOrganizationId)?.id ?? null;
   const ops = isOps(session);
   const [tenantUnread, opsCounts] = await Promise.all([
     activeTenantId ? unreadCount("tenant", activeTenantId) : Promise.resolve(0),

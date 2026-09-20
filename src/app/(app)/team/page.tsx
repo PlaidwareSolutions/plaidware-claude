@@ -1,31 +1,17 @@
-import { redirect } from "next/navigation";
-import { getSession, isOps, roleHasCapability, tenantStatusAllows, tenantStatusMessage } from "@/policy";
-import { AUTH, TENANT } from "@/lib/routes";
-import {
-  getUserTenants,
-  listMembers,
-  listPendingInvites,
-} from "@/modules/tenancy/queries";
+import { requireTenantPage } from "@/policy";
+import { listMembers, listPendingInvites } from "@/modules/tenancy/queries";
 import { TeamManager } from "@/modules/tenancy/components/team-manager";
 
-export default async function TeamPage() {
-  const session = await getSession();
-  if (!session) redirect(AUTH.login);
+export const metadata = { title: "Team" };
+export const dynamic = "force-dynamic";
 
-  const tenants = await getUserTenants(session.user.id);
-  const active =
-    tenants.find((t) => t.id === session.session.activeOrganizationId) ?? tenants[0];
-  if (!active) redirect(TENANT.dashboard);
+export default async function TeamPage() {
+  const { session, active, caps } = await requireTenantPage();
 
   const [members, invites] = await Promise.all([
     listMembers(active.id),
     listPendingInvites(active.id),
   ]);
-
-  const ops = isOps(session);
-  const statusAllows = ops || tenantStatusAllows(active.status, "team");
-  const canManage = (ops || roleHasCapability(active.role, "team")) && statusAllows;
-  const isOwner = active.role === "owner" || ops;
 
   return (
     <TeamManager
@@ -33,9 +19,9 @@ export default async function TeamPage() {
       tenantName={active.name}
       members={members}
       invites={invites}
-      canManage={canManage}
-      readOnlyReason={statusAllows ? null : tenantStatusMessage(active.status)}
-      isOwner={isOwner}
+      canManage={caps.can("team")}
+      readOnlyReason={caps.readOnlyReason}
+      isOwner={caps.isOwner}
       selfUserId={session.user.id}
     />
   );

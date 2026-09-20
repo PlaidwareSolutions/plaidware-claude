@@ -1,10 +1,13 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { AUTH, TENANT } from "../lib/routes";
+import { AUTH, OPS, TENANT, withQuery } from "../lib/routes";
 import { auth } from "../lib/auth";
 import { db } from "../db";
 import { member, organization } from "../modules/auth/schema";
+import { getUserTenants, type TenantSummary } from "../modules/tenancy/queries";
+import { pickActiveTenant } from "../modules/tenancy/active-tenant";
+import { capabilitiesFor, roleHasCapability, type TenantCapabilities } from "./capabilities";
 import { tenantStatusAllows, tenantStatusMessage, type TenantCapability } from "./tenant-status";
 
 export {
@@ -14,10 +17,13 @@ export {
   type TenantCapability,
   type TenantStatus,
 } from "./tenant-status";
+export { capabilitiesFor, roleHasCapability, type TenantCapabilities } from "./capabilities";
 
 /**
  * The single authorization layer (PRD § 2). Every server action, RSC query,
  * and route handler resolves access through here — never inline role checks.
+ * Pure decision logic lives in the sibling files (tenant-status, capabilities)
+ * so client components and tests can import it; this file is server-only.
  */
 
 export class PolicyError extends Error {
@@ -30,21 +36,11 @@ export class PolicyError extends Error {
   }
 }
 
-/** PRD §4.2 role → capability matrix. */
-const ROLE_CAPS: Record<string, ReadonlySet<TenantCapability>> = {
-  owner: new Set(["read", "billing", "write", "team"]),
-  admin: new Set(["read", "billing", "write", "team"]),
-  billing: new Set(["read", "billing"]),
-  member: new Set(["read"]),
-};
-
-export function roleHasCapability(role: string, cap: TenantCapability): boolean {
-  return ROLE_CAPS[role]?.has(cap) ?? false;
-}
-
 export async function getSession() {
   return auth.api.getSession({ headers: await headers() });
 }
+
+export type AppSession = NonNullable<Awaited<ReturnType<typeof getSession>>>;
 
 export async function requireUser() {
   const session = await getSession();
@@ -97,4 +93,49 @@ export async function requireMembership(tenantId: string, cap: TenantCapability)
     throw new PolicyError(403, tenantStatusMessage(m.status));
   }
   return { session, role: m.role };
+}
+
+export type TenantContext = {
+  session: AppSession;
+  ops: boolean;
+  tenants: TenantSummary[];
+  /** The workspace the user is acting in; null for a user with none yet. */
+  active: TenantSummary | null;
+  /** What the user may do in `active`; null when there is no workspace. */
+  caps: TenantCapabilities | null;
+};
+
+/**
+ * Everything a tenant-facing page needs in order to decide what to show:
+ * the session, the user's workspaces, the one they are acting in, and what
+ * their role plus the workspace status allow. Redirects signed-out callers
+ * to login (back to `returnTo` afterwards) and ops accounts that hold no
+ * workspace to the ops portal, so a tenant page never bounces them around.
+ */
+export async function getTenantContext(opts: { returnTo?: string } = {}): Promise<TenantContext> {
+  const session = await getSession();
+  if (!session) redirect(withQuery(AUTH.login, { redirect: opts.returnTo }));
+  const ops = isOps(session);
+  const tenants = await getUserTenants(session.user.id);
+  if (ops && tenants.length === 0) redirect(OPS.home);
+  const active = pickActiveTenant(tenants, session.session.activeOrganizationId);
+  return {
+    session,
+    ops,
+    tenants,
+    active,
+    caps: active ? capabilitiesFor(active.role, active.status, ops) : null,
+  };
+}
+
+/**
+ * getTenantContext() for pages that only make sense inside a workspace.
+ * A user without one lands on the dashboard, which explains how to get one.
+ */
+export async function requireTenantPage(): Promise<
+  TenantContext & { active: TenantSummary; caps: TenantCapabilities }
+> {
+  const ctx = await getTenantContext();
+  if (!ctx.active || !ctx.caps) redirect(TENANT.dashboard);
+  return { ...ctx, active: ctx.active, caps: ctx.caps };
 }
