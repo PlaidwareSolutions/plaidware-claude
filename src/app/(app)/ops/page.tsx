@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireOpsPage } from "@/policy";
-import { listAllTenants, listPlatformUsers } from "@/modules/tenancy/queries";
+import { listAllTenants } from "@/modules/tenancy/queries";
+import { listPlatformUsers } from "@/modules/access/queries";
 import { countNewContactSubmissions } from "@/modules/contact/queries";
 import { listActiveProducts } from "@/modules/catalog/queries";
 import { getPlatformBillingStats, listAllSubscriptionsOps } from "@/modules/billing/queries";

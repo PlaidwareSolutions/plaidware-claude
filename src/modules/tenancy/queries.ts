@@ -168,40 +168,6 @@ export async function findUserByEmail(email: string) {
   return db.query.user.findFirst({ where: eq(user.email, email.toLowerCase()) });
 }
 
-export type PlatformUserRow = {
-  id: string;
-  name: string;
-  email: string;
-  platformRole: string;
-  emailVerified: boolean;
-  createdAt: Date;
-  tenants: { id: string; name: string }[];
-};
-
-export async function listPlatformUsers(): Promise<PlatformUserRow[]> {
-  const users = await db.query.user.findMany({ orderBy: [desc(user.createdAt)] });
-  const memberships = users.length
-    ? await db
-        .select({ userId: member.userId, orgId: organization.id, orgName: organization.name })
-        .from(member)
-        .innerJoin(organization, eq(member.organizationId, organization.id))
-        .where(inArray(member.userId, users.map((u) => u.id)))
-    : [];
-  const byUser = new Map<string, { id: string; name: string }[]>();
-  for (const m of memberships) {
-    byUser.set(m.userId, [...(byUser.get(m.userId) ?? []), { id: m.orgId, name: m.orgName }]);
-  }
-  return users.map((u) => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    platformRole: u.platformRole ?? "customer",
-    emailVerified: u.emailVerified,
-    createdAt: u.createdAt,
-    tenants: byUser.get(u.id) ?? [],
-  }));
-}
-
 // ---------------------------------------------------------------------------
 // Ops → Client page header (layout-level; every tab shares it)
 // ---------------------------------------------------------------------------

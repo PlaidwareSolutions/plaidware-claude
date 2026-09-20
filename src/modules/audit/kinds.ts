@@ -1,9 +1,11 @@
+import { PLATFORM_ROLE_META, normalizePlatformRole } from "@/lib/roles";
+
 /**
  * Every audit `kind` the app writes, with the label and group the Activity
  * tab renders. Unknown kinds still render (humanised) so a new writer never
  * hides its rows.
  */
-export type AuditGroup = "setup" | "billing" | "provisioning" | "people" | "workspace" | "monitoring";
+export type AuditGroup = "setup" | "billing" | "provisioning" | "people" | "workspace" | "monitoring" | "platform";
 
 export const AUDIT_GROUPS: { key: AuditGroup; label: string }[] = [
   { key: "setup", label: "Setup" },
@@ -12,6 +14,7 @@ export const AUDIT_GROUPS: { key: AuditGroup; label: string }[] = [
   { key: "people", label: "People" },
   { key: "workspace", label: "Workspace" },
   { key: "monitoring", label: "Monitoring" },
+  { key: "platform", label: "Platform" },
 ];
 
 const KINDS: Record<string, { label: string; group: AuditGroup }> = {
@@ -41,6 +44,8 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   member_role_changed: { label: "Member role changed", group: "people" },
   member_removed: { label: "Member removed", group: "people" },
   member_phone_updated: { label: "Member phone updated", group: "people" },
+  ownership_transferred: { label: "Ownership transferred", group: "people" },
+  platform_role_changed: { label: "Platform role changed", group: "platform" },
   workspace_status_changed: { label: "Workspace status changed", group: "workspace" },
   incident_acknowledged: { label: "Incident acknowledged", group: "monitoring" },
 };
@@ -95,6 +100,12 @@ export function describeAudit(
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
     case "invite_canceled":
       return str(payload.email);
+    case "ownership_transferred":
+      return `${str(payload.fromEmail) ?? "?"} → ${str(payload.toEmail) ?? "?"}`;
+    case "platform_role_changed": {
+      const role = (v: unknown) => (str(v) ? PLATFORM_ROLE_META[normalizePlatformRole(str(v))].label : "?");
+      return `${str(payload.targetEmail) ?? "?"}: ${role(payload.before)} → ${role(payload.after)}${payload.sessionsRevoked ? " · signed out" : ""}`;
+    }
     case "client_setup_created":
       return payload.regenerated ? "link regenerated" : str(payload.email);
     case "setup_pricing_released": {

@@ -12,8 +12,16 @@ import { Badge } from "@/components/ui/badge";
 
 const fmt = { cents: formatCents };
 
-/** The client's audit trail, newest first, filterable by group. */
-export function ActivityFeed({ entries }: { entries: TimelineEntry[] }) {
+/** An audit trail, newest first, filterable by group. */
+export function ActivityFeed({
+  entries,
+  title = "Activity",
+  emptyDescription = "Every ops action on this client lands here with who did it and when.",
+}: {
+  entries: TimelineEntry[];
+  title?: string;
+  emptyDescription?: string;
+}) {
   const [group, setGroup] = useState<AuditGroup | "all">("all");
   const counts = new Map<AuditGroup, number>();
   for (const e of entries) counts.set(auditGroup(e.kind), (counts.get(auditGroup(e.kind)) ?? 0) + 1);
@@ -21,7 +29,7 @@ export function ActivityFeed({ entries }: { entries: TimelineEntry[] }) {
 
   return (
     <Section
-      title="Activity"
+      title={title}
       icon={History}
       count={entries.length}
       actions={
@@ -41,7 +49,7 @@ export function ActivityFeed({ entries }: { entries: TimelineEntry[] }) {
       }
     >
       {shown.length === 0 ? (
-        <EmptyState icon={History} title="No activity recorded" description="Every ops action on this client lands here with who did it and when." />
+        <EmptyState icon={History} title="No activity recorded" description={emptyDescription} />
       ) : (
         <ol className="flex flex-col divide-y rounded-lg border bg-card">
           {shown.map((e) => {

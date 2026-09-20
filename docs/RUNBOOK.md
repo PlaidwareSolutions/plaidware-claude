@@ -55,3 +55,18 @@ tenant and MHub reactivates/relevels it — Hub does nothing special.
 Login page offers "Email me a sign-in link" (Better Auth magic-link plugin,
 5-minute single-use links, sign-in only — signup still requires the form since
 it collects name/phone). Verifying a link marks the email verified.
+
+## Platform roles (ops access)
+
+Every account has a platform role (`src/lib/roles.ts`): `customer`
+(default), `ops_support`, `ops_admin`. The role is `input: false` in the
+Better Auth config, so only two writers exist, both audited on the Access
+tab's "Platform activity" feed:
+
+- **/ops/system/access** — an ops admin picks a new role on a user's row.
+  Guards: you can't change your own role, an unverified account can't be
+  granted an ops role, and the last ops admin can't be demoted. Changes
+  that touch `ops_admin` require typing the user's email; a downgrade
+  signs the user out everywhere.
+- **Bootstrap** — `scripts/create-ops-admin.ts <email>` (see its header for
+  the Railway invocation) for the first admin in a fresh environment.

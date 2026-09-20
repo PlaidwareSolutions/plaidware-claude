@@ -1,0 +1,3 @@
+ALTER TABLE "audit_logs" ALTER COLUMN "tenant_id" DROP NOT NULL;--> statement-breakpoint
+CREATE INDEX "audit_logs_platform_idx" ON "audit_logs" USING btree ("created_at") WHERE "audit_logs"."tenant_id" is null;--> statement-breakpoint
+ALTER TABLE "user" ADD CONSTRAINT "user_platform_role_check" CHECK ("user"."platform_role" is null or "user"."platform_role" in ('customer', 'ops_support', 'ops_admin'));

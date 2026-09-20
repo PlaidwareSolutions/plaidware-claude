@@ -235,7 +235,7 @@ export async function opsSetUserPhone(opts: { tenantId: string; userId: string; 
  * Exactly one owner per tenant (PRD §4.2): transfer demotes the current owner
  * to admin and promotes the target, atomically.
  */
-export async function transferOwnership(tenantId: string, toUserId: string) {
+export async function transferOwnership(tenantId: string, toUserId: string, actorUserId: string) {
   const changed = await db.transaction(async (tx) => {
     const owner = await tx.query.member.findFirst({
       where: and(eq(member.organizationId, tenantId), eq(member.role, "owner")),
@@ -255,6 +255,22 @@ export async function transferOwnership(tenantId: string, toUserId: string) {
   if (changed) {
     await emitMembershipChanged({ orgId: tenantId, userId: changed.demoted, role: "admin", action: "updated" });
     await emitMembershipChanged({ orgId: tenantId, userId: changed.promoted, role: "owner", action: "updated" });
+    const people = await db.query.user.findMany({
+      where: inArray(user.id, [changed.demoted, changed.promoted]),
+      columns: { id: true, email: true },
+    });
+    const emailOf = (id: string) => people.find((p) => p.id === id)?.email ?? null;
+    await writeAudit({
+      tenantId,
+      actorUserId,
+      kind: "ownership_transferred",
+      payload: {
+        fromUserId: changed.demoted,
+        toUserId: changed.promoted,
+        fromEmail: emailOf(changed.demoted),
+        toEmail: emailOf(changed.promoted),
+      },
+    });
   }
 }
 

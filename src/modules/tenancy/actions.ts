@@ -135,11 +135,11 @@ export async function removeMemberAction(tenantId: string, memberId: string): Pr
 
 export async function transferOwnershipAction(tenantId: string, toUserId: string): Promise<ActionResult> {
   try {
-    const { role } = await requireMembership(tenantId, "team");
+    const { session, role } = await requireMembership(tenantId, "team");
     if (role !== "ops" && role !== "owner") {
       throw new Error("Only the owner can transfer ownership");
     }
-    await transferOwnership(tenantId, toUserId);
+    await transferOwnership(tenantId, toUserId, session.user.id);
     revalidateTeam(tenantId);
     return { ok: true };
   } catch (e) {

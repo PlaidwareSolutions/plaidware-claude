@@ -30,7 +30,14 @@ async function main() {
   const { user } = await import("../src/modules/auth/schema");
   const { auth } = await import("../src/lib/auth");
 
+  const { setPlatformRole } = await import("../src/modules/access/service");
+
   const existing = await db.query.user.findFirst({ where: eq(user.email, email) });
+  if (existing?.platformRole === "ops_admin") {
+    console.log(`${email}: already ops_admin.`);
+    await pool.end();
+    return;
+  }
   if (!existing) {
     await auth.api.signUpEmail({
       body: {
@@ -43,11 +50,12 @@ async function main() {
       },
     });
   }
-  // platformRole is input:false in the auth config — only settable here.
-  await db
-    .update(user)
-    .set({ emailVerified: true, platformRole: "ops_admin" })
-    .where(eq(user.email, email));
+  // platformRole is input:false in the auth config; the access service is the
+  // only writer (also behind /ops/system/access) and audits the grant.
+  await db.update(user).set({ emailVerified: true }).where(eq(user.email, email));
+  const target = await db.query.user.findFirst({ where: eq(user.email, email), columns: { id: true } });
+  if (!target) throw new Error("Account not found after signup");
+  await setPlatformRole({ userId: target.id, role: "ops_admin", actorUserId: null });
   console.log(
     `${email}: ${existing ? "existing account promoted to" : "created as"} ops_admin (verified). ` +
       "Set the password via the forgot-password flow, or sign in with a magic link.",
