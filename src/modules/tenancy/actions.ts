@@ -16,6 +16,7 @@ import {
   opsInviteMember,
   opsRemoveMember,
   opsSetUserPhone,
+  resendInvitation,
   approveRoleRequest,
   cancelRoleRequest,
   createRoleRequest,
@@ -65,6 +66,17 @@ export async function inviteMemberAction(input: z.infer<typeof inviteSchema>): P
       });
     }
     revalidateTeam(parsed.tenantId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function resendInviteAction(tenantId: string, invitationId: string): Promise<ActionResult> {
+  try {
+    const { session } = await requireMembership(tenantId, "team");
+    await resendInvitation({ tenantId, invitationId, actorUserId: session.user.id });
+    revalidateTeam(tenantId);
     return { ok: true };
   } catch (e) {
     return fail(e);

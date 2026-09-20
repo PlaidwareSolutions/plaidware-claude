@@ -16,6 +16,8 @@ export type TenantSetupInvite = {
   createdAt: string;
   /** A pending link is past its expiry: still "pending" in DB but effectively dead. */
   isExpired: boolean;
+  /** The same link can be re-sent (a legacy row without the stored token can only be regenerated). */
+  hasStoredToken: boolean;
 };
 
 /** All setup links ever minted for a tenant, newest first (ops "know your customer"). */
@@ -53,6 +55,7 @@ export async function listTenantSetupInvites(tenantId: string): Promise<TenantSe
     acceptedAt: r.acceptedAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
     isExpired: r.status === "pending" && r.expiresAt.getTime() < now,
+    hasStoredToken: r.tokenEnc != null,
   }));
 }
 

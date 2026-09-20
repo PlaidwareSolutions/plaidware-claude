@@ -5,7 +5,8 @@ import { magicLink, organization } from "better-auth/plugins";
 import { db } from "../db";
 import { env } from "../env";
 import { sendEmail, emailShell, emailButton } from "./email";
-import { sendInvitationEmail } from "./invite-email";
+import { INVITATION_DAYS, sendInvitationEmail } from "./invite-email";
+import { writeAudit } from "../modules/audit/service";
 import { sendAccountVerificationEmail } from "./account-email";
 import { ac, orgRoles } from "./org-roles";
 import { disabledOrgPaths } from "./org-http-surface";
@@ -40,6 +41,8 @@ const orgPlugin = organization({
   // while subscriptions are live). Never through Better Auth's own routes.
   allowUserToCreateOrganization: false,
   disableOrganizationDeletion: true,
+  // The email promises 7 days; Better Auth's default was 48 hours.
+  invitationExpiresIn: INVITATION_DAYS * 86_400,
   schema: {
     organization: {
       additionalFields: {
@@ -73,6 +76,17 @@ const orgPlugin = organization({
     },
     beforeRemoveMember: async ({ member, organization: org }) => {
       forbidIf(orgMutationBlockReason("remove", { status: org.status }, { role: member.role }));
+    },
+    // Tenant-side invites go through auth.api.createInvitation; audit them
+    // here so the client's Activity tab matches the ops path (opsInviteMember
+    // writes its own row and never fires this hook).
+    afterCreateInvitation: async ({ invitation, inviter, organization: org }) => {
+      await writeAudit({
+        tenantId: org.id,
+        actorUserId: inviter.id,
+        kind: "member_invited",
+        payload: { email: invitation.email, role: invitation.role, invitationId: invitation.id },
+      });
     },
     afterUpdateOrganization: async ({ organization: org }) => {
       if (org) await emitOrganizationUpdated(org.id);

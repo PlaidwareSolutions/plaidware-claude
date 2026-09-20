@@ -22,6 +22,7 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   client_setup_completed: { label: "Client completed setup", group: "setup" },
   client_setup_revoked: { label: "Setup link revoked", group: "setup" },
   client_setup_expired: { label: "Setup link expired", group: "setup" },
+  client_setup_resent: { label: "Setup link re-sent", group: "setup" },
   setup_pricing_released: { label: "Setup-link prices released", group: "setup" },
   price_override_set: { label: "Custom price set", group: "billing" },
   price_override_cleared: { label: "Custom price cleared", group: "billing" },
@@ -41,6 +42,7 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   credential_revealed: { label: "Credential revealed", group: "provisioning" },
   member_invited: { label: "Member invited", group: "people" },
   invite_canceled: { label: "Invitation canceled", group: "people" },
+  invite_resent: { label: "Invitation re-sent", group: "people" },
   member_role_changed: { label: "Member role changed", group: "people" },
   member_removed: { label: "Member removed", group: "people" },
   member_phone_updated: { label: "Member phone updated", group: "people" },
@@ -108,6 +110,8 @@ export function describeAudit(
     case "member_role_changed":
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
     case "invite_canceled":
+    case "invite_resent":
+    case "client_setup_resent":
       return str(payload.email);
     case "role_requested":
       return `${str(payload.before) ?? "?"} → ${str(payload.requested) ?? "?"}${str(payload.note) ? ` — ${payload.note}` : ""}`;

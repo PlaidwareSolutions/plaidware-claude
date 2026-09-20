@@ -15,6 +15,7 @@ import {
   createClientSetup,
   getSetupByToken,
   regenerateSetupLink,
+  resendSetupLink,
   revokeSetup,
   runFinalize,
   type FinalizeState,
@@ -53,13 +54,15 @@ const createSchema = z.object({
 
 export async function createClientSetupAction(
   input: z.infer<typeof createSchema>,
-): Promise<{ ok: true; link: string; tenantId: string; superseded: number } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; link: string; tenantId: string; superseded: number; emailError: string | null } | { ok: false; error: string }
+> {
   try {
     const session = await requireOps();
     const p = createSchema.parse(input);
     const r = await createClientSetup({ ...p, actorUserId: session.user.id });
     revalidateClientViews();
-    return { ok: true, link: r.link, tenantId: r.tenantId, superseded: r.superseded };
+    return { ok: true, link: r.link, tenantId: r.tenantId, superseded: r.superseded, emailError: r.emailError };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Setup creation failed" };
   }
@@ -167,11 +170,24 @@ export async function revokeSetupAction(inviteId: string): Promise<{ ok: boolean
   }
 }
 
+/** Re-send the same /welcome link (no rotation). */
+export async function resendSetupLinkAction(inviteId: string): Promise<{ ok: true; sentTo: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireOps();
+    z.string().uuid().parse(inviteId);
+    const r = await resendSetupLink(inviteId, session.user.id);
+    revalidateClientViews();
+    return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not resend link" };
+  }
+}
+
 /** Fresh /welcome link on the same invite; optionally emailed to the client. */
 export async function regenerateSetupLinkAction(
   inviteId: string,
   opts: { emailClient?: boolean } = {},
-): Promise<{ ok: true; link: string; sentTo: string | null } | { ok: false; error: string }> {
+): Promise<{ ok: true; link: string; sentTo: string | null; emailError: string | null } | { ok: false; error: string }> {
   try {
     const session = await requireOps();
     z.string().uuid().parse(inviteId);

@@ -6,6 +6,7 @@ import type { InviteRow, MemberRow, RoleRequestRow } from "../queries";
 import {
   cancelInviteAction,
   cancelRoleRequestAction,
+  resendInviteAction,
   inviteMemberAction,
   removeMemberAction,
   transferOwnershipAction,
@@ -261,15 +262,24 @@ export function TeamManager({
                   expires {formatDate(inv.expiresAt)}{inv.inviterName ? ` · invited by ${inv.inviterName}` : ""}
                 </span>
                 {canManage && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto"
-                    disabled={isPending(`cancel:${inv.id}`)}
-                    onClick={() => void run(() => cancelInviteAction(tenantId, inv.id), { key: `cancel:${inv.id}`, success: "Invitation revoked" })}
-                  >
-                    Revoke
-                  </Button>
+                  <div className="ml-auto flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isPending(`resend:${inv.id}`) || isPending(`cancel:${inv.id}`)}
+                      onClick={() => void run(() => resendInviteAction(tenantId, inv.id), { key: `resend:${inv.id}`, success: `Invitation re-sent to ${inv.email}` })}
+                    >
+                      Resend
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isPending(`resend:${inv.id}`) || isPending(`cancel:${inv.id}`)}
+                      onClick={() => void run(() => cancelInviteAction(tenantId, inv.id), { key: `cancel:${inv.id}`, success: "Invitation revoked" })}
+                    >
+                      Revoke
+                    </Button>
+                  </div>
                 )}
               </div>
             ))}

@@ -1,0 +1,1 @@
+ALTER TABLE "onboarding_invites" ADD COLUMN "token_enc" text;

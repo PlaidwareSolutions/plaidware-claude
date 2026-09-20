@@ -5,6 +5,7 @@ import { env } from "../../env";
 import { auth } from "../../lib/auth";
 import { getStripe } from "../../lib/stripe";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
+import { decryptSecret, encryptSecret } from "../../lib/crypto";
 import { formatCents } from "../../lib/money";
 import { normalizePhone, PLACEHOLDER_PHONE } from "../../lib/phone";
 import { account, organization, user } from "../auth/schema";
@@ -33,6 +34,8 @@ import { AUTH } from "@/lib/routes";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const INVITE_DAYS = 14;
+/** Keep a resendable copy of the raw token when the at-rest key is configured (staging/prod are). */
+const sealToken = (raw: string): string | null => (env.CREDENTIALS_ENCRYPTION_KEY ? encryptSecret(raw) : null);
 
 // ---------------------------------------------------------------------------
 // Ops: prepare everything, get one link
@@ -52,7 +55,7 @@ export async function createClientSetup(opts: {
   }[];
   sendEmailToClient: boolean;
   actorUserId: string;
-}): Promise<{ link: string; inviteId: string; tenantId: string; superseded: number }> {
+}): Promise<{ link: string; inviteId: string; tenantId: string; superseded: number; emailError: string | null }> {
   const email = opts.clientEmail.trim().toLowerCase();
   if (opts.products.length === 0) throw new Error("Pick at least one product");
   const productIds = opts.products.map((p) => p.productId);
@@ -128,6 +131,7 @@ export async function createClientSetup(opts: {
     .insert(onboardingInvites)
     .values({
       tokenHash: sha256(raw),
+      tokenEnc: sealToken(raw),
       tenantId,
       userId: clientUser.id,
       products: entries,
@@ -172,19 +176,26 @@ export async function createClientSetup(opts: {
 
   const link = `${env.APP_BASE_URL}${AUTH.welcome(raw)}`;
 
+  // The link must still reach ops when mail is down, so a send failure is
+  // returned alongside it rather than thrown.
+  let emailError: string | null = null;
   if (opts.sendEmailToClient) {
-    await sendSetupLinkEmail(invite.id, link);
+    try {
+      await sendSetupLinkEmail(invite.id, link);
+    } catch (e) {
+      emailError = e instanceof Error ? e.message : "Email failed";
+    }
   }
 
-  return { link, inviteId: invite.id, tenantId, superseded: supersededIds.length };
+  return { link, inviteId: invite.id, tenantId, superseded: supersededIds.length, emailError };
 }
 
-/** The "your setup is ready" email — used at creation and when ops resends a fresh link. */
+/** The "your setup is ready" email — at creation, on regenerate, and on resend. Throws when mail is configured but failed. */
 export async function sendSetupLinkEmail(inviteId: string, link: string): Promise<string | null> {
   const proposal = await assembleProposal(inviteId);
   if (!proposal) return null;
   const names = proposal.products.map((p) => p.productName).join(" + ");
-  void sendEmail({
+  const r = await sendEmail({
     to: proposal.clientEmail,
     subject: "Your Plaidware setup is ready",
     html: emailShell(
@@ -198,7 +209,30 @@ export async function sendSetupLinkEmail(inviteId: string, link: string): Promis
         `<p style="color:#8b93b2;font-size:13px">This link is personal to you and expires in ${INVITE_DAYS} days.</p>`,
     ),
   });
+  if (!r.sent && env.RESEND_API_KEY) throw new Error(`Email to ${proposal.clientEmail} failed: ${r.error}`);
   return proposal.clientEmail;
+}
+
+/**
+ * Re-send the SAME link (no rotation): the email already in the client's
+ * inbox keeps working. Needs the stored token copy; legacy rows regenerate.
+ */
+export async function resendSetupLink(inviteId: string, actorUserId: string): Promise<{ sentTo: string }> {
+  const invite = await db.query.onboardingInvites.findFirst({ where: eq(onboardingInvites.id, inviteId) });
+  if (!invite) throw new Error("Setup link not found");
+  if (invite.status !== "pending" || invite.expiresAt < new Date()) throw new Error("This link has expired — regenerate it");
+  if (!invite.tokenEnc) throw new Error("This link predates resend support — regenerate it");
+  const raw = decryptSecret(invite.tokenEnc);
+  const link = `${env.APP_BASE_URL}${AUTH.welcome(raw)}`;
+  const sentTo = await sendSetupLinkEmail(inviteId, link);
+  if (!sentTo) throw new Error("Setup link not found");
+  await writeAudit({
+    tenantId: invite.tenantId,
+    actorUserId,
+    kind: "client_setup_resent",
+    payload: { inviteId, email: sentTo },
+  });
+  return { sentTo };
 }
 
 // ---------------------------------------------------------------------------
@@ -665,7 +699,7 @@ export async function regenerateSetupLink(
   inviteId: string,
   actorUserId: string,
   opts: { emailClient?: boolean } = {},
-): Promise<{ link: string; sentTo: string | null }> {
+): Promise<{ link: string; sentTo: string | null; emailError: string | null }> {
   const invite = await db.query.onboardingInvites.findFirst({
     where: eq(onboardingInvites.id, inviteId),
   });
@@ -677,6 +711,7 @@ export async function regenerateSetupLink(
     .update(onboardingInvites)
     .set({
       tokenHash: sha256(raw),
+      tokenEnc: sealToken(raw),
       status: "pending",
       expiresAt: new Date(Date.now() + INVITE_DAYS * 86_400_000),
     })
@@ -690,6 +725,14 @@ export async function regenerateSetupLink(
   });
 
   const link = `${env.APP_BASE_URL}${AUTH.welcome(raw)}`;
-  const sentTo = opts.emailClient ? await sendSetupLinkEmail(inviteId, link) : null;
-  return { link, sentTo };
+  let sentTo: string | null = null;
+  let emailError: string | null = null;
+  if (opts.emailClient) {
+    try {
+      sentTo = await sendSetupLinkEmail(inviteId, link);
+    } catch (e) {
+      emailError = e instanceof Error ? e.message : "Email failed";
+    }
+  }
+  return { link, sentTo, emailError };
 }

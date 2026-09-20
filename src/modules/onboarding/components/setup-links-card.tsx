@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Copy, Link2, Mail, RefreshCw } from "lucide-react";
 import type { TenantSetupInvite } from "../queries";
-import { regenerateSetupLinkAction, revokeSetupAction } from "../actions";
+import { regenerateSetupLinkAction, resendSetupLinkAction, revokeSetupAction } from "../actions";
 import { OPS } from "@/lib/routes";
 import { formatDate, formatRelative } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
@@ -48,7 +48,17 @@ export function SetupLinksCard({
       key: `regen:${inv.id}`,
       success: (r) => (r.sentTo ? `New link emailed to ${r.sentTo}` : "New setup link ready"),
     });
-    if (res?.ok) setFresh({ link: res.link, sentTo: res.sentTo, invite: inv });
+    if (res?.ok) {
+      if (res.emailError) toast.warning(res.emailError);
+      setFresh({ link: res.link, sentTo: res.sentTo, invite: inv });
+    }
+  }
+
+  async function resend(inv: Row) {
+    await run(() => resendSetupLinkAction(inv.id), {
+      key: `resend:${inv.id}`,
+      success: (r) => `Link re-sent to ${r.sentTo}`,
+    });
   }
 
   async function revoke(inv: Row) {
@@ -70,7 +80,7 @@ export function SetupLinksCard({
       title="Setup links"
       icon={Link2}
       count={invites.length}
-      description="One-click onboarding links: password, payment, done. A lost link is regenerated here, never re-entered."
+      description="One-click onboarding links: password, payment, done. A lost link is re-sent as-is; an expired or revoked one is regenerated."
     >
       {visible.length === 0 ? (
         <EmptyState
@@ -113,16 +123,34 @@ export function SetupLinksCard({
                 </div>
                 {status !== "accepted" && (
                   <div className="flex flex-wrap gap-1">
-                    <Button size="sm" variant="outline" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, false)}>
-                      <RefreshCw className="size-3.5" /> {open ? "New link" : "Regenerate"}
-                    </Button>
-                    <Button size="sm" variant="ghost" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, true)}>
-                      <Mail className="size-3.5" /> {open ? "Email again" : "Regenerate & email"}
-                    </Button>
-                    {open && (
-                      <Button size="sm" variant="ghost" disabled={isPending(`revoke:${inv.id}`)} onClick={() => void revoke(inv)}>
-                        Revoke
-                      </Button>
+                    {open ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1"
+                          disabled={!inv.hasStoredToken || isPending(`resend:${inv.id}`)}
+                          title={inv.hasStoredToken ? "Email the same link again" : "Created before resend support — use New link"}
+                          onClick={() => void resend(inv)}
+                        >
+                          <Mail className="size-3.5" /> Resend
+                        </Button>
+                        <Button size="sm" variant="ghost" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, false)}>
+                          <RefreshCw className="size-3.5" /> New link
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={isPending(`revoke:${inv.id}`)} onClick={() => void revoke(inv)}>
+                          Revoke
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="outline" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, false)}>
+                          <RefreshCw className="size-3.5" /> Regenerate
+                        </Button>
+                        <Button size="sm" variant="ghost" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, true)}>
+                          <Mail className="size-3.5" /> Regenerate & email
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}

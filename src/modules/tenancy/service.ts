@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
-import { sendInvitationEmail } from "../../lib/invite-email";
+import { env } from "../../env";
+import { INVITATION_DAYS, sendInvitationEmail } from "../../lib/invite-email";
 import { invitation, member, organization, user } from "../auth/schema";
 import { roleRequests } from "./schema";
 import { listMembers } from "./queries";
@@ -109,8 +110,6 @@ export async function setTenantStatus(
 // plugin does, and emit the same MHub membership events.
 // ---------------------------------------------------------------------------
 
-const INVITE_DAYS = 7;
-
 export async function opsInviteMember(opts: {
   tenantId: string;
   email: string;
@@ -139,7 +138,7 @@ export async function opsInviteMember(opts: {
   if (!inviter) throw new Error("Inviter not found");
   if (existingMember.length) throw new Error(`${email} is already a member of ${org.name}`);
   if (pending && pending.expiresAt > new Date()) {
-    throw new Error(`${email} already has a pending invitation — cancel it first to resend`);
+    throw new Error(`${email} already has a pending invitation — use Resend on it`);
   }
 
   const id = crypto.randomUUID();
@@ -149,7 +148,7 @@ export async function opsInviteMember(opts: {
     email,
     role: opts.role,
     status: "pending",
-    expiresAt: new Date(Date.now() + INVITE_DAYS * 86_400_000),
+    expiresAt: new Date(Date.now() + INVITATION_DAYS * 86_400_000),
     inviterId: opts.inviterUserId,
   });
   await sendInvitationEmail({
@@ -166,6 +165,42 @@ export async function opsInviteMember(opts: {
     payload: { email, role: opts.role, invitationId: id },
   });
   return { invitationId: id };
+}
+
+/**
+ * Re-send a pending invitation as-is: the id, and therefore the link already
+ * in the inbox, stays valid; the expiry moves forward so the copy stays true.
+ * One writer for tenant and ops callers (policy has already gated the action).
+ */
+export async function resendInvitation(opts: { tenantId: string; invitationId: string; actorUserId: string }): Promise<{ email: string }> {
+  const inv = await db.query.invitation.findFirst({
+    where: and(eq(invitation.id, opts.invitationId), eq(invitation.organizationId, opts.tenantId), eq(invitation.status, "pending")),
+  });
+  if (!inv) throw new Error("Invitation not found or already handled");
+  if (inv.expiresAt <= new Date()) throw new Error("This invitation has expired — cancel it and invite again");
+  const [org, inviter, actor] = await Promise.all([
+    db.query.organization.findFirst({ where: eq(organization.id, opts.tenantId), columns: { name: true } }),
+    db.query.user.findFirst({ where: eq(user.id, inv.inviterId), columns: { name: true } }),
+    db.query.user.findFirst({ where: eq(user.id, opts.actorUserId), columns: { name: true } }),
+  ]);
+  if (!org) throw new Error("Tenant not found");
+  const expiresAt = new Date(Date.now() + INVITATION_DAYS * 86_400_000);
+  await db.update(invitation).set({ expiresAt }).where(eq(invitation.id, inv.id));
+  const r = await sendInvitationEmail({
+    to: inv.email,
+    invitationId: inv.id,
+    organizationName: org.name,
+    inviterName: inviter?.name ?? actor?.name ?? "A workspace admin",
+    role: inv.role ?? "member",
+  });
+  if (!r.sent && env.RESEND_API_KEY) throw new Error(`Email to ${inv.email} failed: ${r.error}`);
+  await writeAudit({
+    tenantId: opts.tenantId,
+    actorUserId: opts.actorUserId,
+    kind: "invite_resent",
+    payload: { email: inv.email, role: inv.role, invitationId: inv.id, expiresAt: expiresAt.toISOString() },
+  });
+  return { email: inv.email };
 }
 
 export async function opsCancelInvite(tenantId: string, invitationId: string, actorUserId: string) {

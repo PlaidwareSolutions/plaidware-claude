@@ -9,6 +9,7 @@ import {
   inviteMemberAction,
   opsSetUserPhoneAction,
   removeMemberAction,
+  resendInviteAction,
   transferOwnershipAction,
   updateMemberRoleAction,
 } from "../actions";
@@ -239,15 +240,24 @@ export function ClientPeople({
                   expires {formatDate(inv.expiresAt)}{inv.inviterName ? ` · invited by ${inv.inviterName}` : ""}
                 </span>
                 {canMutate && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="ml-auto"
-                    disabled={isPending(`cancel:${inv.id}`)}
-                    onClick={() => void run(() => cancelInviteAction(tenant.id, inv.id), { key: `cancel:${inv.id}`, success: "Invitation canceled" })}
-                  >
-                    Cancel
-                  </Button>
+                  <div className="ml-auto flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={isPending(`resend:${inv.id}`) || isPending(`cancel:${inv.id}`)}
+                      onClick={() => void run(() => resendInviteAction(tenant.id, inv.id), { key: `resend:${inv.id}`, success: `Invitation re-sent to ${inv.email}` })}
+                    >
+                      Resend
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={isPending(`resend:${inv.id}`) || isPending(`cancel:${inv.id}`)}
+                      onClick={() => void run(() => cancelInviteAction(tenant.id, inv.id), { key: `cancel:${inv.id}`, success: "Invitation canceled" })}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 )}
               </div>
             ))}

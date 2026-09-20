@@ -171,6 +171,7 @@ export function OnboardClientPage({
         return;
       }
       setResult({ link: res.link, tenantId: res.tenantId, superseded: res.superseded });
+      if (res.emailError) toast.warning(`${res.emailError} — send the link yourself.`);
       toast.success(
         res.superseded
           ? `Setup created — ${res.superseded} older pending link${res.superseded === 1 ? "" : "s"} for the same product revoked`

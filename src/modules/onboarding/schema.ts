@@ -16,8 +16,10 @@ export const onboardingInvites = pgTable(
   "onboarding_invites",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** sha256 of the raw token; the raw value only ever lives in the link. */
+    /** sha256 of the raw token — what the /welcome lookup matches on. */
     tokenHash: text("token_hash").notNull().unique(),
+    /** AES-GCM copy of the raw token so ops can re-send the same link; null on legacy rows (regenerate only). */
+    tokenEnc: text("token_enc"),
     tenantId: text("tenant_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
