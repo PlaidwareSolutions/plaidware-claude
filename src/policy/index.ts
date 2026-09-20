@@ -1,8 +1,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { AUTH, OPS, TENANT, withQuery } from "../lib/routes";
-import { hasOpsLevel, opsLevelOf, type OpsLevel } from "../lib/roles";
+import { AUTH, OPS, TENANT, WORK, withQuery } from "../lib/routes";
+import { hasOpsLevel, normalizePlatformRole, opsLevelOf, roleHasWorkAccess, type OpsLevel } from "../lib/roles";
 import { auth } from "../lib/auth";
 import { db } from "../db";
 import { member, organization } from "../modules/auth/schema";
@@ -63,6 +63,49 @@ export function isOps(session: SessionLike) {
 /** Full operational control — the only level that bypasses tenant membership and status. */
 export function isOpsAdmin(session: SessionLike) {
   return hasOpsLevel(session.user.platformRole, "admin");
+}
+
+/** Work-area-only staff: never ops, and kept out of every tenant page. */
+export function isDeveloper(session: SessionLike) {
+  return normalizePlatformRole(session.user.platformRole) === "developer";
+}
+
+/** May open /work: developers and every ops level. */
+export function hasWorkAccess(session: SessionLike) {
+  return roleHasWorkAccess(session.user.platformRole);
+}
+
+export type WorkViewer = { userId: string; isOps: boolean };
+
+/**
+ * Who is reading the work area. Work queries build client-facing DTOs from
+ * this and strip the requesting-client reference unless `isOps` — so a
+ * developer's payload never carries a tenant id or name.
+ */
+export function workViewer(session: SessionLike & { user: { id: string } }): WorkViewer {
+  return { userId: session.user.id, isOps: isOps(session) };
+}
+
+/** Work-area server actions: create/edit/move/comment/plan sprints. */
+export async function requireWork() {
+  const session = await requireUser();
+  if (!hasWorkAccess(session)) throw new PolicyError(403, "Work area access required");
+  return session;
+}
+
+/** Page/layout variant of requireWork(): redirects instead of throwing (same layout-vs-page note as requireOpsPage). */
+export async function requireWorkPage() {
+  const session = await getSession();
+  if (!session) redirect(AUTH.login);
+  if (!hasWorkAccess(session)) redirect(TENANT.dashboard);
+  return session;
+}
+
+/** Board settings, item deletion, developer accounts: ops admins only. */
+export async function requireWorkManage() {
+  const session = await requireUser();
+  if (!isOpsAdmin(session)) throw new PolicyError(403, "Ops admin access required to manage this board");
+  return session;
 }
 
 /** Ops-only server actions; admin unless the action is explicitly open to support. */
@@ -129,12 +172,14 @@ export type TenantContext = {
  * Everything a tenant-facing page needs in order to decide what to show:
  * the session, the user's workspaces, the one they are acting in, and what
  * their role plus the workspace status allow. Redirects signed-out callers
- * to login (back to `returnTo` afterwards) and ops accounts that hold no
- * workspace to the ops portal, so a tenant page never bounces them around.
+ * to login (back to `returnTo` afterwards), developers to the work area
+ * (their whole Hub), and ops accounts that hold no workspace to the ops
+ * portal, so a tenant page never bounces them around.
  */
 export async function getTenantContext(opts: { returnTo?: string } = {}): Promise<TenantContext> {
   const session = await getSession();
   if (!session) redirect(withQuery(AUTH.login, { redirect: opts.returnTo }));
+  if (isDeveloper(session)) redirect(WORK.home);
   const ops = isOpsAdmin(session);
   const tenants = await getUserTenants(session.user.id);
   if (isOps(session) && tenants.length === 0) redirect(OPS.home);

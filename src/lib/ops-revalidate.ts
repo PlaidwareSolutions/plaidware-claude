@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { OPS, TENANT } from "./routes";
+import { OPS, TENANT, WORK } from "./routes";
 
 /**
  * Server-action helpers: one call refreshes every surface that shows a
@@ -20,4 +20,12 @@ export function revalidateOps(...paths: string[]) {
 
 export function revalidateTenantViews() {
   for (const p of Object.values(TENANT)) if (typeof p === "string") revalidatePath(p);
+}
+
+/** Every work-area surface that shows a board's items: overview, my work, the board's tab group, one item. */
+export function revalidateWorkViews(slug?: string, number?: number) {
+  revalidatePath(WORK.home);
+  revalidatePath(WORK.my);
+  if (slug) revalidatePath(WORK.board(slug), "layout");
+  if (slug && number != null) revalidatePath(WORK.item(slug, number));
 }

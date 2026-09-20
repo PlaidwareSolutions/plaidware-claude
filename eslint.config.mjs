@@ -37,13 +37,13 @@ const eslintConfig = defineConfig([
         "error",
         {
           selector:
-            "Literal[value=/^\\/(ops|dashboard|billing|monitoring|inbox|team|settings|checkout|login|signup|invite|welcome|products)(\\/|\\?|$)/]",
-          message: "Route literals live in src/lib/routes.ts — use OPS.*, TENANT.*, AUTH.* or MARKETING.*.",
+            "Literal[value=/^\\/(ops|work|dashboard|billing|monitoring|inbox|team|settings|checkout|login|signup|invite|welcome|products)(\\/|\\?|$)/]",
+          message: "Route literals live in src/lib/routes.ts — use OPS.*, WORK.*, TENANT.*, AUTH.* or MARKETING.*.",
         },
         {
           selector:
-            "TemplateElement[value.raw=/^\\/(ops|dashboard|billing|monitoring|inbox|team|settings|checkout|login|signup|invite|welcome|products)(\\/|\\?|$)/]",
-          message: "Route literals live in src/lib/routes.ts — use OPS.*, TENANT.*, AUTH.* or MARKETING.*.",
+            "TemplateElement[value.raw=/^\\/(ops|work|dashboard|billing|monitoring|inbox|team|settings|checkout|login|signup|invite|welcome|products)(\\/|\\?|$)/]",
+          message: "Route literals live in src/lib/routes.ts — use OPS.*, WORK.*, TENANT.*, AUTH.* or MARKETING.*.",
         },
       ],
     },

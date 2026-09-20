@@ -6,8 +6,9 @@ import {
   MessageSquare,
   Package,
   Settings2,
+  SquareKanban,
 } from "lucide-react";
-import { OPS } from "@/lib/routes";
+import { OPS, WORK } from "@/lib/routes";
 import type { TenantCapability } from "@/policy/tenant-status";
 
 export type NavItem = {
@@ -16,8 +17,8 @@ export type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
   /** Active only on an exact match (the section index). */
   exact?: boolean;
-  /** Which nav count renders as a pill on this item. */
-  countKey?: keyof OpsNavCounts;
+  /** Which nav count renders as a pill on this item ("my" = the work sidebar's assigned-to-me count). */
+  countKey?: keyof OpsNavCounts | "my";
   /** Tenant nav: shown only to roles holding this capability (ops see all). */
   cap?: TenantCapability;
 };
@@ -40,6 +41,7 @@ export const OPS_NAV: NavItem[] = [
   { href: OPS.clients, label: "Clients", icon: Building2 },
   { href: OPS.billing, label: "Billing", icon: CreditCard, countKey: "billing" },
   { href: OPS.products, label: "Products", icon: Package },
+  { href: WORK.home, label: "Work", icon: SquareKanban },
   { href: OPS.monitoring, label: "Monitoring", icon: Activity, countKey: "monitoring" },
   { href: OPS.inbox, label: "Inbox", icon: MessageSquare, countKey: "inbox" },
   { href: OPS.system, label: "System", icon: Settings2, countKey: "system" },

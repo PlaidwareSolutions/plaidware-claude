@@ -71,6 +71,17 @@ export function formatRelative(d: DateInput, now: DateInput = new Date()): strin
   return "just now";
 }
 
+/**
+ * "2026-09-13" — the calendar day of an instant in the display zone. Sprint
+ * days are the team's days, not UTC's: 7pm in Chicago is still today.
+ */
+export function isoDay(d: DateInput = new Date(), timeZone = DISPLAY_TZ): string {
+  const x = toDate(d) ?? new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(x);
+  const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 /** "September 2026" from a "YYYY-MM" key. */
 export function formatMonth(yyyyMm: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})$/.exec(yyyyMm ?? "");

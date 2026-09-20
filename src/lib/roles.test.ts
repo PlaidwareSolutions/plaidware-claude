@@ -7,6 +7,7 @@ import {
   isDowngrade,
   normalizePlatformRole,
   opsLevelOf,
+  roleHasWorkAccess,
   tenantRoleCaps,
 } from "./roles";
 
@@ -59,5 +60,21 @@ describe("platform roles", () => {
     expect(isDowngrade("ops_support", "customer")).toBe(true);
     expect(isDowngrade("customer", "ops_support")).toBe(false);
     expect(isDowngrade("ops_admin", "ops_admin")).toBe(false);
+    // developer: gaining ops keeps the work grant; leaving for customer loses it
+    expect(isDowngrade("customer", "developer")).toBe(false);
+    expect(isDowngrade("developer", "customer")).toBe(true);
+    expect(isDowngrade("developer", "ops_support")).toBe(false);
+    expect(isDowngrade("ops_support", "developer")).toBe(true);
+    expect(isDowngrade("ops_admin", "developer")).toBe(true);
+  });
+  it("keep developers outside the ops levels but inside the work area", () => {
+    expect(normalizePlatformRole("developer")).toBe("developer");
+    expect(opsLevelOf("developer")).toBeNull();
+    expect(hasOpsLevel("developer", "support")).toBe(false);
+    expect(roleHasWorkAccess("developer")).toBe(true);
+    expect(roleHasWorkAccess("ops_support")).toBe(true);
+    expect(roleHasWorkAccess("ops_admin")).toBe(true);
+    expect(roleHasWorkAccess("customer")).toBe(false);
+    expect(roleHasWorkAccess(null)).toBe(false);
   });
 });

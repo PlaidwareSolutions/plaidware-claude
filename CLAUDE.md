@@ -27,10 +27,12 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   `src/policy/{capabilities,tenant-status,org-guards}.ts` (client/test-safe).
 - **Roles**: one table in `src/lib/roles.ts`. Tenant roles
   owner/admin/billing/member (caps read/billing/write/team; owner only by
-  transfer); platform roles customer/ops_support/ops_admin (support = read
-  ops portal + messaging/triage; admin = everything, bypasses membership).
-  `org-roles.ts` derives Better Auth's statements from it. Platform roles are
-  granted only via /ops/system/access (audited) or scripts/create-ops-admin.ts.
+  transfer); platform roles customer/developer/ops_support/ops_admin
+  (developer = the /work area only, never tenants/billing/monitoring;
+  support = read ops portal + messaging/triage + work; admin = everything,
+  bypasses membership). `org-roles.ts` derives Better Auth's statements from
+  it. Platform roles are granted only via /ops/system/access (audited; "Add
+  developer" creates accounts there) or scripts/{create-ops-admin,set-platform-role}.ts.
   Members request tenant role changes from /team; owners/admins/ops decide.
 - **Auth**: Better Auth + organization plugin (tenants = organizations).
   Every `/api/auth/organization/*` route except accept-invitation is disabled
@@ -93,6 +95,28 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   survive Stripe syncs; setup-link prices are held on the invite and become
   `tenant_price_overrides` (tagged `source_invite_id`) only when the client
   pays — revoke/expiry deletes them.
+
+## Work management (2026-09)
+
+- `src/modules/work/` — per-product development queues: one `work_boards` row
+  per product (lazy, key prefix from the slug, mode kanban|sprints, 7/14-day
+  cadence, advisory WIP limits), `work_items` ranked by a lexicographic string
+  key within (board, status) (`rank-logic.ts`), `work_sprints` (one active per
+  board, DB-enforced), comments and a per-item event trail (`event-kinds.ts`).
+  Pure rules in `transitions.ts`, `sprint-logic.ts`, `key-logic.ts`.
+- Area: `/work` (`WORK.*` routes, `src/app/(app)/work/**`, `WorkFrame`,
+  `WORK_NAV`); boards by product slug, items by per-board number. Policy:
+  `requireWork`/`requireWorkPage` (developer or any ops level),
+  `requireWorkManage` (ops admin: settings, delete). `getTenantContext()`
+  bounces developers to `/work`.
+- **Client references never reach developers**: `dto.toCardDto` spreads
+  `requester` only for ops viewers, `visibleEvents` drops `requester_changed`,
+  `item_created` never names a client. Ops-side reads (`listItemsForTenant`,
+  `boardSummaryForProduct`) are called only from ops pages.
+- Work actions call `refresh()` from `next/cache` after revalidating, so the
+  kanban's optimistic move and the fresh tree land in one transition; client
+  code in this module uses `useAction(…, { refresh: false })`. Drag and drop is
+  `@dnd-kit` (explicit `DndContext id` to avoid hydration mismatches).
 
 ## Deployment (Railway project "plaidware-hub")
 

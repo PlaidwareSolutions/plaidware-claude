@@ -49,6 +49,24 @@ describe("ops_support transitions", () => {
   });
 });
 
+describe("developer transitions", () => {
+  const who = { name: "Dev", email: "dev@x.co" };
+  it("is grantable to a verified customer without a typed email", () => {
+    expect(canChangePlatformRole({ ...base, next: "developer" })).toEqual({ ok: true });
+    expect(canChangePlatformRole({ ...base, next: "developer", targetEmailVerified: false })).toMatchObject({ ok: false });
+    expect(platformRoleChangeConfirm({ before: "customer", after: "developer", ...who })).toMatchObject({ typedEmail: false, destructive: false });
+  });
+  it("revokes on the way out, not on the way up to ops", () => {
+    expect(platformRoleChangeConfirm({ before: "developer", after: "customer", ...who }).destructive).toBe(true);
+    expect(platformRoleChangeConfirm({ before: "developer", after: "ops_support", ...who }).destructive).toBe(false);
+    expect(platformRoleChangeConfirm({ before: "ops_support", after: "developer", ...who }).destructive).toBe(true);
+    expect(platformRoleChangeConfirm({ before: "ops_admin", after: "developer", ...who })).toMatchObject({ destructive: true, typedEmail: true });
+  });
+  it("still protects the last ops admin", () => {
+    expect(canChangePlatformRole({ ...base, current: "ops_admin", next: "developer", opsAdminCount: 1 })).toMatchObject({ reason: expect.stringMatching(/last ops admin/) });
+  });
+});
+
 describe("platformRoleChangeConfirm", () => {
   const who = { name: "Ada", email: "ada@x.co" };
   it("asks for a typed email whenever ops admin is involved", () => {

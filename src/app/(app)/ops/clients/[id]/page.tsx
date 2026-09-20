@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Package } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Package, SquareKanban } from "lucide-react";
 import { requireOpsPage } from "@/policy";
 import { listMembers, listPendingRoleRequests } from "@/modules/tenancy/queries";
 import {
@@ -13,12 +13,15 @@ import { listTenantProvisioning } from "@/modules/provisioning/queries";
 import { findQuietReporters, getActiveIncidents } from "@/modules/monitoring/service";
 import { listTenantSetupInvites } from "@/modules/onboarding/queries";
 import { tenantDeliveryHealth } from "@/modules/webhooks_out/queries";
+import { listItemsForTenant } from "@/modules/work/queries";
+import { TypeIcon } from "@/modules/work/components/item-bits";
+import { SOURCE_LABELS } from "@/modules/work/components/labels";
 import { currentMonth, tenantCostBreakdown } from "@/modules/costs/service";
 import { buildAttentionItems } from "@/modules/tenancy/client-attention";
 import { SetupLinksCard } from "@/modules/onboarding/components/setup-links-card";
 import { formatCents } from "@/lib/money";
-import { formatDay } from "@/lib/dates";
-import { OPS } from "@/lib/routes";
+import { formatDay, formatRelative } from "@/lib/dates";
+import { OPS, WORK } from "@/lib/routes";
 import { Section } from "@/components/section";
 import { StatTile } from "@/components/stat-tile";
 import { StatusBadge } from "@/components/status-badge";
@@ -43,7 +46,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const client = await loadClient(id);
   if (!client) notFound();
 
-  const [subscriptions, invoices, automation, members, setupInvites, incidents, quiet, roleRequests] =
+  const [subscriptions, invoices, automation, members, setupInvites, incidents, quiet, roleRequests, requests] =
     await Promise.all([
       listTenantSubscriptions(id),
       listAllInvoicesOps(200, { tenantId: id }),
@@ -53,6 +56,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
       getActiveIncidents({ tenantId: id }),
       findQuietReporters(new Date(), { tenantId: id }),
       listPendingRoleRequests(id),
+      listItemsForTenant(id),
     ]);
   const [provisioning, deliveries, hosting] = await Promise.all([
     listTenantProvisioning(subscriptions),
@@ -77,6 +81,8 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   });
 
   const siteProblems = provisioning.filter((p) => ["unconfigured", "failing"].includes(p.state)).length;
+  const openRequests = requests.filter((r) => r.status !== "done" && r.status !== "canceled");
+  const doneRequests = requests.length - openRequests.length;
   const live = subscriptions.filter((s) => !["canceled", "expired"].includes(s.status));
 
   return (
@@ -166,6 +172,44 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
                 </Link>
               );
             })}
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title="Development requests"
+        icon={SquareKanban}
+        count={requests.length}
+        description="work items this client asked for"
+        actions={<Link href={WORK.home} className="text-sm text-primary hover:underline">Work →</Link>}
+      >
+        {requests.length === 0 ? (
+          <EmptyState
+            compact
+            title="No requests linked to this client"
+            description="Link a work item from its Requesting client field; developers never see the client."
+          />
+        ) : (
+          <div className="flex flex-col gap-2">
+            <ol className="divide-y rounded-lg border bg-card">
+              {openRequests.slice(0, 8).map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+                  <TypeIcon type={r.type} />
+                  <Link href={WORK.item(r.product.slug, r.number)} className="font-mono text-xs text-muted-foreground hover:text-primary">{r.key}</Link>
+                  <Link href={WORK.item(r.product.slug, r.number)} className="min-w-0 flex-1 truncate font-medium text-heading hover:text-primary">{r.title}</Link>
+                  <span className="text-xs text-muted-foreground">{r.product.name}</span>
+                  <StatusBadge kind="workItem" status={r.status} className="text-[10px]" />
+                  <StatusBadge kind="workPriority" status={r.priority} className="text-[10px]" />
+                  <span className="text-xs text-muted-foreground">{SOURCE_LABELS[r.source]} · {formatRelative(r.updatedAt)}</span>
+                </li>
+              ))}
+            </ol>
+            {(openRequests.length > 8 || doneRequests > 0) && (
+              <p className="text-xs text-muted-foreground">
+                {openRequests.length > 8 ? `${openRequests.length - 8} more open · ` : ""}
+                {doneRequests} done
+              </p>
+            )}
           </div>
         )}
       </Section>

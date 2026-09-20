@@ -24,7 +24,11 @@ export type StatusKind =
   | "platformRole"
   | "verification"
   | "invite"
-  | "roleRequest";
+  | "roleRequest"
+  | "workItem"
+  | "workType"
+  | "workPriority"
+  | "sprint";
 
 type Entry = { variant: BadgeVariant; label?: string };
 
@@ -113,7 +117,7 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
     PLATFORM_ROLES.map((r) => [
       r,
       {
-        variant: r === "ops_admin" ? "default" : r === "ops_support" ? "outline" : "secondary",
+        variant: r === "ops_admin" ? "default" : r === "ops_support" ? "outline" : r === "developer" ? "success" : "secondary",
         label: PLATFORM_ROLE_META[r].label,
       },
     ]),
@@ -133,6 +137,31 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
     approved: { variant: "success" },
     denied: { variant: "destructive", label: "declined" },
     canceled: { variant: "outline", label: "withdrawn" },
+  },
+  workItem: {
+    backlog: { variant: "outline" },
+    todo: { variant: "secondary", label: "to do" },
+    in_progress: { variant: "default", label: "in progress" },
+    in_review: { variant: "warning", label: "in review" },
+    done: { variant: "success" },
+    canceled: { variant: "outline" },
+  },
+  workType: {
+    feature: { variant: "default" },
+    enhancement: { variant: "secondary" },
+    bug: { variant: "destructive" },
+    task: { variant: "outline" },
+  },
+  workPriority: {
+    urgent: { variant: "destructive" },
+    high: { variant: "warning" },
+    medium: { variant: "secondary" },
+    low: { variant: "outline" },
+  },
+  sprint: {
+    planned: { variant: "outline" },
+    active: { variant: "success" },
+    completed: { variant: "secondary" },
   },
 };
 

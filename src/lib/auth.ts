@@ -144,11 +144,11 @@ export const auth = betterAuth({
     sendResetPassword: async ({ user, url }) => {
       await sendEmail({
         to: user.email,
-        subject: "Reset your Plaidware password",
+        subject: "Set or reset your Plaidware password",
         html: emailShell(
-          "Reset your password",
-          `<p>We received a request to reset the password for ${user.email}. This link is valid for one hour.</p>` +
-            emailButton(url, "Reset password") +
+          "Set your password",
+          `<p>Use the button below to choose a new password for ${user.email}. This link is valid for one hour.</p>` +
+            emailButton(url, "Set password") +
             `<p>If you didn't request this, you can safely ignore this email.</p>`,
         ),
       });

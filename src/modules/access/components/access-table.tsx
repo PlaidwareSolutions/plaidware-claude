@@ -4,16 +4,22 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Users } from "lucide-react";
+import { Mail, Search, Users } from "lucide-react";
 import type { PlatformUserRow } from "../queries";
-import { setPlatformRoleAction } from "../actions";
+import { sendPasswordSetupAction, setPlatformRoleAction } from "../actions";
+import { AddDeveloperDialog } from "./add-developer-dialog";
 import {
   GRANTABLE_PLATFORM_ROLES,
   canChangePlatformRole,
   platformRoleChangeConfirm,
   typedEmailMatches,
 } from "../rules";
-import { PLATFORM_ROLES, PLATFORM_ROLE_META, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
+import {
+  PLATFORM_ROLES,
+  PLATFORM_ROLE_META,
+  normalizePlatformRole,
+  type PlatformRole,
+} from "@/lib/roles";
 import { OPS, withQuery } from "@/lib/routes";
 import { formatDate, formatRelative } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
@@ -22,6 +28,7 @@ import { useOpsAccess } from "@/components/ops-access";
 import { FilterChip } from "@/components/filter-chip";
 import { StatusBadge } from "@/components/status-badge";
 import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -57,7 +64,9 @@ export function AccessTable({
   const [q, setQ] = useState(filter.q ?? "");
 
   function push(next: { q?: string; role?: string }) {
-    router.push(withQuery(OPS.access, { q: filter.q, role: filter.role, ...next }));
+    router.push(
+      withQuery(OPS.access, { q: filter.q, role: filter.role, ...next }),
+    );
   }
 
   async function change(u: PlatformUserRow, next: PlatformRole) {
@@ -74,14 +83,23 @@ export function AccessTable({
       toast.error(verdict.reason);
       return;
     }
-    const c = platformRoleChangeConfirm({ before, after: next, name: u.name, email: u.email });
+    const c = platformRoleChangeConfirm({
+      before,
+      after: next,
+      name: u.name,
+      email: u.email,
+    });
     const ok = await confirm({
       title: c.title,
       description: c.description,
       destructive: c.destructive,
       confirmLabel: c.destructive ? "Revoke" : "Grant",
       field: c.typedEmail
-        ? { label: "Type the email address to confirm", placeholder: u.email, required: true }
+        ? {
+            label: "Type the email address to confirm",
+            placeholder: u.email,
+            required: true,
+          }
         : undefined,
     });
     if (!ok) return;
@@ -100,39 +118,61 @@ export function AccessTable({
   return (
     <DataTableShell
       toolbar={
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            push({ q: q.trim() || undefined });
-          }}
-        >
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search name or email"
-              className="w-60 pl-8"
-              aria-label="Search accounts"
-            />
-          </div>
-          <Select value={filter.role ?? "all"} onValueChange={(v) => push({ role: v === "all" ? undefined : v })}>
-            <SelectTrigger size="sm" className="w-36" aria-label="Platform role"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All roles</SelectItem>
-              {PLATFORM_ROLES.map((r) => (
-                <SelectItem key={r} value={r}>{PLATFORM_ROLE_META[r].label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {filtered && (
-            <FilterChip
-              label={[filter.q ? `“${filter.q}”` : null, filter.role ? PLATFORM_ROLE_META[normalizePlatformRole(filter.role)].label : null].filter(Boolean).join(" · ")}
-              clearHref={OPS.access}
-            />
-          )}
-        </form>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              push({ q: q.trim() || undefined });
+            }}
+          >
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search name or email"
+                className="w-60 pl-8"
+                aria-label="Search accounts"
+              />
+            </div>
+            <Select
+              value={filter.role ?? "all"}
+              onValueChange={(v) => push({ role: v === "all" ? undefined : v })}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-36"
+                aria-label="Platform role"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All roles</SelectItem>
+                {PLATFORM_ROLES.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {PLATFORM_ROLE_META[r].label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {filtered && (
+              <FilterChip
+                label={[
+                  filter.q ? `“${filter.q}”` : null,
+                  filter.role
+                    ? PLATFORM_ROLE_META[normalizePlatformRole(filter.role)]
+                        .label
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                clearHref={OPS.access}
+              />
+            )}
+          </form>
+          {canMutate && <AddDeveloperDialog />}
+        </div>
       }
       footer={`${users.length} account${users.length === 1 ? "" : "s"}${filtered ? " matching" : ""} — every sign-in on the platform, with workspace memberships. ${opsAdminCount} ops admin${opsAdminCount === 1 ? "" : "s"}.`}
     >
@@ -149,7 +189,11 @@ export function AccessTable({
         </TableHeader>
         <TableBody>
           {users.length === 0 && (
-            <TableEmpty colSpan={6} icon={Users} title={filtered ? "No accounts match" : "No accounts yet"} />
+            <TableEmpty
+              colSpan={6}
+              icon={Users}
+              title={filtered ? "No accounts match" : "No accounts yet"}
+            />
           )}
           {users.map((u) => {
             const role = normalizePlatformRole(u.platformRole);
@@ -159,47 +203,91 @@ export function AccessTable({
                 <TableCell>
                   <div className="font-medium text-heading">
                     {u.name}
-                    {self && <span className="ml-1 text-xs font-normal text-muted-foreground">(you)</span>}
+                    {self && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        (you)
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground">{u.email}</div>
                 </TableCell>
                 <TableCell>
-                  {self || !canMutate ? (
-                    <span title={self ? "Ask another ops admin to change your role" : undefined}>
-                      <StatusBadge kind="platformRole" status={role} />
-                    </span>
-                  ) : (
-                    <Select
-                      value={role}
-                      disabled={isPending(`role:${u.id}`)}
-                      onValueChange={(v) => void change(u, v as PlatformRole)}
-                    >
-                      <SelectTrigger size="sm" className="w-32" aria-label={`Platform role for ${u.name}`}><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {GRANTABLE_PLATFORM_ROLES.map((r) => {
-                          const verdict =
-                            r === role
-                              ? { ok: true as const }
-                              : canChangePlatformRole({
-                                  actorUserId: selfUserId,
-                                  targetUserId: u.id,
-                                  targetEmailVerified: u.emailVerified,
-                                  current: role,
-                                  next: r,
-                                  opsAdminCount,
-                                });
-                          return (
-                            <SelectItem key={r} value={r} disabled={!verdict.ok} title={verdict.ok ? undefined : verdict.reason}>
-                              {PLATFORM_ROLE_META[r].label}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {self || !canMutate ? (
+                      <span
+                        title={
+                          self
+                            ? "Ask another ops admin to change your role"
+                            : undefined
+                        }
+                      >
+                        <StatusBadge kind="platformRole" status={role} />
+                      </span>
+                    ) : (
+                      <Select
+                        value={role}
+                        disabled={isPending(`role:${u.id}`)}
+                        onValueChange={(v) => void change(u, v as PlatformRole)}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className="w-32"
+                          aria-label={`Platform role for ${u.name}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {GRANTABLE_PLATFORM_ROLES.map((r) => {
+                            const verdict =
+                              r === role
+                                ? { ok: true as const }
+                                : canChangePlatformRole({
+                                    actorUserId: selfUserId,
+                                    targetUserId: u.id,
+                                    targetEmailVerified: u.emailVerified,
+                                    current: role,
+                                    next: r,
+                                    opsAdminCount,
+                                  });
+                            return (
+                              <SelectItem
+                                key={r}
+                                value={r}
+                                disabled={!verdict.ok}
+                                title={verdict.ok ? undefined : verdict.reason}
+                              >
+                                {PLATFORM_ROLE_META[r].label}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {canMutate && !self && role !== "customer" && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        title="Send set-password link"
+                        aria-label={`Send set-password link to ${u.name}`}
+                        disabled={isPending(`setup:${u.id}`)}
+                        onClick={() =>
+                          void run(() => sendPasswordSetupAction(u.id), {
+                            key: `setup:${u.id}`,
+                            success: `Set-password link sent to ${u.email}`,
+                            refresh: false,
+                          })
+                        }
+                      >
+                        <Mail className="size-3.5" />
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="hidden sm:table-cell">
-                  <StatusBadge kind="verification" status={u.emailVerified ? "verified" : "pending"} />
+                  <StatusBadge
+                    kind="verification"
+                    status={u.emailVerified ? "verified" : "pending"}
+                  />
                 </TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
                   {u.tenants.length === 0
@@ -207,12 +295,24 @@ export function AccessTable({
                     : u.tenants.map((t, i) => (
                         <span key={t.id}>
                           {i > 0 && ", "}
-                          <Link href={OPS.client(t.id)} className="hover:text-primary">{t.name}</Link>
+                          <Link
+                            href={OPS.client(t.id)}
+                            className="hover:text-primary"
+                          >
+                            {t.name}
+                          </Link>
                         </span>
                       ))}
                 </TableCell>
-                <TableCell className="hidden text-sm text-muted-foreground lg:table-cell" title={u.lastSeenAt ? formatDate(u.lastSeenAt) : undefined}>
-                  {u.lastSeenAt ? formatRelative(u.lastSeenAt) : <span className="text-warning">never</span>}
+                <TableCell
+                  className="hidden text-sm text-muted-foreground lg:table-cell"
+                  title={u.lastSeenAt ? formatDate(u.lastSeenAt) : undefined}
+                >
+                  {u.lastSeenAt ? (
+                    formatRelative(u.lastSeenAt)
+                  ) : (
+                    <span className="text-warning">never</span>
+                  )}
                 </TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
                   {formatDate(u.createdAt)}

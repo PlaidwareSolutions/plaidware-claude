@@ -6,7 +6,7 @@ import { PLATFORM_ROLE_META, isDowngrade, type PlatformRole } from "@/lib/roles"
  */
 
 /** Roles the Access tab can assign. */
-export const GRANTABLE_PLATFORM_ROLES = ["customer", "ops_support", "ops_admin"] as const satisfies readonly PlatformRole[];
+export const GRANTABLE_PLATFORM_ROLES = ["customer", "developer", "ops_support", "ops_admin"] as const satisfies readonly PlatformRole[];
 
 export type PlatformRoleChange = {
   /** Null for the bootstrap script: no self or last-admin guard applies. */
@@ -29,7 +29,7 @@ export function canChangePlatformRole(i: PlatformRoleChange): RuleVerdict {
     return { ok: false, reason: "You can't change your own platform role. Ask another ops admin." };
   }
   if (i.next !== "customer" && !i.targetEmailVerified) {
-    return { ok: false, reason: "Ops roles need a verified email address." };
+    return { ok: false, reason: "Staff roles need a verified email address." };
   }
   if (i.current === "ops_admin" && i.next !== "ops_admin" && i.opsAdminCount <= 1) {
     return { ok: false, reason: "This is the last ops admin. Grant someone else ops admin first." };

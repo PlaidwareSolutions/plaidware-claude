@@ -15,10 +15,19 @@ describe("status variants", () => {
     expect(statusVariant("platformRole", "ops_admin")).toEqual({ variant: "default", label: "ops admin" });
     expect(statusVariant("platformRole", "ops_support")).toEqual({ variant: "outline", label: "ops support" });
     expect(statusVariant("platformRole", "customer").variant).toBe("secondary");
+    expect(statusVariant("platformRole", "developer")).toEqual({ variant: "success", label: "developer" });
     expect(statusVariant("tenantRole", "owner")).toEqual({ variant: "secondary", label: "owner" });
     expect(statusVariant("tenantRole", "billing").label).toBe("billing");
     expect(statusVariant("roleRequest", "pending").variant).toBe("warning");
     expect(statusVariant("roleRequest", "denied").label).toBe("declined");
+  });
+
+  it("covers the work area", () => {
+    expect(statusVariant("workItem", "in_progress")).toEqual({ variant: "default", label: "in progress" });
+    expect(statusVariant("workItem", "done").variant).toBe("success");
+    expect(statusVariant("workType", "bug").variant).toBe("destructive");
+    expect(statusVariant("workPriority", "urgent").variant).toBe("destructive");
+    expect(statusVariant("sprint", "active").variant).toBe("success");
   });
 
   it("falls back gracefully for unknown or missing statuses", () => {

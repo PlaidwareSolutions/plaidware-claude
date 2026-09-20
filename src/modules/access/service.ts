@@ -1,8 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db } from "../../db";
+import { auth } from "../../lib/auth";
+import { emailButton, emailShell, sendEmail } from "../../lib/email";
+import { PLACEHOLDER_PHONE } from "../../lib/phone";
+import { AUTH } from "../../lib/routes";
+import { env } from "../../env";
 import { session, user } from "../auth/schema";
 import { writeAudit } from "../audit/service";
-import { isDowngrade, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
+import { PLATFORM_ROLE_META, isDowngrade, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
 import { countOpsAdmins } from "./queries";
 import { canChangePlatformRole } from "./rules";
 
@@ -51,4 +56,75 @@ export async function setPlatformRole(opts: {
 
 export async function revokeUserSessions(userId: string): Promise<void> {
   await db.delete(session).where(eq(session.userId, userId));
+}
+
+/**
+ * Ops creates a developer account. The row is inserted directly (not via
+ * signUpEmail, which would mail a verification link and auto-sign-in a
+ * passwordless account) as a verified customer, then promoted through
+ * setPlatformRole so the usual guards and the platform audit trail apply.
+ * No password exists until the person follows the set-password link: Better
+ * Auth's reset flow creates the credential account on first use.
+ */
+export async function createDeveloperAccount(opts: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  actorUserId: string;
+}): Promise<{ userId: string }> {
+  const email = opts.email.trim().toLowerCase();
+  const firstName = opts.firstName.trim();
+  const lastName = opts.lastName.trim();
+  const existing = await db.query.user.findFirst({ where: eq(user.email, email), columns: { id: true } });
+  if (existing) throw new Error("An account with this email already exists — change its role in the table instead.");
+
+  const userId = crypto.randomUUID();
+  const now = new Date();
+  await db.insert(user).values({
+    id: userId,
+    name: `${firstName} ${lastName}`.trim(),
+    email,
+    emailVerified: true,
+    firstName,
+    lastName,
+    phone: PLACEHOLDER_PHONE,
+    platformRole: "customer",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await setPlatformRole({ userId, role: "developer", actorUserId: opts.actorUserId });
+  await writeAudit({
+    tenantId: null,
+    actorUserId: opts.actorUserId,
+    kind: "platform_account_created",
+    payload: { targetUserId: userId, targetEmail: email, role: "developer" },
+  });
+  await sendEmail({
+    to: email,
+    subject: "Welcome to the Plaidware work area",
+    html: emailShell(
+      "You've been added as a developer",
+      `<p>Hi ${firstName}, an ops admin added ${email} to Plaidware Hub's work area — product boards, backlogs and sprints.</p>` +
+        `<p>A second email carries your set-password link (valid for one hour). After that you can also sign in any time with a magic link from the login page.</p>` +
+        emailButton(`${env.APP_BASE_URL}${AUTH.login}`, "Open Plaidware Hub"),
+    ),
+  });
+  await sendPasswordSetup({ userId });
+  return { userId };
+}
+
+/** (Re)send the set-password link — for staff accounts created here, or anyone who lost theirs. */
+export async function sendPasswordSetup(opts: { userId: string }): Promise<{ email: string }> {
+  const target = await db.query.user.findFirst({
+    where: eq(user.id, opts.userId),
+    columns: { email: true, platformRole: true },
+  });
+  if (!target) throw new Error("User not found");
+  if (normalizePlatformRole(target.platformRole) === "customer") {
+    throw new Error("Customers reset their own password from the login page.");
+  }
+  // Better Auth mails the link through sendResetPassword (src/lib/auth.ts).
+  await auth.api.requestPasswordReset({ body: { email: target.email, redirectTo: AUTH.resetPassword } });
+  console.log(`[access] set-password link sent to ${target.email} (${PLATFORM_ROLE_META[normalizePlatformRole(target.platformRole)].label})`);
+  return { email: target.email };
 }

@@ -50,6 +50,7 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   role_request_denied: { label: "Role request declined", group: "people" },
   role_request_canceled: { label: "Role request withdrawn", group: "people" },
   platform_role_changed: { label: "Platform role changed", group: "platform" },
+  platform_account_created: { label: "Account created by ops", group: "platform" },
   workspace_status_changed: { label: "Workspace status changed", group: "workspace" },
   incident_acknowledged: { label: "Incident acknowledged", group: "monitoring" },
 };
@@ -121,6 +122,8 @@ export function describeAudit(
       const role = (v: unknown) => (str(v) ? PLATFORM_ROLE_META[normalizePlatformRole(str(v))].label : "?");
       return `${str(payload.targetEmail) ?? "?"}: ${role(payload.before)} → ${role(payload.after)}${payload.sessionsRevoked ? " · signed out" : ""}`;
     }
+    case "platform_account_created":
+      return str(payload.targetEmail) ? `${payload.targetEmail} · ${str(payload.role) ?? "developer"}` : null;
     case "client_setup_created":
       return payload.regenerated ? "link regenerated" : str(payload.email);
     case "setup_pricing_released": {

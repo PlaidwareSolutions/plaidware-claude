@@ -1,0 +1,2 @@
+ALTER TABLE "user" DROP CONSTRAINT "user_platform_role_check";--> statement-breakpoint
+ALTER TABLE "user" ADD CONSTRAINT "user_platform_role_check" CHECK ("user"."platform_role" is null or "user"."platform_role" in ('customer', 'developer', 'ops_support', 'ops_admin'));

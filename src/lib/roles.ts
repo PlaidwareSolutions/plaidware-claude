@@ -84,27 +84,43 @@ export function tenantRoleCaps(role: string): ReadonlySet<TenantCapability> {
 // Platform roles
 // ---------------------------------------------------------------------------
 
-export const PLATFORM_ROLES = ["customer", "ops_support", "ops_admin"] as const;
+export const PLATFORM_ROLES = ["customer", "developer", "ops_support", "ops_admin"] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
 
 /** Ops access levels, lowest to highest. `requireOps(min)` compares these. */
 export type OpsLevel = "support" | "admin";
 
-export const PLATFORM_ROLE_META: Record<PlatformRole, { label: string; description: string; level: 0 | 1 | 2 }> = {
+/** What a platform role unlocks. Losing any of these on a role change is a downgrade. */
+export type PlatformGrant = "ops_read" | "ops_admin" | "work";
+
+export const PLATFORM_ROLE_META: Record<
+  PlatformRole,
+  { label: string; description: string; level: 0 | 1 | 2; grants: readonly PlatformGrant[] }
+> = {
   customer: {
     label: "customer",
     description: "A client account; access comes from workspace memberships",
     level: 0,
+    grants: [],
+  },
+  developer: {
+    label: "developer",
+    description: "The work area only — no clients, billing or monitoring",
+    // Level 0 on purpose: hasOpsLevel() must never treat a developer as ops.
+    level: 0,
+    grants: ["work"],
   },
   ops_support: {
     label: "ops support",
     description: "Reads the ops portal, handles client messages and incident triage",
     level: 1,
+    grants: ["ops_read", "work"],
   },
   ops_admin: {
     label: "ops admin",
     description: "Full operational control of the platform",
     level: 2,
+    grants: ["ops_read", "ops_admin", "work"],
   },
 };
 
@@ -138,7 +154,13 @@ export function hasOpsLevel(role: string | null | undefined, min: OpsLevel): boo
   return PLATFORM_ROLE_META[normalizePlatformRole(role)].level >= PLATFORM_ROLE_META[OPS_LEVEL_ROLE[min]].level;
 }
 
+/** May open the work area (/work): developers and every ops level. */
+export function roleHasWorkAccess(role: string | null | undefined): boolean {
+  return PLATFORM_ROLE_META[normalizePlatformRole(role)].grants.includes("work");
+}
+
 /** A change that removes access (used to decide whether to sign the user out). */
 export function isDowngrade(before: PlatformRole, after: PlatformRole): boolean {
-  return PLATFORM_ROLE_META[after].level < PLATFORM_ROLE_META[before].level;
+  const kept = PLATFORM_ROLE_META[after].grants;
+  return PLATFORM_ROLE_META[before].grants.some((g) => !kept.includes(g));
 }

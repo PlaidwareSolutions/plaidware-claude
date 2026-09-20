@@ -1,5 +1,6 @@
 export type ClientTab = "billing" | "provisioning" | "monitoring" | "people" | "activity";
 export type ProductTab = "pricing" | "kpis" | "defaults" | "subscribers";
+export type WorkTab = "backlog" | "sprints" | "settings";
 
 /**
  * Every internal path, in one place — used for <Link href> and for
@@ -41,9 +42,28 @@ export const TENANT = {
     withQuery("/checkout/complete", { subscription: subscriptionId }),
 } as const;
 
+/**
+ * The work area (development queues, boards, sprints) — developers' whole Hub,
+ * also reachable by ops. Boards are addressed by product slug, items by their
+ * per-board number, so a key-prefix change never breaks a link. `/work/my` is
+ * a static segment: a product with slug "my" would be shadowed.
+ */
+export const WORK = {
+  home: "/work",
+  my: "/work/my",
+  board: (slug: string) => `/work/${slug}`,
+  tab: (slug: string, tab: WorkTab) => `/work/${slug}/${tab}`,
+  backlog: (slug: string) => `/work/${slug}/backlog`,
+  sprints: (slug: string) => `/work/${slug}/sprints`,
+  sprint: (slug: string, id: string) => `/work/${slug}/sprints/${id}`,
+  item: (slug: string, number: number) => `/work/${slug}/items/${number}`,
+  settings: (slug: string) => `/work/${slug}/settings`,
+} as const;
+
 export const AUTH = {
   login: "/login",
   signup: "/signup",
+  resetPassword: "/reset-password",
   invite: (id: string) => `/invite/${id}`,
   welcome: (token: string) => `/welcome/${token}`,
 } as const;

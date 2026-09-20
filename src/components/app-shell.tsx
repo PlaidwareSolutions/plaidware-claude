@@ -21,14 +21,15 @@ import {
   Users,
 } from "lucide-react";
 import { isNavActive, OPS_NAV, type NavItem, type OpsNavCounts } from "@/components/ops-nav";
-import { AUTH, OPS, TENANT } from "@/lib/routes";
+import { WORK_NAV, type WorkBoardNav, type WorkNavCounts } from "@/components/work-nav";
+import { UserAvatar } from "@/components/user-avatar";
+import { AUTH, OPS, TENANT, WORK } from "@/lib/routes";
 import { roleHasCapability } from "@/policy/capabilities";
 import type { OpsLevel } from "@/lib/roles";
 import { authClient } from "@/lib/auth-client";
 import { setActiveTenantAction } from "@/modules/tenancy/actions";
 import type { TenantSummary } from "@/modules/tenancy/queries";
 import { cn } from "@/lib/utils";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -55,12 +56,15 @@ export function AppShell({
   tenants,
   activeTenantId,
   counts,
+  workBoards,
   children,
 }: {
-  user: { name: string; email: string; isOps: boolean; opsLevel?: OpsLevel | null };
+  user: { name: string; email: string; isOps: boolean; isDeveloper: boolean; opsLevel?: OpsLevel | null };
   tenants: TenantSummary[];
   activeTenantId: string | null;
-  counts?: { tenantUnread: number; tenantTeam?: number; ops?: OpsNavCounts };
+  counts?: { tenantUnread: number; tenantTeam?: number; ops?: OpsNavCounts; work?: WorkNavCounts };
+  /** Product boards listed under the work nav (developers and ops). */
+  workBoards?: WorkBoardNav[];
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -70,8 +74,12 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const inOps = isNavActive(OPS.home, pathname);
+  const inWork = isNavActive(WORK.home, pathname);
+  // A developer's whole Hub is the work area: its nav everywhere, never a workspace.
+  const dev = user.isDeveloper;
+  const tenantUi = !inOps && !inWork && !dev;
   const active = tenants.find((t) => t.id === activeTenantId) ?? null;
-  const nav = (inOps ? OPS_NAV : TENANT_NAV).filter(
+  const nav = (dev || inWork ? WORK_NAV : inOps ? OPS_NAV : TENANT_NAV).filter(
     (item) => !item.cap || user.isOps || (active !== null && roleHasCapability(active.role, item.cap)),
   );
 
@@ -98,9 +106,11 @@ export function AppShell({
             ? (counts?.tenantUnread ?? 0)
             : item.href === TENANT.team
               ? (counts?.tenantTeam ?? 0)
-              : item.countKey
-              ? (counts?.ops?.[item.countKey] ?? 0)
-              : 0;
+              : item.countKey === "my"
+                ? (counts?.work?.my ?? 0)
+                : item.countKey
+                  ? (counts?.ops?.[item.countKey] ?? 0)
+                  : 0;
         return (
           <Link
             key={item.href}
@@ -121,7 +131,35 @@ export function AppShell({
           </Link>
         );
       })}
-      {user.isOps && (!inOps || tenants.length > 0) && (
+      {nav === WORK_NAV && workBoards && workBoards.length > 0 && (
+        <>
+          <div className="mt-4 border-t pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3">
+            Boards
+          </div>
+          {workBoards.map((b) => {
+            const href = WORK.board(b.slug);
+            const current = isNavActive(href, pathname);
+            return (
+              <Link
+                key={b.slug}
+                href={href}
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
+                  current
+                    ? "bg-primary/10 font-medium text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                )}
+              >
+                <span className="size-2.5 shrink-0 rounded-full" style={{ background: b.color ?? "var(--primary)" }} />
+                <span className="truncate">{b.name}</span>
+                <span className="ml-auto font-mono text-[10px] text-muted-foreground">{b.keyPrefix}</span>
+              </Link>
+            );
+          })}
+        </>
+      )}
+      {user.isOps && (inWork || !inOps || tenants.length > 0) && (
         <>
           <div className="mt-4 border-t pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3">
             {inOps ? "Tenant view" : "Operations"}
@@ -154,6 +192,9 @@ export function AppShell({
               OPS{user.opsLevel === "support" ? " · SUPPORT" : ""}
             </span>
           )}
+          {inWork && (
+            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">WORK</span>
+          )}
         </div>
         {sidebar}
       </aside>
@@ -176,7 +217,7 @@ export function AppShell({
             </SheetContent>
           </Sheet>
 
-          {!inOps && tenants.length > 0 && (
+          {tenantUi && tenants.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2" disabled={pending}>
@@ -212,16 +253,7 @@ export function AppShell({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="rounded-full" aria-label="Account">
-                <Avatar className="size-8">
-                  <AvatarFallback className="text-xs">
-                    {user.name
-                      .split(" ")
-                      .map((p) => p[0])
-                      .slice(0, 2)
-                      .join("")
-                      .toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
+                <UserAvatar name={user.name} />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
@@ -243,7 +275,7 @@ export function AppShell({
         </header>
 
         <main className="flex-1 p-4 sm:p-6">
-          {!inOps && active && <TenantStatusBanner status={active.status} />}
+          {tenantUi && active && <TenantStatusBanner status={active.status} />}
           {children}
         </main>
       </div>

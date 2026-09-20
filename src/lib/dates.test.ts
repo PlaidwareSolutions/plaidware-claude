@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDay, formatMonth, formatRelative, formatUtcHour } from "./dates";
+import { formatDate, formatDateTime, formatDay, formatMonth, formatRelative, formatUtcHour, isoDay } from "./dates";
 
 // Tests run without NEXT_PUBLIC_DISPLAY_TZ → display zone is UTC.
 const T = new Date("2026-09-13T14:05:30Z");
@@ -17,6 +17,13 @@ describe("dates", () => {
     expect(formatDateTime(undefined)).toBe("—");
     expect(formatDay("not a date")).toBe("—");
     expect(formatMonth("2026")).toBe("—");
+  });
+
+  it("gives the calendar day in the display zone", () => {
+    expect(isoDay("2026-09-13T23:30:00Z", "America/Chicago")).toBe("2026-09-13");
+    expect(isoDay("2026-09-14T03:00:00Z", "America/Chicago")).toBe("2026-09-13");
+    expect(isoDay("2026-09-14T03:00:00Z", "UTC")).toBe("2026-09-14");
+    expect(isoDay(T)).toBe("2026-09-13");
   });
 
   it("formats UTC job times regardless of display zone", () => {

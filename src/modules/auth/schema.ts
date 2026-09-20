@@ -33,7 +33,7 @@ export const user = pgTable("user", {
 }, (t) => [
   // PLATFORM_ROLES in src/lib/roles.ts; text (not an enum) because the
   // auth generator emits text for additional fields.
-  check("user_platform_role_check", sql`${t.platformRole} is null or ${t.platformRole} in ('customer', 'ops_support', 'ops_admin')`),
+  check("user_platform_role_check", sql`${t.platformRole} is null or ${t.platformRole} in ('customer', 'developer', 'ops_support', 'ops_admin')`),
 ]);
 
 export const session = pgTable(
