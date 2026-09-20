@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Package } from "lucide-react";
 import { requireOpsPage } from "@/policy";
-import { listMembers } from "@/modules/tenancy/queries";
+import { listMembers, listPendingRoleRequests } from "@/modules/tenancy/queries";
 import {
   getBillingAutomationStatus,
   listAllInvoicesOps,
@@ -43,7 +43,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
   const client = await loadClient(id);
   if (!client) notFound();
 
-  const [subscriptions, invoices, automation, members, setupInvites, incidents, quiet] =
+  const [subscriptions, invoices, automation, members, setupInvites, incidents, quiet, roleRequests] =
     await Promise.all([
       listTenantSubscriptions(id),
       listAllInvoicesOps(200, { tenantId: id }),
@@ -52,6 +52,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
       listTenantSetupInvites(id),
       getActiveIncidents({ tenantId: id }),
       findQuietReporters(new Date(), { tenantId: id }),
+      listPendingRoleRequests(id),
     ]);
   const [provisioning, deliveries, hosting] = await Promise.all([
     listTenantProvisioning(subscriptions),
@@ -72,6 +73,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
     setupInvites,
     deliveries: { dead: deliveries.dead, pending: deliveries.pending },
     members,
+    roleRequests,
   });
 
   const siteProblems = provisioning.filter((p) => ["unconfigured", "failing"].includes(p.state)).length;

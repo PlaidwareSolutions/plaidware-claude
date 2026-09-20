@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Crown, MailPlus, Phone, Trash2, Users } from "lucide-react";
-import type { InviteRow, MemberRow } from "../queries";
+import type { InviteRow, MemberRow, RoleRequestRow } from "../queries";
 import {
   cancelInviteAction,
   inviteMemberAction,
@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/table";
 import { ASSIGNABLE_TENANT_ROLES, TENANT_ROLE_META, normalizePlatformRole, type AssignableTenantRole } from "@/lib/roles";
 import { useOpsAccess } from "@/components/ops-access";
+import { RoleRequestsSection } from "./role-requests-section";
 
 type Role = AssignableTenantRole;
 
@@ -54,10 +55,12 @@ export function ClientPeople({
   tenant,
   members,
   invites,
+  roleRequests,
 }: {
   tenant: { id: string; name: string; status: string };
   members: MemberRow[];
   invites: InviteRow[];
+  roleRequests: RoleRequestRow[];
 }) {
   const { run, isPending, pending } = useAction();
   const { canMutate } = useOpsAccess();
@@ -110,6 +113,12 @@ export function ClientPeople({
 
   return (
     <div className="flex flex-col gap-8">
+      <RoleRequestsSection
+        tenantId={tenant.id}
+        requests={roleRequests}
+        canDecide={canMutate}
+        readOnlyReason={canMutate ? null : "An ops admin can approve or decline this."}
+      />
       <Section
         title="Members"
         icon={Users}

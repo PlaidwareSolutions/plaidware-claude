@@ -13,12 +13,32 @@ const base = {
   setupInvites: [],
   deliveries: { dead: 0, pending: 0 },
   members: [{ role: "owner", lastSeenAt: new Date(), phone: "+15551234567", emailVerified: true }],
+  roleRequests: [],
 };
 const now = new Date("2026-09-14T12:00:00Z");
 
 describe("buildAttentionItems", () => {
   it("is empty for a healthy client", () => {
     expect(buildAttentionItems(base, now)).toEqual([]);
+  });
+
+  it("surfaces open role requests, nudging after three days", () => {
+    const items = buildAttentionItems(
+      {
+        ...base,
+        roleRequests: [
+          { id: "r1", requesterName: "Ada", requestedRole: "billing", createdAt: "2026-09-13T12:00:00Z" },
+          { id: "r2", requesterName: "Bob", requestedRole: "admin", createdAt: "2026-09-01T12:00:00Z" },
+        ],
+      },
+      now,
+    );
+    expect(items.map((i) => [i.key, i.tone])).toEqual([
+      ["role-req-r1", "info"],
+      ["role-req-r2", "warning"],
+    ]);
+    expect(items[0].title).toBe("Ada asked to become billing");
+    expect(items[0].href).toBe("/ops/clients/t1/people");
   });
 
   it("covers the three incident classes", () => {

@@ -60,7 +60,7 @@ export function AppShell({
   user: { name: string; email: string; isOps: boolean; opsLevel?: OpsLevel | null };
   tenants: TenantSummary[];
   activeTenantId: string | null;
-  counts?: { tenantUnread: number; ops?: OpsNavCounts };
+  counts?: { tenantUnread: number; tenantTeam?: number; ops?: OpsNavCounts };
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -96,7 +96,9 @@ export function AppShell({
         const count =
           item.href === TENANT.inbox
             ? (counts?.tenantUnread ?? 0)
-            : item.countKey
+            : item.href === TENANT.team
+              ? (counts?.tenantTeam ?? 0)
+              : item.countKey
               ? (counts?.ops?.[item.countKey] ?? 0)
               : 0;
         return (

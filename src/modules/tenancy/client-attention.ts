@@ -1,5 +1,6 @@
 import { OPS } from "../../lib/routes";
 import { isPlaceholderPhone } from "../../lib/phone";
+import { roleLabel, roleRequestAttentionTone } from "./role-request-rules";
 
 /** One "needs a human" line on the client Overview, linking to the tab that fixes it. */
 export type AttentionItem = {
@@ -25,6 +26,7 @@ export function buildAttentionItems(
     setupInvites: { id: string; status: string; isExpired: boolean; expiresAt: string; clientEmail: string }[];
     deliveries: { dead: number; pending: number };
     members: { role: string; lastSeenAt: Date | string | null; phone: string; emailVerified: boolean }[];
+    roleRequests: { id: string; requesterName: string; requestedRole: string; createdAt: Date | string }[];
   },
   now = new Date(),
 ): AttentionItem[] {
@@ -103,6 +105,16 @@ export function buildAttentionItems(
 
   if (input.deliveries.dead > 0) {
     out.push({ key: "mhub-dead", tone: "danger", title: `${input.deliveries.dead} MHub deliver${input.deliveries.dead === 1 ? "y" : "ies"} dead-lettered`, href: tab("activity") });
+  }
+
+  for (const r of input.roleRequests) {
+    out.push({
+      key: `role-req-${r.id}`,
+      tone: roleRequestAttentionTone(r.createdAt, now),
+      title: `${r.requesterName} asked to become ${roleLabel(r.requestedRole)}`,
+      detail: "Approve or decline from People.",
+      href: tab("people"),
+    });
   }
 
   const owner = input.members.find((m) => m.role === "owner");
