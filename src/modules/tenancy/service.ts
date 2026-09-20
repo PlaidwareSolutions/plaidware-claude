@@ -7,6 +7,7 @@ import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
 import { onboardingInvites } from "../onboarding/schema";
 import { writeAudit } from "../audit/service";
 import { emitMembershipChanged, emitOrganizationUpdated } from "../webhooks_out/service";
+import type { AssignableTenantRole } from "@/lib/roles";
 
 export type TenantStatus = "active" | "suspended" | "inactive";
 
@@ -101,7 +102,7 @@ const INVITE_DAYS = 7;
 export async function opsInviteMember(opts: {
   tenantId: string;
   email: string;
-  role: "admin" | "billing" | "member";
+  role: AssignableTenantRole;
   inviterUserId: string;
 }): Promise<{ invitationId: string }> {
   const email = opts.email.trim().toLowerCase();
@@ -179,7 +180,7 @@ export async function opsCancelInvite(tenantId: string, invitationId: string, ac
 export async function opsUpdateMemberRole(opts: {
   tenantId: string;
   memberId: string;
-  role: "admin" | "billing" | "member";
+  role: AssignableTenantRole;
   actorUserId: string;
 }) {
   const target = await db.query.member.findFirst({

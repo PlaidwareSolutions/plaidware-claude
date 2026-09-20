@@ -43,9 +43,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ASSIGNABLE_TENANT_ROLES, TENANT_ROLE_META, type AssignableTenantRole } from "@/lib/roles";
 
-const ASSIGNABLE_ROLES = ["admin", "billing", "member"] as const;
-type Role = (typeof ASSIGNABLE_ROLES)[number];
+type Role = AssignableTenantRole;
 
 export function TeamManager({
   tenantId,
@@ -141,7 +141,7 @@ export function TeamManager({
                   </TableCell>
                   <TableCell>
                     {m.role === "owner" ? (
-                      <StatusBadge kind="role" status="owner" label={<span className="inline-flex items-center gap-1"><Crown className="size-3" /> owner</span>} />
+                      <StatusBadge kind="tenantRole" status="owner" label={<span className="inline-flex items-center gap-1"><Crown className="size-3" /> owner</span>} />
                     ) : canManage ? (
                       <Select
                         value={m.role}
@@ -155,11 +155,11 @@ export function TeamManager({
                       >
                         <SelectTrigger size="sm" className="w-28"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {ASSIGNABLE_ROLES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                          {ASSIGNABLE_TENANT_ROLES.map((r) => <SelectItem key={r} value={r}>{TENANT_ROLE_META[r].label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     ) : (
-                      <StatusBadge kind="role" status={m.role} />
+                      <StatusBadge kind="tenantRole" status={m.role} />
                     )}
                   </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">{formatDate(m.joinedAt)}</TableCell>
@@ -192,7 +192,7 @@ export function TeamManager({
             {invites.map((inv) => (
               <div key={inv.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-2 text-sm">
                 <span className="font-medium text-heading">{inv.email}</span>
-                <StatusBadge kind="role" status={inv.role} />
+                <StatusBadge kind="tenantRole" status={inv.role} />
                 <span className="text-xs text-muted-foreground">
                   expires {formatDate(inv.expiresAt)}{inv.inviterName ? ` · invited by ${inv.inviterName}` : ""}
                 </span>
@@ -229,9 +229,9 @@ export function TeamManager({
               <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as Role)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="admin">Admin — full workspace access</SelectItem>
-                  <SelectItem value="billing">Billing — invoices and payments</SelectItem>
-                  <SelectItem value="member">Member — read-only</SelectItem>
+                  {ASSIGNABLE_TENANT_ROLES.map((r) => (
+                    <SelectItem key={r} value={r}>{TENANT_ROLE_META[r].label} — {TENANT_ROLE_META[r].description}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

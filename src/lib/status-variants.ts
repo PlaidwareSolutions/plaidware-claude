@@ -2,6 +2,8 @@
  * The single status → badge-variant map. Every status pill in both portals
  * goes through statusVariant(); no component picks a colour on its own.
  */
+import { PLATFORM_ROLES, PLATFORM_ROLE_META, TENANT_ROLES, TENANT_ROLE_META } from "./roles";
+
 export type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
 
 export type StatusKind =
@@ -18,7 +20,8 @@ export type StatusKind =
   | "collection"
   | "product"
   | "promo"
-  | "role"
+  | "tenantRole"
+  | "platformRole"
   | "verification"
   | "invite";
 
@@ -102,14 +105,18 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
     active: { variant: "success" },
     archived: { variant: "outline" },
   },
-  role: {
-    ops_admin: { variant: "default", label: "ops admin" },
-    customer: { variant: "secondary" },
-    owner: { variant: "secondary" },
-    admin: { variant: "secondary" },
-    billing: { variant: "secondary" },
-    member: { variant: "secondary" },
-  },
+  tenantRole: Object.fromEntries(
+    TENANT_ROLES.map((r) => [r, { variant: "secondary", label: TENANT_ROLE_META[r].label }]),
+  ),
+  platformRole: Object.fromEntries(
+    PLATFORM_ROLES.map((r) => [
+      r,
+      {
+        variant: r === "ops_admin" ? "default" : r === "ops_support" ? "outline" : "secondary",
+        label: PLATFORM_ROLE_META[r].label,
+      },
+    ]),
+  ),
   verification: {
     verified: { variant: "success" },
     pending: { variant: "warning" },

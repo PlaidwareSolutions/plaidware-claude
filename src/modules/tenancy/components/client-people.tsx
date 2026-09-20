@@ -19,7 +19,6 @@ import { tenantStatusMessage } from "@/policy/tenant-status";
 import { Section } from "@/components/section";
 import { StatusBadge } from "@/components/status-badge";
 import { DataTableShell, TableEmpty } from "@/components/data-table-shell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,9 +45,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ASSIGNABLE_TENANT_ROLES, TENANT_ROLE_META, normalizePlatformRole, type AssignableTenantRole } from "@/lib/roles";
 
-const ASSIGNABLE_ROLES = ["admin", "billing", "member"] as const;
-type Role = (typeof ASSIGNABLE_ROLES)[number];
+type Role = AssignableTenantRole;
 
 export function ClientPeople({
   tenant,
@@ -140,7 +139,9 @@ export function ClientPeople({
                   <TableCell>
                     <div className="flex items-center gap-1.5 font-medium text-heading">
                       {m.name}
-                      {m.platformRole === "ops_admin" && <Badge variant="default" className="text-[10px]">ops</Badge>}
+                      {normalizePlatformRole(m.platformRole) !== "customer" && (
+                        <StatusBadge kind="platformRole" status={m.platformRole} className="text-[10px]" />
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       <a href={`mailto:${m.email}`} className="hover:text-primary">{m.email}</a>
@@ -148,7 +149,7 @@ export function ClientPeople({
                   </TableCell>
                   <TableCell>
                     {m.role === "owner" ? (
-                      <StatusBadge kind="role" status="owner" />
+                      <StatusBadge kind="tenantRole" status="owner" />
                     ) : (
                       <Select
                         value={m.role}
@@ -162,7 +163,7 @@ export function ClientPeople({
                       >
                         <SelectTrigger size="sm" className="w-28"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {ASSIGNABLE_ROLES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                          {ASSIGNABLE_TENANT_ROLES.map((r) => <SelectItem key={r} value={r}>{TENANT_ROLE_META[r].label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     )}
@@ -217,7 +218,7 @@ export function ClientPeople({
             {invites.map((inv) => (
               <div key={inv.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-2 text-sm">
                 <span className="font-medium text-heading">{inv.email}</span>
-                <StatusBadge kind="role" status={inv.role} />
+                <StatusBadge kind="tenantRole" status={inv.role} />
                 <span className="text-xs text-muted-foreground">
                   expires {formatDate(inv.expiresAt)}{inv.inviterName ? ` · invited by ${inv.inviterName}` : ""}
                 </span>
@@ -252,9 +253,9 @@ export function ClientPeople({
               <Select value={inviteForm.role} onValueChange={(v) => setInviteForm({ ...inviteForm, role: v as Role })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="admin">admin — everything except ownership</SelectItem>
-                  <SelectItem value="billing">billing — invoices and payment methods</SelectItem>
-                  <SelectItem value="member">member — read only</SelectItem>
+                  {ASSIGNABLE_TENANT_ROLES.map((r) => (
+                    <SelectItem key={r} value={r}>{TENANT_ROLE_META[r].label} — {TENANT_ROLE_META[r].description}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

@@ -177,7 +177,7 @@ export const auth = betterAuth({
       firstName: { type: "string", required: true },
       lastName: { type: "string", required: true },
       phone: { type: "string", required: true },
-      // 'customer' | 'ops_admin' — never settable from client input
+      // PLATFORM_ROLES (src/lib/roles.ts) — never settable from client input
       platformRole: { type: "string", defaultValue: "customer", input: false },
     },
   },

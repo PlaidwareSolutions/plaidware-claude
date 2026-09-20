@@ -1,3 +1,4 @@
+import { tenantRoleCaps } from "@/lib/roles";
 import { tenantStatusAllows, tenantStatusMessage, type TenantCapability } from "./tenant-status";
 
 /**
@@ -6,16 +7,9 @@ import { tenantStatusAllows, tenantStatusMessage, type TenantCapability } from "
  * tests (src/policy/index.ts is server-only).
  */
 
-/** PRD §4.2 role → capability matrix. */
-const ROLE_CAPS: Record<string, ReadonlySet<TenantCapability>> = {
-  owner: new Set(["read", "billing", "write", "team"]),
-  admin: new Set(["read", "billing", "write", "team"]),
-  billing: new Set(["read", "billing"]),
-  member: new Set(["read"]),
-};
-
+/** PRD §4.2 role → capability matrix, from the role table in src/lib/roles.ts. */
 export function roleHasCapability(role: string, cap: TenantCapability): boolean {
-  return ROLE_CAPS[role]?.has(cap) ?? false;
+  return tenantRoleCaps(role).has(cap);
 }
 
 export type TenantCapabilities = {

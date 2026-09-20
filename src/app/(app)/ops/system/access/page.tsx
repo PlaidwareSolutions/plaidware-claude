@@ -43,7 +43,7 @@ export default async function OpsAccessPage() {
                 <div className="text-xs text-muted-foreground">{u.email}</div>
               </TableCell>
               <TableCell>
-                <StatusBadge kind="role" status={u.platformRole} />
+                <StatusBadge kind="platformRole" status={u.platformRole} />
               </TableCell>
               <TableCell className="hidden sm:table-cell">
                 <StatusBadge kind="verification" status={u.emailVerified ? "verified" : "pending"} />

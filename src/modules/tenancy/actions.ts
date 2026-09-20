@@ -22,6 +22,7 @@ import {
   type DeleteTenantPreview,
 } from "./service";
 import { listMembers } from "./queries";
+import { ASSIGNABLE_TENANT_ROLES } from "@/lib/roles";
 
 /** Tenant-side pages and the ops client page both render membership. */
 function revalidateTeam(tenantId: string) {
@@ -38,7 +39,7 @@ function fail(e: unknown): ActionResult {
 const inviteSchema = z.object({
   tenantId: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(["admin", "billing", "member"]), // owner is never invitable (PRD §4.2)
+  role: z.enum(ASSIGNABLE_TENANT_ROLES), // owner is never invitable (PRD §4.2)
 });
 
 export async function inviteMemberAction(input: z.infer<typeof inviteSchema>): Promise<ActionResult> {
@@ -86,7 +87,7 @@ export async function cancelInviteAction(tenantId: string, invitationId: string)
 const roleSchema = z.object({
   tenantId: z.string().min(1),
   memberId: z.string().min(1),
-  role: z.enum(["admin", "billing", "member"]),
+  role: z.enum(ASSIGNABLE_TENANT_ROLES),
 });
 
 export async function updateMemberRoleAction(input: z.infer<typeof roleSchema>): Promise<ActionResult> {
