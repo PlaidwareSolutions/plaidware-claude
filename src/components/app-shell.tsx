@@ -115,7 +115,7 @@ export function AppShell({
           </Link>
         );
       })}
-      {user.isOps && (
+      {user.isOps && (!inOps || tenants.length > 0) && (
         <>
           <div className="mt-4 border-t pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3">
             {inOps ? "Tenant view" : "Operations"}

@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { Activity, Package, Receipt, Users } from "lucide-react";
 import { getTenantContext, tenantStatusAllows } from "@/policy";
-import { OPS, TENANT } from "@/lib/routes";
+import { TENANT } from "@/lib/routes";
 import { listMembers } from "@/modules/tenancy/queries";
 import { listTenantInvoices, listTenantSubscriptions } from "@/modules/billing/queries";
 import { latestHealthBySubscription } from "@/modules/monitoring/service";
@@ -19,9 +18,8 @@ export const metadata = { title: "Home" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const { ops, active } = await getTenantContext();
-  // Ops accounts land on the ops portal; their workspace (if any) is reachable from there.
-  if (ops) redirect(OPS.home);
+  // Ops accounts without a workspace are sent to the ops portal by getTenantContext().
+  const { active } = await getTenantContext();
 
   if (!active) {
     return (
