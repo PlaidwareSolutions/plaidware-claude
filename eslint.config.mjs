@@ -36,18 +36,28 @@ const eslintConfig = defineConfig([
       "no-restricted-syntax": [
         "error",
         {
-          selector: "Literal[value=/^\\/ops(\\/|$)/]",
-          message: "Route literals live in src/lib/routes.ts — use OPS.*.",
+          selector:
+            "Literal[value=/^\\/(ops|dashboard|billing|monitoring|inbox|team|settings|checkout|login|signup|invite|welcome|products)(\\/|\\?|$)/]",
+          message: "Route literals live in src/lib/routes.ts — use OPS.*, TENANT.*, AUTH.* or MARKETING.*.",
         },
         {
-          selector: "TemplateElement[value.raw=/^\\/ops\\//]",
-          message: "Route literals live in src/lib/routes.ts — use OPS.*.",
+          selector:
+            "TemplateElement[value.raw=/^\\/(ops|dashboard|billing|monitoring|inbox|team|settings|checkout|login|signup|invite|welcome|products)(\\/|\\?|$)/]",
+          message: "Route literals live in src/lib/routes.ts — use OPS.*, TENANT.*, AUTH.* or MARKETING.*.",
         },
       ],
     },
   },
   {
-    files: ["src/lib/routes.ts", "src/lib/dates.ts", "src/app/robots.ts", "src/**/*.test.ts"],
+    files: [
+      "src/lib/routes.ts",
+      "src/lib/dates.ts",
+      "src/app/robots.ts",
+      "src/app/sitemap.ts",
+      "src/proxy.ts",
+      "src/app/(marketing)/**",
+      "src/**/*.test.ts",
+    ],
     rules: {
       "no-restricted-syntax": "off",
       "no-restricted-properties": "off",

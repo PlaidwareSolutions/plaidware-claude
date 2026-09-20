@@ -21,7 +21,7 @@ import {
   Users,
 } from "lucide-react";
 import { isNavActive, OPS_NAV, type NavItem, type OpsNavCounts } from "@/components/ops-nav";
-import { OPS, TENANT } from "@/lib/routes";
+import { AUTH, OPS, TENANT } from "@/lib/routes";
 import { roleHasCapability } from "@/policy/capabilities";
 import { authClient } from "@/lib/auth-client";
 import { setActiveTenantAction } from "@/modules/tenancy/actions";
@@ -84,7 +84,7 @@ export function AppShell({
 
   async function logOut() {
     await authClient.signOut();
-    router.push("/login");
+    router.push(AUTH.login);
     router.refresh();
   }
 

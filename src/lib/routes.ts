@@ -35,12 +35,27 @@ export const TENANT = {
   team: "/team",
   settings: "/settings",
   checkout: "/checkout",
+  /** Checkout for one product, in the session's active workspace. */
+  checkoutFor: (slug: string) => withQuery("/checkout", { product: slug }),
+  checkoutComplete: (subscriptionId: string) =>
+    withQuery("/checkout/complete", { subscription: subscriptionId }),
 } as const;
 
 export const AUTH = {
   login: "/login",
   signup: "/signup",
+  invite: (id: string) => `/invite/${id}`,
   welcome: (token: string) => `/welcome/${token}`,
+} as const;
+
+/**
+ * Marketing routes, served by plaidware.com. On the hub host src/proxy.ts
+ * bounces them to the marketing site, so a link to one leaves the app —
+ * keep the constant, never turn it into an app route.
+ */
+export const MARKETING = {
+  products: "/products",
+  product: (slug: string) => `/products/${slug}`,
 } as const;
 
 /** `withQuery(OPS.monitoring, { tenant: id })` → "/ops/monitoring?tenant=…"; empty values are dropped. */

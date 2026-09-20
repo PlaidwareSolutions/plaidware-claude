@@ -4,6 +4,7 @@ import { CheckCircle2 } from "lucide-react";
 import { getTenantContext } from "@/policy";
 import { getSubscriptionForTenant } from "@/modules/billing/queries";
 import { Button } from "@/components/ui/button";
+import { TENANT } from "@/lib/routes";
 
 export const metadata = { title: "Order complete" };
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export default async function CheckoutCompletePage({
   searchParams: Promise<{ subscription?: string }>;
 }) {
   const { subscription: subscriptionId } = await searchParams;
-  if (!subscriptionId) redirect("/billing");
+  if (!subscriptionId) redirect(TENANT.billing);
 
   const { tenants } = await getTenantContext();
   let sub = null;
@@ -38,10 +39,10 @@ export default async function CheckoutCompletePage({
       </p>
       <div className="flex gap-3">
         <Button asChild>
-          <Link href="/billing">View billing</Link>
+          <Link href={TENANT.billing}>View billing</Link>
         </Button>
         <Button asChild variant="outline">
-          <Link href="/dashboard">Dashboard</Link>
+          <Link href={TENANT.dashboard}>Dashboard</Link>
         </Button>
       </div>
     </div>

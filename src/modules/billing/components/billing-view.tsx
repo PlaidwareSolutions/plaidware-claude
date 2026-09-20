@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { MARKETING } from "@/lib/routes";
 
 export type { AddonOption };
 
@@ -151,7 +152,7 @@ export function BillingView({
             action={
               canWrite ? (
                 <Button asChild size="sm">
-                  <Link href="/products">Browse the catalog</Link>
+                  <Link href={MARKETING.products}>Browse the catalog</Link>
                 </Button>
               ) : undefined
             }

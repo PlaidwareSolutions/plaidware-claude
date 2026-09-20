@@ -90,7 +90,7 @@ export async function billingPortalAction(
     await requireMembership(tenantId, "billing");
     const url = await createBillingPortalSession(
       tenantId,
-      `${env.APP_BASE_URL}/billing`,
+      `${env.APP_BASE_URL}${TENANT.billing}`,
     );
     return { ok: true, url };
   } catch (e) {

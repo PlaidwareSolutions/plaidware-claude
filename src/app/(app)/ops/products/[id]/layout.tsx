@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireOpsPage } from "@/policy";
-import { OPS, withQuery } from "@/lib/routes";
+import { MARKETING, OPS, withQuery } from "@/lib/routes";
 import { formatCents } from "@/lib/money";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -55,7 +55,7 @@ export default async function ProductLayout({
             </Button>
             {p.isActive && (
               <Button asChild variant="outline" size="sm">
-                <a href={`/products/${p.slug}`} target="_blank" rel="noreferrer">Public page</a>
+                <a href={MARKETING.product(p.slug)} target="_blank" rel="noreferrer">Public page</a>
               </Button>
             )}
           </>

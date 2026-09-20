@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Activity, Package, Receipt, Users } from "lucide-react";
 import { getTenantContext } from "@/policy";
-import { TENANT } from "@/lib/routes";
+import { MARKETING, TENANT } from "@/lib/routes";
 import { listMembers } from "@/modules/tenancy/queries";
 import { listTenantInvoices, listTenantSubscriptions } from "@/modules/billing/queries";
 import { latestHealthBySubscription } from "@/modules/monitoring/service";
@@ -29,7 +29,7 @@ export default async function DashboardPage() {
         description="You don't have a workspace yet. One is created for you when you subscribe to your first product, or when your team invites you."
         action={
           <Button asChild>
-            <Link href="/products">Browse the catalog</Link>
+            <Link href={MARKETING.products}>Browse the catalog</Link>
           </Button>
         }
         className="mx-auto mt-16 max-w-md"
@@ -67,7 +67,7 @@ export default async function DashboardPage() {
         actions={
           canBuy ? (
             <Button asChild variant="outline" size="sm">
-              <Link href="/products">Add a product</Link>
+              <Link href={MARKETING.products}>Add a product</Link>
             </Button>
           ) : null
         }
@@ -103,7 +103,7 @@ export default async function DashboardPage() {
             action={
               canBuy ? (
                 <Button asChild size="sm">
-                  <Link href="/products">Browse the catalog</Link>
+                  <Link href={MARKETING.products}>Browse the catalog</Link>
                 </Button>
               ) : undefined
             }

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { OPS } from "@/lib/routes";
+import { MARKETING, OPS } from "@/lib/routes";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
@@ -76,7 +76,7 @@ const productSchema = z.object({
 function revalidateProduct(id: string) {
   revalidatePath(OPS.products);
   revalidatePath(OPS.product(id), "layout");
-  revalidatePath("/products");
+  revalidatePath(MARKETING.products);
   revalidatePath("/");
 }
 

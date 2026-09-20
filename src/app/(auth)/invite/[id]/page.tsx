@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient, useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { AUTH, TENANT, withQuery } from "@/lib/routes";
 
 export default function InvitePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -24,7 +25,7 @@ export default function InvitePage({ params }: { params: Promise<{ id: string }>
       setError(error.message ?? "This invitation is no longer valid");
       return;
     }
-    router.push("/dashboard");
+    router.push(TENANT.dashboard);
     router.refresh();
   }
 
@@ -33,7 +34,7 @@ export default function InvitePage({ params }: { params: Promise<{ id: string }>
   }
 
   if (!session) {
-    const back = encodeURIComponent(`/invite/${id}`);
+    const back = AUTH.invite(id);
     return (
       <div className="flex flex-col gap-4 text-center">
         <h1 className="text-xl font-semibold text-heading">You&apos;re invited</h1>
@@ -43,10 +44,10 @@ export default function InvitePage({ params }: { params: Promise<{ id: string }>
         </p>
         <div className="flex flex-col gap-2">
           <Button asChild>
-            <Link href={`/login?redirect=${back}`}>Sign in</Link>
+            <Link href={withQuery(AUTH.login, { redirect: back })}>Sign in</Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href={`/signup?redirect=${back}`}>Create account</Link>
+            <Link href={withQuery(AUTH.signup, { redirect: back })}>Create account</Link>
           </Button>
         </div>
       </div>

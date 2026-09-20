@@ -9,6 +9,7 @@ import { hubUrl } from "@/lib/urls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TENANT } from "@/lib/routes";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +83,7 @@ export default async function ProductPage({
               </div>
             ))}
             <Button asChild className="mt-2">
-              <a href={hubUrl(`/checkout?product=${product.slug}`)}>Get started</a>
+              <a href={hubUrl(TENANT.checkoutFor(product.slug))}>Get started</a>
             </Button>
             <p className="text-center text-xs text-muted-foreground">
               Secure checkout · cancel anytime

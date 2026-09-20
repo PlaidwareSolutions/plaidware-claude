@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TENANT } from "@/lib/routes";
 
 const label = (c: { kind: string; interval?: string | null; intervalCount?: number | null }) =>
   c.kind === "one_time" ? "one-time" : intervalLabel(c);
@@ -97,7 +98,7 @@ export function CheckoutFlow({
         subscriptionId: res.subscriptionId,
       });
     } else {
-      router.push(`/checkout/complete?subscription=${res.subscriptionId}`);
+      router.push(TENANT.checkoutComplete(res.subscriptionId));
     }
   }
 
@@ -267,7 +268,7 @@ export function PaymentForm({
     if (!stripe || !elements) return;
     setBusy(true);
     const target =
-      returnUrl ?? `${window.location.origin}/checkout/complete?subscription=${subscriptionId}`;
+      returnUrl ?? `${window.location.origin}${TENANT.checkoutComplete(subscriptionId ?? "")}`;
     const confirm =
       mode === "setup"
         ? stripe.confirmSetup({ elements, confirmParams: { return_url: target } })
@@ -279,7 +280,7 @@ export function PaymentForm({
       return;
     }
     if (onSuccess) onSuccess();
-    else router.push(`/checkout/complete?subscription=${subscriptionId}`);
+    else router.push(subscriptionId ? TENANT.checkoutComplete(subscriptionId) : TENANT.billing);
   }
 
   return (

@@ -18,6 +18,7 @@ import {
 import { createBillingPortalSession, ensureTenantStripeCustomer } from "./service";
 import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 import { writeAudit } from "../audit/service";
+import { TENANT } from "@/lib/routes";
 
 // ---------------------------------------------------------------------------
 // Policy
@@ -190,7 +191,7 @@ export async function sendPreDueReminders(now = new Date()): Promise<number> {
           `<p>Invoice ${inv.invoiceNumber} for ${formatCents(inv.amountDueCents - inv.amountPaidCents)} is due on ${formatDate(inv.dueDate)}.</p>` +
             (inv.hostedInvoiceUrl
               ? emailButton(inv.hostedInvoiceUrl, "Pay now")
-              : emailButton(`${env.APP_BASE_URL}/billing`, "View billing")),
+              : emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "View billing")),
         ),
       });
     }
@@ -438,7 +439,7 @@ export async function recordPaymentRow(opts: {
         html: emailShell(
           "Payment received",
           `<p>We received ${formatCents(opts.amountCents)} toward invoice ${inv.invoiceNumber}. Thank you.</p>` +
-            emailButton(`${env.APP_BASE_URL}/billing`, "View billing"),
+            emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "View billing"),
         ),
       });
     }
@@ -545,7 +546,7 @@ export async function resolveDunningForInvoice(invoiceId: string): Promise<void>
       html: emailShell(
         "Welcome back",
         `<p>Payment received — your services are active again. Thanks for getting it sorted.</p>` +
-          emailButton(`${env.APP_BASE_URL}/dashboard`, "Open dashboard"),
+          emailButton(`${env.APP_BASE_URL}${TENANT.dashboard}`, "Open dashboard"),
       ),
     });
   }
@@ -612,7 +613,7 @@ export async function runDunningSweep(now = new Date()): Promise<{
                 : "") +
               (inv.hostedInvoiceUrl
                 ? emailButton(inv.hostedInvoiceUrl, "Pay now")
-                : emailButton(`${env.APP_BASE_URL}/billing`, "View billing")),
+                : emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "View billing")),
           ),
         });
       }
@@ -654,7 +655,7 @@ export async function runDunningSweep(now = new Date()): Promise<{
             `<p>Invoice ${inv.invoiceNumber} (${formatCents(inv.amountDueCents)}) remained unpaid past the grace period, so your services are suspended. Pay now and everything reactivates automatically.</p>` +
               (inv.hostedInvoiceUrl
                 ? emailButton(inv.hostedInvoiceUrl, "Pay now")
-                : emailButton(`${env.APP_BASE_URL}/billing`, "View billing")),
+                : emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "View billing")),
           ),
         });
       }
@@ -780,7 +781,7 @@ export async function switchSubscriptionToAutoCharge(subscriptionId: string): Pr
  * their card, and hand the same link back so ops can paste it into a chat.
  */
 export async function sendCardSetupLink(tenantId: string): Promise<{ url: string; sentTo: string | null }> {
-  const url = await createBillingPortalSession(tenantId, `${env.APP_BASE_URL}/billing`);
+  const url = await createBillingPortalSession(tenantId, `${env.APP_BASE_URL}${TENANT.billing}`);
   const contacts = await tenantBillingContacts(tenantId);
   const to = contacts[0] ?? null;
   if (to) {

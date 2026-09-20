@@ -4,6 +4,7 @@ import { getProductBySlug } from "@/modules/catalog/queries";
 import { getTenantOverrides } from "@/modules/billing/service";
 import { CheckoutFlow } from "@/modules/billing/components/checkout-flow";
 import { EmptyState } from "@/components/empty-state";
+import { MARKETING, TENANT } from "@/lib/routes";
 
 export const metadata = { title: "Checkout" };
 export const dynamic = "force-dynamic";
@@ -14,14 +15,14 @@ export default async function CheckoutPage({
   searchParams: Promise<{ product?: string }>;
 }) {
   const { product: slug } = await searchParams;
-  if (!slug) redirect("/products");
+  if (!slug) redirect(MARKETING.products);
   // A user with no workspace yet must still get here: the first purchase creates one.
-  const { active, caps } = await getTenantContext({ returnTo: `/checkout?product=${slug}` });
+  const { active, caps } = await getTenantContext({ returnTo: TENANT.checkoutFor(slug) });
 
   const product = await getProductBySlug(slug);
-  if (!product) redirect("/products");
+  if (!product) redirect(MARKETING.products);
 
-  if (active && caps?.readOnlyReason) redirect("/billing"); // suspended: pay, don't buy
+  if (active && caps?.readOnlyReason) redirect(TENANT.billing); // suspended: pay, don't buy
   if (active && caps && !caps.roleCan("write")) {
     return (
       <EmptyState

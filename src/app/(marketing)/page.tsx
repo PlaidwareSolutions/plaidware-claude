@@ -14,6 +14,7 @@ import { formatCents } from "@/lib/money";
 import { monthlyFromCents } from "@/modules/catalog/pricing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AUTH } from "@/lib/routes";
 
 export const metadata: Metadata = {
   title: "Plaidware — One control plane for every product",
@@ -134,7 +135,7 @@ export default async function HomePage() {
           </p>
           <div className="flex gap-3">
             <Button asChild>
-              <a href={hubUrl("/signup")}>Get started</a>
+              <a href={hubUrl(AUTH.signup)}>Get started</a>
             </Button>
             <Button asChild variant="outline">
               <Link href="/contact">Talk to us</Link>

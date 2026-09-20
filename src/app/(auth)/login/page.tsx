@@ -8,6 +8,7 @@ import { resolveRedirect } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AUTH, withQuery } from "@/lib/routes";
 
 function LoginForm() {
   const router = useRouter();
@@ -33,7 +34,7 @@ function LoginForm() {
       const { error } = await authClient.signIn.magicLink({
         email,
         callbackURL: redirect,
-        errorCallbackURL: "/login?error=magic-link",
+        errorCallbackURL: withQuery(AUTH.login, { error: "magic-link" }),
       });
       setBusy(false);
       if (error) {
@@ -111,7 +112,7 @@ function LoginForm() {
       </button>
       <p className="text-center text-sm text-muted-foreground">
         New to Plaidware?{" "}
-        <Link href={`/signup?redirect=${encodeURIComponent(redirect)}`} className="text-primary hover:underline">
+        <Link href={withQuery(AUTH.signup, { redirect })} className="text-primary hover:underline">
           Create an account
         </Link>
       </p>

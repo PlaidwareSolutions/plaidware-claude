@@ -40,6 +40,7 @@ import { mintIngestKey } from "../monitoring/service";
 import { writeAudit } from "../audit/service";
 import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 import { subscriptionEventForStatusChange } from "../webhooks_out/logic";
+import { TENANT } from "@/lib/routes";
 
 // ---------------------------------------------------------------------------
 // Stripe object provisioning
@@ -864,7 +865,7 @@ async function onInvoicePaid(sub: typeof subscriptions.$inferSelect) {
         html: emailShell(
           `${product.name} is on the way`,
           `<p>Your payment is confirmed and your ${product.name} subscription is active. We're getting things ready — track everything from your dashboard.</p>` +
-            emailButton(`${env.APP_BASE_URL}/dashboard`, "Open dashboard"),
+            emailButton(`${env.APP_BASE_URL}${TENANT.dashboard}`, "Open dashboard"),
         ),
       });
     }
@@ -977,7 +978,7 @@ export async function sendUpcomingRenewalReminder(invoice: Stripe.Invoice): Prom
     html: emailShell(
       "Your renewal is coming up",
       `<p>Your ${product?.name ?? "Plaidware"} subscription renews${dueTs ? ` on ${formatDate(dueTs * 1000)}` : " soon"}. Your card on file will be charged automatically — nothing to do.</p><ul>${lines}</ul><p><strong>Total: ${formatCents(invoice.amount_due)}</strong></p>` +
-        emailButton(`${env.APP_BASE_URL}/billing`, "View billing"),
+        emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "View billing"),
     ),
   });
 }
@@ -1012,7 +1013,7 @@ export async function sendTrialEndingReminder(stripeSub: Stripe.Subscription) {
     html: emailShell(
       "Trial ending soon",
       `<p>Your free trial of ${product.name} ends in 3 days. Your saved payment method will then be charged${monthly ? ` ${formatCents(monthly)}/month` : ""} automatically. Nothing to do if you'd like to continue.</p>` +
-        emailButton(`${env.APP_BASE_URL}/billing`, "Manage billing"),
+        emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "Manage billing"),
     ),
   });
 }

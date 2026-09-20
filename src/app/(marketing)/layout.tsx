@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { hubUrl } from "@/lib/urls";
+import { AUTH } from "@/lib/routes";
 
 const NAV = [
   { href: "/products", label: "Products" },
@@ -26,10 +27,10 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           </nav>
           <div className="flex-1" />
           <Button asChild variant="ghost" size="sm">
-            <a href={hubUrl("/login")}>Sign in</a>
+            <a href={hubUrl(AUTH.login)}>Sign in</a>
           </Button>
           <Button asChild size="sm">
-            <a href={hubUrl("/signup")}>Get started</a>
+            <a href={hubUrl(AUTH.signup)}>Get started</a>
           </Button>
         </div>
       </header>

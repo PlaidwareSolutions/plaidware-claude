@@ -12,7 +12,7 @@ import { completeSetupPasswordAction, finalizeSetupAction, startSetupCheckoutAct
 import { PaymentForm } from "@/modules/billing/components/checkout-flow";
 import { authClient, useSession } from "@/lib/auth-client";
 import { formatCents } from "@/lib/money";
-import { AUTH, TENANT } from "@/lib/routes";
+import { AUTH, TENANT, withQuery } from "@/lib/routes";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,7 +62,7 @@ export function WelcomeFlow({
   const productNames = proposal.products.map((p) => p.productName).join(" + ");
   const welcomeReturnUrl =
     typeof window !== "undefined"
-      ? `${window.location.origin}/welcome/${token}?paid=1`
+      ? `${window.location.origin}${withQuery(AUTH.welcome(token), { paid: "1" })}`
       : undefined;
 
   /** Drive the server-side fan-out until every product is live. */

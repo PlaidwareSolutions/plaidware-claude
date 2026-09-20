@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { TENANT } from "@/lib/routes";
 
 function CheckEmail() {
   const email = useSearchParams().get("email") ?? "";
@@ -13,7 +14,7 @@ function CheckEmail() {
   async function resend() {
     if (!email) return;
     setBusy(true);
-    await authClient.sendVerificationEmail({ email, callbackURL: "/dashboard" });
+    await authClient.sendVerificationEmail({ email, callbackURL: TENANT.dashboard });
     setBusy(false);
     setSent(true);
   }

@@ -29,6 +29,7 @@ import {
   type InviteProductEntry,
   type ProposalProduct,
 } from "./proposal";
+import { AUTH } from "@/lib/routes";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const INVITE_DAYS = 14;
@@ -169,7 +170,7 @@ export async function createClientSetup(opts: {
     },
   });
 
-  const link = `${env.APP_BASE_URL}/welcome/${raw}`;
+  const link = `${env.APP_BASE_URL}${AUTH.welcome(raw)}`;
 
   if (opts.sendEmailToClient) {
     await sendSetupLinkEmail(invite.id, link);
@@ -688,7 +689,7 @@ export async function regenerateSetupLink(
     payload: { regenerated: true, inviteId, emailed: Boolean(opts.emailClient) },
   });
 
-  const link = `${env.APP_BASE_URL}/welcome/${raw}`;
+  const link = `${env.APP_BASE_URL}${AUTH.welcome(raw)}`;
   const sentTo = opts.emailClient ? await sendSetupLinkEmail(inviteId, link) : null;
   return { link, sentTo };
 }

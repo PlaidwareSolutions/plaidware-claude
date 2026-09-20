@@ -8,6 +8,7 @@ import { resolveRedirect } from "@/lib/safe-redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AUTH, withQuery } from "@/lib/routes";
 
 function SignupForm() {
   const router = useRouter();
@@ -87,7 +88,7 @@ function SignupForm() {
       </Button>
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href={`/login?redirect=${encodeURIComponent(redirect)}`} className="text-primary hover:underline">
+        <Link href={withQuery(AUTH.login, { redirect })} className="text-primary hover:underline">
           Sign in
         </Link>
       </p>

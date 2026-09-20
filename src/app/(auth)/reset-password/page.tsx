@@ -6,6 +6,7 @@ import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AUTH } from "@/lib/routes";
 
 function ResetForm() {
   const router = useRouter();
@@ -37,7 +38,7 @@ function ResetForm() {
       setError(error.message ?? "Reset failed");
       return;
     }
-    router.push("/login");
+    router.push(AUTH.login);
   }
 
   return (

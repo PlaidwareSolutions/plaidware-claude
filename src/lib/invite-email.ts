@@ -1,5 +1,6 @@
 import { env } from "../env";
 import { emailButton, emailShell, sendEmail } from "./email";
+import { AUTH } from "@/lib/routes";
 
 /** The workspace invitation email — sent by Better Auth's org plugin and by ops-side invites alike. */
 export async function sendInvitationEmail(opts: {
@@ -9,7 +10,7 @@ export async function sendInvitationEmail(opts: {
   inviterName: string;
   role: string;
 }): Promise<void> {
-  const url = `${env.APP_BASE_URL}/invite/${opts.invitationId}`;
+  const url = `${env.APP_BASE_URL}${AUTH.invite(opts.invitationId)}`;
   await sendEmail({
     to: opts.to,
     subject: `You're invited to ${opts.organizationName} on Plaidware`,

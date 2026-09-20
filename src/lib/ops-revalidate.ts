@@ -19,5 +19,5 @@ export function revalidateOps(...paths: string[]) {
 }
 
 export function revalidateTenantViews() {
-  for (const p of Object.values(TENANT)) revalidatePath(p);
+  for (const p of Object.values(TENANT)) if (typeof p === "string") revalidatePath(p);
 }
