@@ -21,6 +21,7 @@ import { subscriptionProvisioning } from "../provisioning/schema";
 import { writeAudit } from "../audit/service";
 import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 import { onboardingInvites } from "./schema";
+import { needsPasswordSetup } from "./setup-rules";
 import {
   buildProductProposal,
   combineTotals,
@@ -79,21 +80,29 @@ export async function createClientSetup(opts: {
     }
   }
 
-  // 1. Find or create the client's account (password set on the welcome page).
+  // 1. Find or create the client's account. A new row is inserted directly —
+  //    signUpEmail would also mail a "confirm your email" link, and clicking
+  //    that first used to break the set-password step. No credential account
+  //    exists until the client chooses a password on the welcome page.
   let clientUser = await db.query.user.findFirst({ where: eq(user.email, email) });
   if (!clientUser) {
     const [first, ...rest] = opts.clientName.trim().split(/\s+/);
-    await auth.api.signUpEmail({
-      body: {
-        email,
-        password: `Setup-${randomBytes(16).toString("hex")}`,
+    const now = new Date();
+    [clientUser] = await db
+      .insert(user)
+      .values({
+        id: crypto.randomUUID(),
         name: opts.clientName.trim(),
+        email,
+        emailVerified: false,
         firstName: first || "Client",
         lastName: rest.join(" ") || "-",
         phone: normalizePhone(opts.phone) ?? PLACEHOLDER_PHONE,
-      },
-    });
-    clientUser = (await db.query.user.findFirst({ where: eq(user.email, email) }))!;
+        platformRole: "customer",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
   } else if (opts.phone && normalizePhone(opts.phone) && clientUser.phone === PLACEHOLDER_PHONE) {
     await db.update(user).set({ phone: normalizePhone(opts.phone)! }).where(eq(user.id, clientUser.id));
   }
@@ -261,8 +270,12 @@ async function assembleProposal(inviteId: string): Promise<SetupProposal | null>
   });
   if (!invite || invite.products.length === 0) return null;
   const allComponentIds = invite.products.flatMap(entryComponentIds);
-  const [clientUser, productRows, comps, overrides, org] = await Promise.all([
+  const [clientUser, credential, productRows, comps, overrides, org] = await Promise.all([
     db.query.user.findFirst({ where: eq(user.id, invite.userId) }),
+    db.query.account.findFirst({
+      where: and(eq(account.userId, invite.userId), eq(account.providerId, "credential")),
+      columns: { password: true },
+    }),
     db.query.products.findMany({
       where: inArray(products.id, invite.products.map((p) => p.productId)),
     }),
@@ -299,8 +312,8 @@ async function assembleProposal(inviteId: string): Promise<SetupProposal | null>
     clientEmail: clientUser.email,
     tenantId: invite.tenantId,
     tenantName: org?.name ?? "your workspace",
-    // Password step needed while the account is still ops-provisioned (unverified).
-    needsPassword: !clientUser.emailVerified,
+    // Password step until the account has a password and a verified email.
+    needsPassword: needsPasswordSetup({ emailVerified: clientUser.emailVerified, credentialPassword: credential?.password }),
     products: proposalProducts,
     primaryIndex: pickPrimaryIndex(invite.products, (id) => recurringIds.has(id)),
     ...combineTotals(proposalProducts),
@@ -382,18 +395,34 @@ export async function completeSetupPassword(raw: string, newPassword: string): P
   }
   const clientUser = await db.query.user.findFirst({ where: eq(user.id, invite.userId) });
   if (!clientUser) throw new Error("Account not found");
-  // Only while the account is still ops-provisioned; afterwards use normal sign-in.
-  if (clientUser.emailVerified) {
+  const credential = await db.query.account.findFirst({
+    where: and(eq(account.userId, invite.userId), eq(account.providerId, "credential")),
+    columns: { id: true, password: true },
+  });
+  if (!needsPasswordSetup({ emailVerified: clientUser.emailVerified, credentialPassword: credential?.password })) {
     throw new Error("Password already set — sign in with your existing password");
   }
 
   const ctx = await auth.$context;
   const hash = await ctx.password.hash(newPassword);
-  await db
-    .update(account)
-    .set({ password: hash })
-    .where(and(eq(account.userId, invite.userId), eq(account.providerId, "credential")));
-  await db.update(user).set({ emailVerified: true }).where(eq(user.id, invite.userId));
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    if (credential) {
+      await tx.update(account).set({ password: hash }).where(eq(account.id, credential.id));
+    } else {
+      // Mirrors Better Auth's own credential account (accountId = userId).
+      await tx.insert(account).values({
+        id: crypto.randomUUID(),
+        accountId: invite.userId,
+        providerId: "credential",
+        userId: invite.userId,
+        password: hash,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    await tx.update(user).set({ emailVerified: true }).where(eq(user.id, invite.userId));
+  });
 }
 
 // ---------------------------------------------------------------------------

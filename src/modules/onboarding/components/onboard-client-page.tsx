@@ -44,7 +44,7 @@ type Section = {
 type Lookup =
   | { state: "idle" }
   | { state: "new" }
-  | { state: "existing"; name: string; workspace: { id: string; name: string } | null };
+  | { state: "existing"; name: string; needsPassword: boolean; workspace: { id: string; name: string } | null };
 
 export type OnboardInitial = { clientName?: string; clientEmail?: string; tenantName?: string; phone?: string };
 
@@ -83,7 +83,7 @@ export function OnboardClientPage({
     if (!res.ok) return;
     if (!res.exists) setLookup({ state: "new" });
     else {
-      setLookup({ state: "existing", name: res.name, workspace: res.workspace });
+      setLookup({ state: "existing", name: res.name, needsPassword: res.needsPassword, workspace: res.workspace });
       if (!client.name) setClient((c) => ({ ...c, name: res.name }));
     }
   }
@@ -289,9 +289,10 @@ export function OnboardClientPage({
                     <p className="text-xs text-success">
                       Existing account: {lookup.name}.{" "}
                       {lookup.workspace ? `Will attach to their workspace "${lookup.workspace.name}".` : "They own no workspace yet — one is created."}
+                      {lookup.needsPassword ? " They haven't set a password yet — the setup link will ask for one." : ""}
                     </p>
                   )}
-                  {lookup.state === "new" && <p className="text-xs text-muted-foreground">New account — they choose a password on the setup link.</p>}
+                  {lookup.state === "new" && <p className="text-xs text-muted-foreground">New account — no confirmation email; they choose a password on the setup link.</p>}
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="ob-name">Client name</Label>

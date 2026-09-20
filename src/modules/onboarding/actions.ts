@@ -2,12 +2,13 @@
 
 import { revalidateClientViews } from "@/lib/ops-revalidate";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { requireOps, requireUser } from "../../policy";
 import { normalizePhone } from "../../lib/phone";
-import { user } from "../auth/schema";
+import { account, user } from "../auth/schema";
 import { getUserTenants } from "../tenancy/queries";
+import { needsPasswordSetup } from "./setup-rules";
 import { createCheckout, type CheckoutResult } from "../billing/service";
 import {
   applyInvitePricing,
@@ -76,7 +77,7 @@ export async function lookupClientEmailAction(
   email: string,
 ): Promise<
   | { ok: true; exists: false }
-  | { ok: true; exists: true; name: string; workspace: { id: string; name: string } | null }
+  | { ok: true; exists: true; name: string; needsPassword: boolean; workspace: { id: string; name: string } | null }
   | { ok: false; error: string }
 > {
   try {
@@ -84,11 +85,19 @@ export async function lookupClientEmailAction(
     const addr = z.string().email().parse(email.trim().toLowerCase());
     const existing = await db.query.user.findFirst({ where: eq(user.email, addr) });
     if (!existing) return { ok: true, exists: false };
-    const owned = (await getUserTenants(existing.id)).find((t) => t.role === "owner") ?? null;
+    const [tenants, credential] = await Promise.all([
+      getUserTenants(existing.id),
+      db.query.account.findFirst({
+        where: and(eq(account.userId, existing.id), eq(account.providerId, "credential")),
+        columns: { password: true },
+      }),
+    ]);
+    const owned = tenants.find((t) => t.role === "owner") ?? null;
     return {
       ok: true,
       exists: true,
       name: existing.name,
+      needsPassword: needsPasswordSetup({ emailVerified: existing.emailVerified, credentialPassword: credential?.password }),
       workspace: owned ? { id: owned.id, name: owned.name } : null,
     };
   } catch (e) {

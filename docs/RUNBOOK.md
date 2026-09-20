@@ -99,3 +99,18 @@ is single-step: one confirmation link goes to the NEW address (locally it
 appears in the `[email:dev]` log) and a notice goes to the old one; the audit
 row `email_change_requested` lands in the Access tab's Platform activity.
 Better Auth's raw `/update-user` and `/change-email` routes are disabled.
+
+## Client onboarding links and invitations
+
+- **Setup links** (`/ops/clients/new`, `src/modules/onboarding`): a new client is
+  created as an unverified row with no password and gets exactly one email —
+  the setup link (no "confirm your email" mail; the link's password step
+  creates the credential account and verifies the address). Open links can be
+  **re-sent as-is** (the same `/welcome/<token>` stays valid; the raw token is
+  kept encrypted under `CREDENTIALS_ENCRYPTION_KEY` — rows made before that
+  can only be regenerated), **regenerated** (new token, old link dead) or
+  **revoked**. A Resend failure is reported to ops instead of swallowed.
+- **Workspace invitations** (Team page, People tab): valid 7 days; "Resend"
+  re-mails the same invitation and moves the expiry forward; the link shows
+  who invited whom where and locks signup to the invited address; accepting
+  needs a verified session matching that address.
