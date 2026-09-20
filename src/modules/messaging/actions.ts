@@ -2,12 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { OPS, TENANT } from "@/lib/routes";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../../db";
-import { requireMembership, requireOps, requireUser, isOps } from "../../policy";
-import { messageThreads } from "./schema";
-import { closeThread, createThread, replyToThread } from "./service";
+import { requireMembership, requireOps } from "../../policy";
+import { closeThread, createThread, getThreadTenantId, replyToThread } from "./service";
 
 type R = { ok: boolean; error?: string };
 const fail = (e: unknown): R => ({ ok: false, error: e instanceof Error ? e.message : "Failed" });
@@ -22,15 +19,15 @@ const createSchema = z.object({
 export async function createThreadAction(input: z.infer<typeof createSchema>): Promise<R> {
   try {
     const p = createSchema.parse(input);
-    const session = await requireUser();
-    const ops = isOps(session);
-    if (!ops) await requireMembership(p.tenantId, "write");
+    // Messaging support is a read-level right: every member, in any
+    // workspace status, can ask Plaidware for help.
+    const { session, role } = await requireMembership(p.tenantId, "read");
     await createThread({
       tenantId: p.tenantId,
       subject: p.subject,
       body: p.body,
       senderUserId: session.user.id,
-      senderRole: ops ? "ops" : "tenant",
+      senderRole: role === "ops" ? "ops" : "tenant",
       subscriptionId: p.subscriptionId,
     });
     revalidatePath(TENANT.inbox);
@@ -43,18 +40,14 @@ export async function createThreadAction(input: z.infer<typeof createSchema>): P
 
 export async function replyAction(threadId: string, body: string): Promise<R> {
   try {
-    const session = await requireUser();
-    const thread = await db.query.messageThreads.findFirst({
-      where: eq(messageThreads.id, threadId),
-    });
-    if (!thread) throw new Error("Thread not found");
-    const ops = isOps(session);
-    if (!ops) await requireMembership(thread.tenantId, "write");
+    const tenantId = await getThreadTenantId(threadId);
+    if (!tenantId) throw new Error("Thread not found");
+    const { session, role } = await requireMembership(tenantId, "read");
     await replyToThread({
       threadId,
       body: z.string().min(1).max(5000).parse(body),
       senderUserId: session.user.id,
-      senderRole: ops ? "ops" : "tenant",
+      senderRole: role === "ops" ? "ops" : "tenant",
     });
     revalidatePath(TENANT.inbox);
     revalidatePath(OPS.inbox);

@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../../db";
-import { organization } from "../auth/schema";
+import { organization, user } from "../auth/schema";
 import { messageThreads, messages } from "./schema";
 
 export type ThreadRow = {
@@ -71,6 +71,23 @@ export async function unreadCount(viewer: Viewer, tenantId?: string): Promise<nu
   return Number(rows[0]?.n ?? 0);
 }
 
+export type ThreadMessage = {
+  id: string;
+  senderRole: Viewer;
+  senderName: string | null;
+  body: string;
+  createdAt: string;
+};
+
+/** The tenant a thread belongs to, for authorising a reply. */
+export async function getThreadTenantId(threadId: string): Promise<string | null> {
+  const row = await db.query.messageThreads.findFirst({
+    where: eq(messageThreads.id, threadId),
+    columns: { tenantId: true },
+  });
+  return row?.tenantId ?? null;
+}
+
 export async function getThreadWithMessages(threadId: string, viewer: Viewer) {
   const thread = await db.query.messageThreads.findFirst({
     where: eq(messageThreads.id, threadId),
@@ -87,11 +104,24 @@ export async function getThreadWithMessages(threadId: string, viewer: Viewer) {
         viewer === "tenant" ? isNull(messages.readByTenantAt) : isNull(messages.readByOpsAt),
       ),
     );
-  const rows = await db.query.messages.findMany({
-    where: eq(messages.threadId, threadId),
-    orderBy: [messages.createdAt],
-  });
-  return { thread, messages: rows };
+  const rows = await db
+    .select({
+      id: messages.id,
+      senderRole: messages.senderRole,
+      senderName: user.name,
+      body: messages.body,
+      createdAt: messages.createdAt,
+    })
+    .from(messages)
+    .leftJoin(user, eq(messages.senderUserId, user.id))
+    .where(eq(messages.threadId, threadId))
+    .orderBy(messages.createdAt);
+  const result: ThreadMessage[] = rows.map((m) => ({
+    ...m,
+    senderName: m.senderName ?? null,
+    createdAt: m.createdAt.toISOString(),
+  }));
+  return { thread, messages: result };
 }
 
 export async function createThread(opts: {

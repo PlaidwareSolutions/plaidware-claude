@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { MessageSquare, Plus, Send } from "lucide-react";
-import type { ThreadRow } from "../service";
+import type { ThreadMessage, ThreadRow } from "../service";
 import { closeThreadAction, createThreadAction, replyAction } from "../actions";
 import { OPS, TENANT, withQuery } from "@/lib/routes";
 import { formatDateTime } from "@/lib/dates";
@@ -20,13 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-export type MessageDto = {
-  id: string;
-  senderRole: string;
-  senderName: string | null;
-  body: string;
-  createdAt: string;
-};
+export type MessageDto = ThreadMessage;
 
 export function InboxView({
   scope,
