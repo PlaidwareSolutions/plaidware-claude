@@ -11,10 +11,15 @@
  */
 export const ORG_BROWSER_ALLOWLIST: readonly string[] = ["/organization/accept-invitation"];
 
-/** The `/organization/*` paths to hand to Better Auth's `disabledPaths`. */
-export function disabledOrgPaths(paths: readonly string[]): string[] {
+/**
+ * The `/organization/*` paths to hand to Better Auth's `disabledPaths`.
+ * Accepts the plugin's raw endpoint paths, some of which are not strings
+ * (helper entries without a route), and ignores those.
+ */
+export function disabledOrgPaths(paths: readonly unknown[]): string[] {
   const disabled = new Set<string>();
   for (const p of paths) {
+    if (typeof p !== "string") continue;
     if (p.startsWith("/organization/") && !ORG_BROWSER_ALLOWLIST.includes(p)) disabled.add(p);
   }
   return [...disabled].sort();

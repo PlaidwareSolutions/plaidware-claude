@@ -24,6 +24,9 @@ describe("disabledOrgPaths", () => {
     ]);
     expect(out).not.toContain("/organization/accept-invitation");
   });
+  it("ignores endpoint entries that have no path", () => {
+    expect(disabledOrgPaths([undefined, null, 42, "/organization/create"])).toEqual(["/organization/create"]);
+  });
   it("never touches non-organization paths", () => {
     expect(disabledOrgPaths(PATHS)).not.toContain("/sign-in/email");
     expect(disabledOrgPaths(["/sign-in/email"])).toEqual([]);
