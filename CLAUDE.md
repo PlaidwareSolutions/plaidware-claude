@@ -22,9 +22,20 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   contracts get route handlers: `/api/auth/[...all]`, `/api/system/health`,
   (later) `/api/metrics/ingest`, `/api/webhooks/stripe`.
 - **Authorization**: everything goes through `src/policy/` (requireUser,
-  requireOps, requireMembership). Never inline role checks.
-- **Auth**: Better Auth + organization plugin (tenants = organizations,
-  4 roles: owner/admin/billing/member in `src/lib/org-roles.ts`).
+  requireOps(min), requireMembership, getTenantContext/requireTenantPage for
+  client pages). Never inline role checks. Pure decision logic lives in
+  `src/policy/{capabilities,tenant-status,org-guards}.ts` (client/test-safe).
+- **Roles**: one table in `src/lib/roles.ts`. Tenant roles
+  owner/admin/billing/member (caps read/billing/write/team; owner only by
+  transfer); platform roles customer/ops_support/ops_admin (support = read
+  ops portal + messaging/triage; admin = everything, bypasses membership).
+  `org-roles.ts` derives Better Auth's statements from it. Platform roles are
+  granted only via /ops/system/access (audited) or scripts/create-ops-admin.ts.
+  Members request tenant role changes from /team; owners/admins/ops decide.
+- **Auth**: Better Auth + organization plugin (tenants = organizations).
+  Every `/api/auth/organization/*` route except accept-invitation is disabled
+  over HTTP (`src/lib/org-http-surface.ts`); org mutations go through server
+  actions + `auth.api.*`, guarded by before-hooks (status gate, unique owner).
   Signup is email-verification-gated; login before verify → EMAIL_NOT_VERIFIED.
 - **DB**: Postgres + Drizzle. Schema barrel: `src/db/schema.ts` re-exports every
   module schema; migrations committed in `drizzle/`. Money = integer cents
