@@ -21,5 +21,10 @@ export const auditLogs = pgTable(
   (t) => [
     index("audit_logs_tenant_idx").on(t.tenantId, t.createdAt),
     index("audit_logs_platform_idx").on(t.createdAt).where(sql`${t.tenantId} is null`),
+    // The per-user timeline (ops user page) unions "did" and "done to them";
+    // each arm gets its own index so Postgres can BitmapOr them.
+    index("audit_logs_actor_idx").on(t.actorUserId, t.createdAt),
+    index("audit_logs_target_user_idx").on(sql`(${t.payload}->>'targetUserId')`),
+    index("audit_logs_payload_user_idx").on(sql`(${t.payload}->>'userId')`),
   ],
 );

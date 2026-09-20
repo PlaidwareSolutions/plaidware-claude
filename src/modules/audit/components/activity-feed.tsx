@@ -62,6 +62,7 @@ export function ActivityFeed({
                   {detail && <span className="text-muted-foreground"> — {detail}</span>}
                   <div className="text-xs text-muted-foreground" title={formatDateTime(e.createdAt)}>
                     {e.actorName ?? "System"} · {formatRelative(e.createdAt)} · {formatDateTime(e.createdAt)}
+                    {e.context && <span className="opacity-70"> · {e.context}</span>}
                   </div>
                 </div>
               </li>
