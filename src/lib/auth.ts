@@ -6,10 +6,86 @@ import { env } from "../env";
 import { sendEmail, emailShell, emailButton } from "./email";
 import { sendInvitationEmail } from "./invite-email";
 import { ac, orgRoles } from "./org-roles";
+import { disabledOrgPaths } from "./org-http-surface";
 import {
   emitMembershipChanged,
   emitOrganizationUpdated,
 } from "../modules/webhooks_out/service";
+
+/**
+ * Tenant = Better Auth organization. Instantiated once so the HTTP surface
+ * below can be derived from the endpoints it registers.
+ */
+const orgPlugin = organization({
+  ac,
+  roles: orgRoles,
+  creatorRole: "owner",
+  // Workspaces are created only by a first purchase (createCheckoutAction)
+  // or ops onboarding, and deleted only by ops (deleteTenant, which refuses
+  // while subscriptions are live). Never through Better Auth's own routes.
+  allowUserToCreateOrganization: false,
+  disableOrganizationDeletion: true,
+  schema: {
+    organization: {
+      additionalFields: {
+        // 'active' | 'suspended' | 'inactive' — tenant lifecycle (PRD §4.2)
+        status: { type: "string", defaultValue: "active", input: false },
+        // Billing identity lives on the tenant, not the user (PRD §2)
+        stripeCustomerId: { type: "string", required: false, input: false },
+      },
+    },
+  },
+  // MHub lifecycle (integration contract §B): org/membership changes made
+  // through Better Auth surface here. The emit functions no-op unless the
+  // org holds a live marketing-* subscription, and never throw.
+  // Direct-Drizzle mutations (transferOwnership) emit at their own sites.
+  organizationHooks: {
+    afterUpdateOrganization: async ({ organization: org }) => {
+      if (org) await emitOrganizationUpdated(org.id);
+    },
+    afterAddMember: async ({ member }) => {
+      await emitMembershipChanged({
+        orgId: member.organizationId,
+        userId: member.userId,
+        role: member.role,
+        action: "added",
+      });
+    },
+    afterAcceptInvitation: async ({ member }) => {
+      await emitMembershipChanged({
+        orgId: member.organizationId,
+        userId: member.userId,
+        role: member.role,
+        action: "added",
+      });
+    },
+    afterUpdateMemberRole: async ({ member }) => {
+      await emitMembershipChanged({
+        orgId: member.organizationId,
+        userId: member.userId,
+        role: member.role,
+        action: "updated",
+      });
+    },
+    afterRemoveMember: async ({ member }) => {
+      await emitMembershipChanged({
+        orgId: member.organizationId,
+        userId: member.userId,
+        role: member.role,
+        action: "removed",
+      });
+    },
+  },
+  sendInvitationEmail: async (data) => {
+    await sendInvitationEmail({
+      to: data.email,
+      invitationId: data.id,
+      organizationName: data.organization.name,
+      inviterName: data.inviter.user.name,
+      role: data.role,
+    });
+  },
+});
 
 export const auth = betterAuth({
   baseURL: env.APP_BASE_URL,
@@ -19,6 +95,10 @@ export const auth = betterAuth({
     ...(env.TRUSTED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
   ],
   database: drizzleAdapter(db, { provider: "pg" }),
+  // Org mutations are server-side only (src/lib/org-http-surface.ts): every
+  // /organization/* route except accept-invitation is 404 over HTTP.
+  // auth.api.* calls skip the router, so server actions are unaffected.
+  disabledPaths: disabledOrgPaths(Object.values(orgPlugin.endpoints).map((e) => e.path)),
 
   advanced: {
     // Session shared with sibling apps (marketing.plaidware.com) via
@@ -100,71 +180,7 @@ export const auth = betterAuth({
         });
       },
     }),
-    organization({
-      ac,
-      roles: orgRoles,
-      creatorRole: "owner",
-      schema: {
-        organization: {
-          additionalFields: {
-            // 'active' | 'suspended' | 'inactive' — tenant lifecycle (PRD §4.2)
-            status: { type: "string", defaultValue: "active", input: false },
-            // Billing identity lives on the tenant, not the user (PRD §2)
-            stripeCustomerId: { type: "string", required: false, input: false },
-          },
-        },
-      },
-      // MHub lifecycle (integration contract §B): org/membership changes made
-      // through Better Auth surface here. The emit functions no-op unless the
-      // org holds a live marketing-* subscription, and never throw.
-      // Direct-Drizzle mutations (transferOwnership) emit at their own sites.
-      organizationHooks: {
-        afterUpdateOrganization: async ({ organization: org }) => {
-          if (org) await emitOrganizationUpdated(org.id);
-        },
-        afterAddMember: async ({ member }) => {
-          await emitMembershipChanged({
-            orgId: member.organizationId,
-            userId: member.userId,
-            role: member.role,
-            action: "added",
-          });
-        },
-        afterAcceptInvitation: async ({ member }) => {
-          await emitMembershipChanged({
-            orgId: member.organizationId,
-            userId: member.userId,
-            role: member.role,
-            action: "added",
-          });
-        },
-        afterUpdateMemberRole: async ({ member }) => {
-          await emitMembershipChanged({
-            orgId: member.organizationId,
-            userId: member.userId,
-            role: member.role,
-            action: "updated",
-          });
-        },
-        afterRemoveMember: async ({ member }) => {
-          await emitMembershipChanged({
-            orgId: member.organizationId,
-            userId: member.userId,
-            role: member.role,
-            action: "removed",
-          });
-        },
-      },
-      sendInvitationEmail: async (data) => {
-        await sendInvitationEmail({
-          to: data.email,
-          invitationId: data.id,
-          organizationName: data.organization.name,
-          inviterName: data.inviter.user.name,
-          role: data.role,
-        });
-      },
-    }),
+    orgPlugin,
   ],
 });
 
