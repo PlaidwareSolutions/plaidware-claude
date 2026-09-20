@@ -13,6 +13,8 @@ import {
 } from "../actions";
 import { RoleRequestDialog } from "./role-request-dialog";
 import { RoleRequestsSection } from "./role-requests-section";
+import { RoleMatrix } from "@/components/role-matrix";
+import { tenantRoleMatrix } from "@/lib/role-matrices";
 import { formatDate, formatRelative } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
 import { useConfirm } from "@/components/confirm-dialog";
@@ -237,6 +239,16 @@ export function TeamManager({
           </Table>
         </DataTableShell>
       </Section>
+
+      <details className="rounded-lg border bg-card px-4 py-3 text-sm">
+        <summary className="cursor-pointer font-medium text-heading">What each role can do</summary>
+        <div className="mt-3 flex flex-col gap-2">
+          <RoleMatrix data={tenantRoleMatrix()} highlightRow={selfRole} />
+          <p className="text-xs text-muted-foreground">
+            {readOnlyReason ?? "Owners and admins change roles above; billing and member roles can request a change."}
+          </p>
+        </div>
+      </details>
 
       {invites.length > 0 && (
         <Section title="Pending invitations" icon={MailPlus} count={invites.length}>

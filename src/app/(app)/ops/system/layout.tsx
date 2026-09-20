@@ -14,6 +14,7 @@ export default async function SystemLayout({ children }: { children: React.React
         <LinkTabs
           items={[
             { href: OPS.access, label: "Access" },
+            { href: OPS.roles, label: "Roles" },
             { href: OPS.webhooks, label: "Webhooks", count: dead },
             { href: OPS.costs, label: "Costs" },
             ...(env.PROMOS_ENABLED === "true" ? [{ href: OPS.promos, label: "Promos" }] : []),

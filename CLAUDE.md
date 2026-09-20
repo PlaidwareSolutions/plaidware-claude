@@ -89,6 +89,12 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   mutations in client code via `useAction()`; one `<PageHeader>` per route,
   `<Section>`, `<StatTile>`, `<DataTableShell>`/`<TableEmpty>`, `<EmptyState>`.
   Pages call module `queries.ts` only — no raw `db.query` in page.tsx.
+- User management: `/ops/users/[id]` (layout + tabs Overview|workspaces|sessions|activity,
+  module `src/modules/access`) is one account — role, disable/re-enable (Better Auth
+  session hook refuses disabled accounts), set-password link, session revocation, and
+  a cross-workspace audit timeline. `/ops/system/roles` is the read-only roles &
+  permissions reference (`src/lib/role-matrices.ts` derived from the role tables;
+  `src/lib/permissions-reference.ts` hand-kept — update it when a guard changes).
 - Semantics: workspace status gates members via `policy.requireMembership`
   (suspended = read + billing; inactive = read); subscription holds carry
   `suspension_source` ('dunning' lifts on payment, 'manual' only by ops) and
