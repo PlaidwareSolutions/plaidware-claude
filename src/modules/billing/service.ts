@@ -6,6 +6,7 @@ import { emailButton, emailShell, sendEmail } from "../../lib/email";
 import { formatCents } from "../../lib/money";
 import { formatDate } from "../../lib/dates";
 import { env } from "../../env";
+import { tenantStatusAllows, tenantStatusMessage } from "../../policy/tenant-status";
 import { member, organization, user } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
 import {
@@ -176,6 +177,16 @@ export async function createCheckout(opts: {
   offSession?: { paymentMethodId: string };
 }): Promise<CheckoutResult> {
   const stripe = getStripe();
+
+  // The workspace must be able to take on new products: a suspended one can
+  // pay its way out but not buy, an inactive one can't do either. Checked
+  // here so every entry point (self-serve, setup links) shares the rule.
+  const org = await db.query.organization.findFirst({
+    where: eq(organization.id, opts.tenantId),
+    columns: { status: true },
+  });
+  if (!org) throw new Error("Tenant not found");
+  if (!tenantStatusAllows(org.status, "write")) throw new Error(tenantStatusMessage(org.status));
 
   const product = await db.query.products.findFirst({
     where: eq(products.id, opts.productId),

@@ -21,10 +21,13 @@ const label = (c: { kind: string; interval?: string | null; intervalCount?: numb
 
 export function CheckoutFlow({
   product,
+  tenantId = null,
   publishableKey,
   promosEnabled = false,
 }: {
   product: ProductDto;
+  /** The workspace whose prices are shown; the purchase is pinned to it. */
+  tenantId?: string | null;
   publishableKey: string;
   promosEnabled?: boolean;
 }) {
@@ -72,6 +75,7 @@ export function CheckoutFlow({
       productId: product.id,
       componentIds: [...optional],
       promoCode: promoCode.trim() || undefined,
+      tenantId: tenantId ?? undefined,
     });
     setBusy(false);
     if (!res.ok) {

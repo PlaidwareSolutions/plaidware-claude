@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { TENANT } from "@/lib/routes";
 import { z } from "zod";
 import { env } from "../../env";
-import { requireMembership, requireUser } from "../../policy";
+import { isOps, requireMembership, requireUser } from "../../policy";
 import { getUserTenants } from "../tenancy/queries";
+import { pickActiveTenant } from "../tenancy/active-tenant";
 import { createTenantWithOwner, uniqueSlug } from "../tenancy/service";
 import {
   cancelSubscription,
@@ -41,16 +42,17 @@ export async function createCheckoutAction(
     const tenants = await getUserTenants(session.user.id);
     let tenant =
       (parsed.tenantId ? tenants.find((t) => t.id === parsed.tenantId) : null) ??
-      tenants.find((t) => t.id === session.session.activeOrganizationId) ??
-      tenants[0] ??
-      null;
+      pickActiveTenant(tenants, session.session.activeOrganizationId);
     if (parsed.tenantId && tenant?.id !== parsed.tenantId) {
       return { ok: false, error: "You don't have access to that workspace." };
     }
-    if (tenant && !["owner", "admin"].includes(tenant.role)) {
-      return { ok: false, error: "Ask a workspace owner or admin to make purchases." };
-    }
-    if (!tenant) {
+    if (tenant) {
+      // Role (owner/admin) and workspace status (suspended: pay, don't buy)
+      // are both decided by policy, not here.
+      await requireMembership(tenant.id, "write");
+    } else if (isOps(session)) {
+      return { ok: false, error: "Ops accounts don't own workspaces. Onboard the client instead." };
+    } else {
       const name =
         `${session.user.name}'s workspace`.length > 60
           ? "My workspace"

@@ -86,8 +86,9 @@ export async function requireMembership(tenantId: string, cap: TenantCapability)
     .innerJoin(organization, eq(member.organizationId, organization.id))
     .where(and(eq(member.organizationId, tenantId), eq(member.userId, session.user.id)))
     .limit(1);
-  if (!m || !roleHasCapability(m.role, cap)) {
-    throw new PolicyError(403, "You don't have access to this workspace");
+  if (!m) throw new PolicyError(403, "You don't have access to this workspace");
+  if (!roleHasCapability(m.role, cap)) {
+    throw new PolicyError(403, `Your role (${m.role}) can't do this. Ask a workspace owner or admin.`);
   }
   if (!tenantStatusAllows(m.status, cap)) {
     throw new PolicyError(403, tenantStatusMessage(m.status));
