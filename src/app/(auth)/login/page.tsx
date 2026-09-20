@@ -48,7 +48,7 @@ function LoginForm() {
     setBusy(false);
     if (error) {
       if (error.code === "EMAIL_NOT_VERIFIED") {
-        router.push(`/check-email?email=${encodeURIComponent(email)}`);
+        router.push(withQuery(AUTH.checkEmail, { email }));
         return;
       }
       setError(error.message ?? "Sign in failed");
@@ -89,7 +89,7 @@ function LoginForm() {
         <div className="grid gap-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="password">Password</Label>
-            <Link href="/forgot-password" className="text-xs text-primary hover:underline">
+            <Link href={AUTH.forgotPassword} className="text-xs text-primary hover:underline">
               Forgot password?
             </Link>
           </div>

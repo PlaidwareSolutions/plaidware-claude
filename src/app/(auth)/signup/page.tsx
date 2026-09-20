@@ -53,7 +53,7 @@ function SignupForm() {
       setError(error.message ?? "Sign up failed");
       return;
     }
-    router.push(`/check-email?email=${encodeURIComponent(form.email)}`);
+    router.push(withQuery(AUTH.checkEmail, { email: form.email }));
   }
 
   return (

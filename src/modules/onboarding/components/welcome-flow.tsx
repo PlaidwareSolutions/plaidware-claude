@@ -388,7 +388,7 @@ export function WelcomeFlow({
               <Button type="submit" disabled={busy || !signInPw}>
                 {busy ? "Signing in…" : "Sign in & continue"}
               </Button>
-              <Link href="/forgot-password" className="text-center text-xs text-primary hover:underline">
+              <Link href={AUTH.forgotPassword} className="text-center text-xs text-primary hover:underline">
                 Forgot password?
               </Link>
             </form>

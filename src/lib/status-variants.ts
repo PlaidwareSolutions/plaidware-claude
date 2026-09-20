@@ -25,6 +25,8 @@ export type StatusKind =
   | "verification"
   | "invite"
   | "roleRequest"
+  | "accountStatus"
+  | "session"
   | "workItem"
   | "workType"
   | "workPriority"
@@ -137,6 +139,13 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
     approved: { variant: "success" },
     denied: { variant: "destructive", label: "declined" },
     canceled: { variant: "outline", label: "withdrawn" },
+  },
+  accountStatus: {
+    active: { variant: "success" },
+    disabled: { variant: "destructive" },
+  },
+  session: {
+    current: { variant: "success", label: "this device" },
   },
   workItem: {
     backlog: { variant: "outline" },

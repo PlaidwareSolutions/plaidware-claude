@@ -5,6 +5,7 @@ import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AUTH } from "@/lib/routes";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -15,7 +16,7 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setBusy(true);
     // Always report success — no account enumeration (PRD §4.1).
-    await authClient.requestPasswordReset({ email, redirectTo: "/reset-password" });
+    await authClient.requestPasswordReset({ email, redirectTo: AUTH.resetPassword });
     setBusy(false);
     setDone(true);
   }

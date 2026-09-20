@@ -22,6 +22,13 @@ export function revalidateTenantViews() {
   for (const p of Object.values(TENANT)) if (typeof p === "string") revalidatePath(p);
 }
 
+/** Every surface that shows one account: the Access table, the user's page (all tabs), the ops home counts. */
+export function revalidateUserViews(userId: string) {
+  revalidatePath(OPS.access);
+  revalidatePath(OPS.user(userId), "layout");
+  revalidatePath(OPS.home);
+}
+
 /** Every work-area surface that shows a board's items: overview, my work, the board's tab group, one item. */
 export function revalidateWorkViews(slug?: string, number?: number) {
   revalidatePath(WORK.home);

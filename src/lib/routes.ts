@@ -1,6 +1,7 @@
 export type ClientTab = "billing" | "provisioning" | "monitoring" | "people" | "activity";
 export type ProductTab = "pricing" | "kpis" | "defaults" | "subscribers";
 export type WorkTab = "backlog" | "sprints" | "settings";
+export type UserTab = "workspaces" | "sessions" | "activity";
 
 /**
  * Every internal path, in one place — used for <Link href> and for
@@ -23,6 +24,10 @@ export const OPS = {
   leads: "/ops/inbox/leads",
   system: "/ops/system",
   access: "/ops/system/access",
+  /** One account: profile, workspaces, sessions, activity (the Access tab is the index). */
+  user: (id: string) => `/ops/users/${id}`,
+  userTab: (id: string, tab: UserTab) => `/ops/users/${id}/${tab}`,
+  roles: "/ops/system/roles",
   webhooks: "/ops/system/webhooks",
   costs: "/ops/system/costs",
   promos: "/ops/system/promos",
@@ -35,6 +40,8 @@ export const TENANT = {
   inbox: "/inbox",
   team: "/team",
   settings: "/settings",
+  /** Where a confirmed email change lands (the page turns the query into a toast). */
+  settingsAfterEmailChange: () => withQuery("/settings", { email: "changed" }),
   checkout: "/checkout",
   /** Checkout for one product, in the session's active workspace. */
   checkoutFor: (slug: string) => withQuery("/checkout", { product: slug }),
@@ -63,6 +70,8 @@ export const WORK = {
 export const AUTH = {
   login: "/login",
   signup: "/signup",
+  checkEmail: "/check-email",
+  forgotPassword: "/forgot-password",
   resetPassword: "/reset-password",
   invite: (id: string) => `/invite/${id}`,
   welcome: (token: string) => `/welcome/${token}`,

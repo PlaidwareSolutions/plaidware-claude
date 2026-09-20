@@ -20,6 +20,8 @@ describe("status variants", () => {
     expect(statusVariant("tenantRole", "billing").label).toBe("billing");
     expect(statusVariant("roleRequest", "pending").variant).toBe("warning");
     expect(statusVariant("roleRequest", "denied").label).toBe("declined");
+    expect(statusVariant("accountStatus", "disabled").variant).toBe("destructive");
+    expect(statusVariant("session", "current")).toEqual({ variant: "success", label: "this device" });
   });
 
   it("covers the work area", () => {
