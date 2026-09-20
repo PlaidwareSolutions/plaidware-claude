@@ -1,7 +1,7 @@
-import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "../../db";
-import { member, organization, session, user } from "../auth/schema";
-import { isPlatformRole, type PlatformRole } from "@/lib/roles";
+import { account, member, organization, session, user } from "../auth/schema";
+import { PLATFORM_ROLES, isPlatformRole, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
 
 export type PlatformUserRow = {
   id: string;
@@ -92,4 +92,114 @@ export async function countActiveOpsAdmins(): Promise<number> {
     .from(user)
     .where(and(eq(user.platformRole, "ops_admin"), isNull(user.disabledAt)));
   return Number(row?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// One account (the ops user page)
+// ---------------------------------------------------------------------------
+
+export type PlatformUserDetail = {
+  id: string;
+  name: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  platformRole: string;
+  emailVerified: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  lastSeenAt: Date | null;
+  disabledAt: Date | null;
+  disabledReason: string | null;
+  /** A credential account with a password exists (else the set-password link is a first-time setup). */
+  hasPassword: boolean;
+  activeSessionCount: number;
+  membershipCount: number;
+};
+
+export async function getPlatformUser(id: string): Promise<PlatformUserDetail | null> {
+  const u = await db.query.user.findFirst({ where: eq(user.id, id) });
+  if (!u) return null;
+  const now = new Date();
+  const [cred, [seen], [active], [mem]] = await Promise.all([
+    db.query.account.findFirst({
+      where: and(eq(account.userId, id), eq(account.providerId, "credential")),
+      columns: { password: true },
+    }),
+    db.select({ last: sql<Date | null>`max(${session.updatedAt})` }).from(session).where(eq(session.userId, id)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(session)
+      .where(and(eq(session.userId, id), gt(session.expiresAt, now))),
+    db.select({ n: sql<number>`count(*)` }).from(member).where(eq(member.userId, id)),
+  ]);
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    firstName: u.firstName,
+    lastName: u.lastName,
+    phone: u.phone,
+    platformRole: u.platformRole ?? "customer",
+    emailVerified: u.emailVerified,
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
+    lastSeenAt: seen?.last ?? null,
+    disabledAt: u.disabledAt ?? null,
+    disabledReason: u.disabledReason ?? null,
+    hasPassword: !!cred?.password,
+    activeSessionCount: Number(active?.n ?? 0),
+    membershipCount: Number(mem?.n ?? 0),
+  };
+}
+
+export type UserSessionRow = {
+  id: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  expiresAt: Date;
+  expired: boolean;
+  activeTenant: { id: string; name: string } | null;
+};
+
+/** A person's sessions, newest activity first; never the token. */
+export async function listUserSessions(userId: string, limit = 50): Promise<UserSessionRow[]> {
+  const now = new Date();
+  const rows = await db
+    .select({
+      id: session.id,
+      ipAddress: session.ipAddress,
+      userAgent: session.userAgent,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      expiresAt: session.expiresAt,
+      tenantId: organization.id,
+      tenantName: organization.name,
+    })
+    .from(session)
+    .leftJoin(organization, eq(session.activeOrganizationId, organization.id))
+    .where(eq(session.userId, userId))
+    .orderBy(desc(session.updatedAt))
+    .limit(limit);
+  return rows.map(({ tenantId, tenantName, ...r }) => ({
+    ...r,
+    ipAddress: r.ipAddress || null,
+    userAgent: r.userAgent || null,
+    expired: r.expiresAt <= now,
+    activeTenant: tenantId && tenantName ? { id: tenantId, name: tenantName } : null,
+  }));
+}
+
+/** How many accounts hold each platform role (null rows count as customers). */
+export async function countUsersByPlatformRole(): Promise<Record<PlatformRole, number>> {
+  const rows = await db
+    .select({ role: user.platformRole, n: sql<number>`count(*)` })
+    .from(user)
+    .groupBy(user.platformRole);
+  const out = Object.fromEntries(PLATFORM_ROLES.map((r) => [r, 0])) as Record<PlatformRole, number>;
+  for (const r of rows) out[normalizePlatformRole(r.role)] += Number(r.n);
+  return out;
 }

@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { invitation, member, organization, session, user } from "../auth/schema";
 import { roleRequests } from "./schema";
+import { TENANT_ROLES, isTenantRole, type TenantRole } from "@/lib/roles";
 import { subscriptions } from "../billing/schema";
 import { products } from "../catalog/schema";
 import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
@@ -285,4 +286,49 @@ export async function countPendingRoleRequests(tenantId: string): Promise<number
     .from(roleRequests)
     .where(and(eq(roleRequests.tenantId, tenantId), eq(roleRequests.status, "pending")));
   return Number(row?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// One person across workspaces (the ops user page)
+// ---------------------------------------------------------------------------
+
+export type UserMembershipRow = TenantSummary & { memberId: string; joinedAt: Date };
+
+export async function listUserMemberships(userId: string): Promise<UserMembershipRow[]> {
+  const rows = await db
+    .select({
+      memberId: member.id,
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      status: organization.status,
+      role: member.role,
+      joinedAt: member.createdAt,
+    })
+    .from(member)
+    .innerJoin(organization, eq(member.organizationId, organization.id))
+    .where(eq(member.userId, userId))
+    .orderBy(organization.name);
+  return rows.map((r) => ({ ...r, slug: r.slug ?? "", status: r.status ?? "active" }));
+}
+
+export type UserRoleRequestRow = RoleRequestRow & { tenantName: string };
+
+export async function listOpenRoleRequestsForUser(userId: string): Promise<UserRoleRequestRow[]> {
+  return db
+    .select({ ...roleRequestSelect, tenantName: organization.name })
+    .from(roleRequests)
+    .innerJoin(user, eq(roleRequests.userId, user.id))
+    .innerJoin(member, eq(roleRequests.memberId, member.id))
+    .innerJoin(organization, eq(roleRequests.tenantId, organization.id))
+    .where(and(eq(roleRequests.userId, userId), eq(roleRequests.status, "pending")))
+    .orderBy(roleRequests.createdAt);
+}
+
+/** How many memberships hold each tenant role, platform-wide. */
+export async function countMembersByTenantRole(): Promise<Record<TenantRole, number>> {
+  const rows = await db.select({ role: member.role, n: sql<number>`count(*)` }).from(member).groupBy(member.role);
+  const out = Object.fromEntries(TENANT_ROLES.map((r) => [r, 0])) as Record<TenantRole, number>;
+  for (const r of rows) if (isTenantRole(r.role)) out[r.role] += Number(r.n);
+  return out;
 }
