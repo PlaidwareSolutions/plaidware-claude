@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Crown, MailPlus, Phone, Trash2, Users } from "lucide-react";
 import type { InviteRow, MemberRow, RoleRequestRow } from "../queries";
 import {
@@ -48,6 +49,7 @@ import {
 import { ASSIGNABLE_TENANT_ROLES, TENANT_ROLE_META, normalizePlatformRole, type AssignableTenantRole } from "@/lib/roles";
 import { useOpsAccess } from "@/components/ops-access";
 import { RoleRequestsSection } from "./role-requests-section";
+import { OPS } from "@/lib/routes";
 
 type Role = AssignableTenantRole;
 
@@ -151,7 +153,7 @@ export function ClientPeople({
                 <TableRow key={m.memberId}>
                   <TableCell>
                     <div className="flex items-center gap-1.5 font-medium text-heading">
-                      {m.name}
+                      <Link href={OPS.user(m.userId)} className="hover:text-primary">{m.name}</Link>
                       {normalizePlatformRole(m.platformRole) !== "customer" && (
                         <StatusBadge kind="platformRole" status={m.platformRole} className="text-[10px]" />
                       )}
