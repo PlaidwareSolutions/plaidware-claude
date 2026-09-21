@@ -9,6 +9,7 @@ import {
   listTenantSubscriptions,
 } from "@/modules/billing/queries";
 import { getBillingPolicy } from "@/modules/billing/ar-service";
+import { listPendingSetupTerms } from "@/modules/onboarding/queries";
 import { BILLING_SCHEDULE, nextDailyRunUtc } from "@/modules/billing/schedule";
 import { OpsClientBilling } from "@/modules/billing/components/ops-client-billing";
 import { stripeTestMode } from "@/lib/stripe";
@@ -26,13 +27,14 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
   const client = await loadClient(id);
   if (!client) notFound();
 
-  const [subscriptions, invoices, automation, pricingRows, policy, startable] = await Promise.all([
+  const [subscriptions, invoices, automation, pricingRows, policy, startable, pendingSetups] = await Promise.all([
     listTenantSubscriptions(id),
     listAllInvoicesOps(200, { tenantId: id }),
     getBillingAutomationStatus({ tenantId: id }), // live Stripe reads — never cached
     listTenantPricingRows(id),
     getBillingPolicy(),
     getStartSubscriptionOptions(id), // one live Stripe read for the card-on-file flag
+    listPendingSetupTerms(id),
   ]);
   const addonOptions = await listAddonOptions(id, subscriptions);
 
@@ -53,6 +55,7 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
       nextSweepUtc={nextDailyRunUtc(BILLING_SCHEDULE.dunningSweep.hourUtc).toISOString()}
       stripeTestMode={stripeTestMode()}
       startable={startable}
+      pendingSetups={pendingSetups}
     />
   );
 }

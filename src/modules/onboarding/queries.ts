@@ -1,8 +1,10 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
 import { organization, user } from "../auth/schema";
-import { products } from "../catalog/schema";
+import { productComponents, products } from "../catalog/schema";
+import { tenantPriceOverrides } from "../billing/schema";
 import { onboardingInvites } from "./schema";
+import { buildProductProposal, entryComponentIds, type ProposalProduct } from "./proposal";
 
 export type TenantSetupInvite = {
   id: string;
@@ -85,5 +87,73 @@ export async function listOpenSetupInvites(): Promise<OpenSetupInvite[]> {
   );
   return perTenant.flatMap(({ tenantId, invites }) =>
     invites.map((i) => ({ ...i, tenantId, tenantName: byTenant.get(tenantId) ?? "" })),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pending setup links as "subscriptions on their way" (client Billing tab)
+// ---------------------------------------------------------------------------
+
+export type PendingSetupTerms = {
+  inviteId: string;
+  /** pending | expired (a pending row past its expiry) */
+  status: "pending" | "expired";
+  clientName: string;
+  clientEmail: string;
+  createdAt: string;
+  expiresAt: string;
+  hasStoredToken: boolean;
+  productId: string;
+  productName: string;
+  productColor: string | null;
+  /** Priced exactly as the welcome page shows it, as of now. */
+  proposal: ProposalProduct;
+};
+
+/** Every open (or expired-but-unresolved) setup link for a tenant, one entry per product, with its priced terms. */
+export async function listPendingSetupTerms(tenantId: string): Promise<PendingSetupTerms[]> {
+  const rows = await db.query.onboardingInvites.findMany({
+    where: and(eq(onboardingInvites.tenantId, tenantId), eq(onboardingInvites.status, "pending")),
+    orderBy: [desc(onboardingInvites.createdAt)],
+  });
+  if (rows.length === 0) return [];
+  const componentIds = [...new Set(rows.flatMap((r) => r.products.flatMap(entryComponentIds)))];
+  const productIds = [...new Set(rows.flatMap((r) => r.products.map((p) => p.productId)))];
+  const [users, prods, comps, overrides] = await Promise.all([
+    db.query.user.findMany({ where: inArray(user.id, rows.map((r) => r.userId)) }),
+    db.query.products.findMany({ where: inArray(products.id, productIds) }),
+    componentIds.length
+      ? db.query.productComponents.findMany({ where: inArray(productComponents.id, componentIds) })
+      : Promise.resolve([]),
+    db.query.tenantPriceOverrides.findMany({ where: eq(tenantPriceOverrides.tenantId, tenantId) }),
+  ]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const productById = new Map(prods.map((p) => [p.id, p]));
+  const overrideAmounts = new Map(overrides.map((o) => [o.componentId, o.amountCents]));
+  const now = new Date();
+  return rows.flatMap((r) =>
+    r.products.map((entry) => {
+      const ids = entryComponentIds(entry);
+      const product = productById.get(entry.productId);
+      return {
+        inviteId: r.id,
+        status: r.expiresAt.getTime() < now.getTime() ? ("expired" as const) : ("pending" as const),
+        clientName: userById.get(r.userId)?.name ?? "—",
+        clientEmail: userById.get(r.userId)?.email ?? "—",
+        createdAt: r.createdAt.toISOString(),
+        expiresAt: r.expiresAt.toISOString(),
+        hasStoredToken: r.tokenEnc != null,
+        productId: entry.productId,
+        productName: product?.name ?? "Unknown product",
+        productColor: product?.color ?? null,
+        proposal: buildProductProposal(
+          entry,
+          product?.name ?? "Product",
+          comps.filter((c) => ids.includes(c.id)),
+          overrideAmounts,
+          { now },
+        ),
+      };
+    }),
   );
 }

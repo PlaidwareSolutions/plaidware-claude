@@ -26,6 +26,117 @@ import { Input } from "@/components/ui/input";
 
 type Row = TenantSetupInvite & { tenantId?: string; tenantName?: string };
 
+/** The link a row needs for its actions. */
+export type SetupLinkRef = { id: string; clientEmail: string; hasStoredToken: boolean };
+
+/**
+ * Resend / New link / Revoke for one open setup link (Regenerate / Regenerate
+ * & email for a dead one). Regenerating shows the new link exactly once, in
+ * this component's own dialog. Shared by the Setup links card and the
+ * pending-subscription card on the Billing tab.
+ */
+export function SetupLinkActions({ invite, status }: { invite: SetupLinkRef; status: string }) {
+  const { run, isPending } = useAction();
+  const confirm = useConfirm();
+  const [fresh, setFresh] = useState<{ link: string; sentTo: string | null } | null>(null);
+  const open = status === "pending";
+
+  async function regenerate(emailClient: boolean) {
+    const res = await run(() => regenerateSetupLinkAction(invite.id, { emailClient }), {
+      key: `regen:${invite.id}`,
+      success: (r) => (r.sentTo ? `New link emailed to ${r.sentTo}` : "New setup link ready"),
+    });
+    if (res?.ok) {
+      if (res.emailError) toast.warning(res.emailError);
+      setFresh({ link: res.link, sentTo: res.sentTo });
+    }
+  }
+
+  async function resend() {
+    await run(() => resendSetupLinkAction(invite.id), {
+      key: `resend:${invite.id}`,
+      success: (r) => `Link re-sent to ${r.sentTo}`,
+    });
+  }
+
+  async function revoke() {
+    const ok = await confirm({
+      title: `Revoke the setup link for ${invite.clientEmail}?`,
+      description: "The link stops working immediately and any prices held for it are cleared. You can regenerate a new one later.",
+      confirmLabel: "Revoke link",
+      destructive: true,
+    });
+    if (!ok) return;
+    void run(() => revokeSetupAction(invite.id), { key: `revoke:${invite.id}`, success: "Setup link revoked" });
+  }
+
+  if (status === "accepted") return null;
+  return (
+    <>
+      <div className="flex flex-wrap gap-1">
+        {open ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              disabled={!invite.hasStoredToken || isPending(`resend:${invite.id}`)}
+              title={invite.hasStoredToken ? "Email the same link again" : "Created before resend support — use New link"}
+              onClick={() => void resend()}
+            >
+              <Mail className="size-3.5" /> Resend
+            </Button>
+            <Button size="sm" variant="ghost" className="gap-1" disabled={isPending(`regen:${invite.id}`)} onClick={() => void regenerate(false)}>
+              <RefreshCw className="size-3.5" /> New link
+            </Button>
+            <Button size="sm" variant="ghost" disabled={isPending(`revoke:${invite.id}`)} onClick={() => void revoke()}>
+              Revoke
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="outline" className="gap-1" disabled={isPending(`regen:${invite.id}`)} onClick={() => void regenerate(false)}>
+              <RefreshCw className="size-3.5" /> Regenerate
+            </Button>
+            <Button size="sm" variant="ghost" className="gap-1" disabled={isPending(`regen:${invite.id}`)} onClick={() => void regenerate(true)}>
+              <Mail className="size-3.5" /> Regenerate & email
+            </Button>
+          </>
+        )}
+      </div>
+      <Dialog open={!!fresh} onOpenChange={(o) => !o && setFresh(null)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Setup link ready</DialogTitle>
+            <DialogDescription>
+              For {invite.clientEmail}. Valid 14 days, single use; the previous link no longer works.
+              {fresh?.sentTo ? ` Emailed to ${fresh.sentTo}.` : " Not emailed — send it yourself."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <Input readOnly value={fresh?.link ?? ""} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 gap-1"
+              onClick={() => {
+                if (!fresh) return;
+                navigator.clipboard.writeText(fresh.link);
+                toast.success("Link copied");
+              }}
+            >
+              <Copy className="size-3.5" /> Copy
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setFresh(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 /**
  * Every setup link for a client (or, with `showTenant`, every open link on the
  * platform). Regenerate rotates the token and shows the new link exactly once.
@@ -39,39 +150,6 @@ export function SetupLinksCard({
   showTenant?: boolean;
   compact?: boolean;
 }) {
-  const { run, isPending } = useAction();
-  const confirm = useConfirm();
-  const [fresh, setFresh] = useState<{ link: string; sentTo: string | null; invite: Row } | null>(null);
-
-  async function regenerate(inv: Row, emailClient: boolean) {
-    const res = await run(() => regenerateSetupLinkAction(inv.id, { emailClient }), {
-      key: `regen:${inv.id}`,
-      success: (r) => (r.sentTo ? `New link emailed to ${r.sentTo}` : "New setup link ready"),
-    });
-    if (res?.ok) {
-      if (res.emailError) toast.warning(res.emailError);
-      setFresh({ link: res.link, sentTo: res.sentTo, invite: inv });
-    }
-  }
-
-  async function resend(inv: Row) {
-    await run(() => resendSetupLinkAction(inv.id), {
-      key: `resend:${inv.id}`,
-      success: (r) => `Link re-sent to ${r.sentTo}`,
-    });
-  }
-
-  async function revoke(inv: Row) {
-    const ok = await confirm({
-      title: `Revoke the setup link for ${inv.clientEmail}?`,
-      description: "The link stops working immediately and any prices held for it are cleared. You can regenerate a new one later.",
-      confirmLabel: "Revoke link",
-      destructive: true,
-    });
-    if (!ok) return;
-    void run(() => revokeSetupAction(inv.id), { key: `revoke:${inv.id}`, success: "Setup link revoked" });
-  }
-
   const effective = (inv: Row) => (inv.status === "pending" && inv.isExpired ? "expired" : inv.status);
   const visible = compact ? invites.filter((i) => i.status !== "accepted") : invites;
 
@@ -121,74 +199,12 @@ export function SetupLinksCard({
                           : ""}
                   </div>
                 </div>
-                {status !== "accepted" && (
-                  <div className="flex flex-wrap gap-1">
-                    {open ? (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1"
-                          disabled={!inv.hasStoredToken || isPending(`resend:${inv.id}`)}
-                          title={inv.hasStoredToken ? "Email the same link again" : "Created before resend support — use New link"}
-                          onClick={() => void resend(inv)}
-                        >
-                          <Mail className="size-3.5" /> Resend
-                        </Button>
-                        <Button size="sm" variant="ghost" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, false)}>
-                          <RefreshCw className="size-3.5" /> New link
-                        </Button>
-                        <Button size="sm" variant="ghost" disabled={isPending(`revoke:${inv.id}`)} onClick={() => void revoke(inv)}>
-                          Revoke
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button size="sm" variant="outline" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, false)}>
-                          <RefreshCw className="size-3.5" /> Regenerate
-                        </Button>
-                        <Button size="sm" variant="ghost" className="gap-1" disabled={isPending(`regen:${inv.id}`)} onClick={() => void regenerate(inv, true)}>
-                          <Mail className="size-3.5" /> Regenerate & email
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
+                <SetupLinkActions invite={inv} status={status} />
               </div>
             );
           })}
         </div>
       )}
-
-      <Dialog open={!!fresh} onOpenChange={(o) => !o && setFresh(null)}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Setup link ready</DialogTitle>
-            <DialogDescription>
-              For {fresh?.invite.clientEmail}. Valid 14 days, single use; the previous link no longer works.
-              {fresh?.sentTo ? ` Emailed to ${fresh.sentTo}.` : " Not emailed — send it yourself."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-2">
-            <Input readOnly value={fresh?.link ?? ""} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
-            <Button
-              size="sm"
-              variant="outline"
-              className="shrink-0 gap-1"
-              onClick={() => {
-                if (!fresh) return;
-                navigator.clipboard.writeText(fresh.link);
-                toast.success("Link copied");
-              }}
-            >
-              <Copy className="size-3.5" /> Copy
-            </Button>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setFresh(null)}>Done</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Section>
   );
 }
