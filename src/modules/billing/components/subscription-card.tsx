@@ -21,7 +21,7 @@ import {
   sendCardSetupLinkAction,
   switchToAutoChargeAction,
 } from "../ar-actions";
-import { intervalLabel, isRecurringKind } from "../mappers";
+import { intervalLabel, isRecurringKind, itemMrrCents, resolveInterval } from "../mappers";
 import { formatCents } from "@/lib/money";
 import { formatDate, formatDay, formatMonth } from "@/lib/dates";
 import { OPS, stripeSubscriptionUrl } from "@/lib/routes";
@@ -69,6 +69,13 @@ export function SubscriptionCard({
   const live = !CLOSED.has(sub.status);
   const a = automation && !automation.error ? automation : undefined;
   const items = sub.items.filter((i) => i.status !== "canceled");
+  // sub.monthlyCents is MRR (yearly items folded in); beside an explicit "/yr"
+  // figure, show the plain monthly amount instead of double-counting.
+  const monthlyDisplay = a?.yearlyCents
+    ? items
+        .filter((i) => i.status === "active" && isRecurringKind(i.kind) && resolveInterval(i)?.interval !== "year")
+        .reduce((s, i) => s + itemMrrCents(i, i.amountCents * i.quantity), 0)
+    : sub.monthlyCents;
   const stripeDiffers = a?.stripeStatus && a.stripeStatus !== sub.status && a.stripeStatus.replace("_", " ") !== sub.status;
 
   return (
@@ -95,8 +102,8 @@ export function SubscriptionCard({
             )}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {sub.monthlyCents > 0 ? `${formatCents(sub.monthlyCents)}/mo` : "no recurring charge"}
-            {a?.yearlyCents ? ` + ${formatCents(a.yearlyCents)}/yr` : ""}
+            {monthlyDisplay > 0 ? `${formatCents(monthlyDisplay)}/mo` : a?.yearlyCents ? "" : "no recurring charge"}
+            {a?.yearlyCents ? `${monthlyDisplay > 0 ? " + " : ""}${formatCents(a.yearlyCents)}/yr` : ""}
             {live && (a?.nextChargeAt ?? sub.currentPeriodEnd)
               ? ` · next charge ${formatDate(a?.nextChargeAt ?? sub.currentPeriodEnd)}`
               : ""}
