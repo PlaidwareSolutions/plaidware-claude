@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { WorkOverviewRow } from "../dto";
 import { SprintProgress, sprintTiming } from "./sprint-progress";
+import { StatusBars } from "./status-bars";
 
 /** One product board on the work overview. */
 export function BoardCard({ row }: { row: WorkOverviewRow }) {
@@ -24,13 +25,8 @@ export function BoardCard({ row }: { row: WorkOverviewRow }) {
           <CardTitle className="text-lg">{row.product.name}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 text-xs text-muted-foreground">
-          <div className="flex flex-wrap gap-x-3 gap-y-1 tabular-nums">
-            <span><b className="font-medium text-heading">{c.backlog}</b> backlog</span>
-            <span><b className="font-medium text-heading">{c.todo}</b> to do</span>
-            <span><b className="font-medium text-heading">{c.in_progress}</b> in progress</span>
-            <span><b className="font-medium text-heading">{c.in_review}</b> in review</span>
-            {row.myOpen > 0 && <span className="text-primary">{row.myOpen} mine</span>}
-          </div>
+          <StatusBars counts={c} />
+          {row.myOpen > 0 && <span className="text-primary">{row.myOpen} mine</span>}
           {s ? (
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2">
