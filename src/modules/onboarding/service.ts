@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import { db } from "../../db";
 import { env } from "../../env";
 import { auth } from "../../lib/auth";
@@ -7,13 +7,22 @@ import { getStripe } from "../../lib/stripe";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
 import { decryptSecret, encryptSecret } from "../../lib/crypto";
 import { formatCents } from "../../lib/money";
+import { formatMonth } from "../../lib/dates";
 import { normalizePhone, PLACEHOLDER_PHONE } from "../../lib/phone";
 import { account, organization, user } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
-import { subscriptions, tenantPriceOverrides } from "../billing/schema";
+import { invoices, subscriptions, tenantPriceOverrides } from "../billing/schema";
 import { isRecurringKind, LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
-import { createCheckout, promoteDefaultPaymentMethod } from "../billing/service";
-import { setTenantPriceOverride } from "../billing/ar-service";
+import {
+  createCheckout,
+  ensureStripePriceForAmount,
+  getTenantOverrides,
+  promoteDefaultPaymentMethod,
+  type CheckoutBackdate,
+} from "../billing/service";
+import { createOfflinePaidInvoice, setTenantPriceOverride } from "../billing/ar-service";
+import { buildCatchUp, buildStartPlan, type CheckoutItemPlan } from "../billing/start-logic";
+import { PAYMENT_METHOD_LABEL, type OfflinePaymentDetails } from "../billing/payment-methods";
 import { createTenantWithOwner, uniqueSlug } from "../tenancy/service";
 import { getUserTenants } from "../tenancy/queries";
 import { setDomain } from "../provisioning/service";
@@ -26,6 +35,7 @@ import {
   buildProductProposal,
   combineTotals,
   entryComponentIds,
+  entryItemPlan,
   entryPriceMap,
   pickPrimaryIndex,
   type InviteProductEntry,
@@ -51,11 +61,22 @@ export async function createClientSetup(opts: {
   /** Locked per-product selections; priceCents null = list price. */
   products: {
     productId: string;
-    items: { componentId: string; priceCents: number | null }[];
+    items: {
+      componentId: string;
+      priceCents: number | null;
+      /** Recurring add-ons only. */
+      quantity?: number;
+      /** One-time components only. */
+      settlement?: { mode: "invoice" } | { mode: "waive" } | { mode: "offline"; payment: OfflinePaymentDetails };
+    }[];
     domainUrl?: string | null;
+    /** "YYYY-MM": bill calendar months from here; the catch-up rides the first invoice. */
+    billFromMonth?: string | null;
   }[];
   sendEmailToClient: boolean;
   actorUserId: string;
+  /** Pin the workspace (ops dialog on an existing client); the email must own it. */
+  tenantId?: string | null;
 }): Promise<{ link: string; inviteId: string; tenantId: string; superseded: number; emailError: string | null }> {
   const email = opts.clientEmail.trim().toLowerCase();
   if (opts.products.length === 0) throw new Error("Pick at least one product");
@@ -107,9 +128,12 @@ export async function createClientSetup(opts: {
     await db.update(user).set({ phone: normalizePhone(opts.phone)! }).where(eq(user.id, clientUser.id));
   }
 
-  // 2. Find their owned tenant, else create one.
+  // 2. Find their owned tenant (the pinned one when ops asked), else create one.
   const memberships = await getUserTenants(clientUser.id);
-  const owned = memberships.find((m) => m.role === "owner");
+  const owned = opts.tenantId
+    ? memberships.find((m) => m.id === opts.tenantId && m.role === "owner")
+    : memberships.find((m) => m.role === "owner");
+  if (opts.tenantId && !owned) throw new Error("That email doesn't own this workspace");
   const tenantId = owned
     ? owned.id
     : (
@@ -120,6 +144,70 @@ export async function createClientSetup(opts: {
         })
       ).id;
 
+  // 2b. Every product's terms must be a valid start (main charge + required
+  //     items present, quantities sane, offline lines priced) before anything
+  //     is written.
+  const productRows = await db.query.products.findMany({ where: inArray(products.id, productIds) });
+  const allComps = await db.query.productComponents.findMany({
+    where: inArray(productComponents.productId, productIds),
+  });
+  for (const p of opts.products) {
+    const product = productRows.find((x) => x.id === p.productId);
+    if (!product) throw new Error("Product not found");
+    const r = buildStartPlan({
+      items: p.items.map((i) => ({
+        componentId: i.componentId,
+        amountCents: i.priceCents ?? comps.find((c) => c.id === i.componentId)?.amountCents ?? 0,
+        quantity: i.quantity ?? 1,
+        settlement: i.settlement,
+      })),
+      components: allComps
+        .filter((c) => c.productId === p.productId)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          kind: c.kind,
+          role: c.role,
+          interval: c.interval,
+          intervalCount: c.intervalCount,
+          isRequired: c.isRequired,
+          isActive: c.isActive,
+          listCents: c.amountCents,
+        })),
+      trialDays: product.trialDays,
+      skipTrial: true,
+      billFromMonth: p.billFromMonth,
+    });
+    if (!r.ok) throw new Error(`${product.name}: ${r.errors.join(" · ")}`);
+  }
+
+  // 2c. Money already in hand is recorded now — one paid-out-of-band invoice
+  //     per offline item, linked to the subscription once the client checks
+  //     out. Done before the invite exists so a Stripe failure leaves nothing
+  //     half-made.
+  const overrides = await getTenantOverrides(tenantId, allItemIds);
+  const offlineInvoiceFor = new Map<string, string>(); // componentId → invoice id
+  for (const p of opts.products) {
+    for (const item of p.items) {
+      if (item.settlement?.mode !== "offline") continue;
+      const comp = comps.find((c) => c.id === item.componentId)!;
+      const product = productRows.find((x) => x.id === p.productId)!;
+      const amount = item.priceCents ?? comp.amountCents;
+      const priceId = await ensureStripePriceForAmount(comp, product.name, tenantId, amount, overrides.get(comp.id));
+      const r = await createOfflinePaidInvoice({
+        tenantId,
+        subscriptionId: null,
+        contact: { email, name: clientUser.name },
+        kind: "product",
+        description: `${product.name} — ${comp.name} (setup link · paid by ${PAYMENT_METHOD_LABEL[item.settlement.payment.method].toLowerCase()})`,
+        lines: [{ priceId, quantity: 1, name: comp.name, unitAmountCents: amount }],
+        payment: item.settlement.payment,
+        recordedByUserId: opts.actorUserId,
+      });
+      offlineInvoiceFor.set(comp.id, r.invoiceId);
+    }
+  }
+
   // 3. Custom prices are held on the invite and become tenant overrides only
   //    when the client commits (applyInvitePricing) — a link that is never
   //    used leaves no pricing behind, and a price can't land on the wrong
@@ -129,12 +217,35 @@ export async function createClientSetup(opts: {
     productId: p.productId,
     items: p.items.map((i) => {
       const comp = comps.find((c) => c.id === i.componentId);
+      const recurring = comp ? isRecurringKind(comp.kind) : false;
+      const s = i.settlement;
       return {
         componentId: i.componentId,
-        priceCents: i.priceCents == null || i.priceCents === comp?.amountCents ? null : i.priceCents,
+        priceCents:
+          !recurring && s?.mode === "waive"
+            ? 0
+            : i.priceCents == null || i.priceCents === comp?.amountCents
+              ? null
+              : i.priceCents,
+        ...(recurring && (i.quantity ?? 1) > 1 ? { quantity: i.quantity } : {}),
+        ...(!recurring && s?.mode === "waive" ? { settlement: { mode: "waive" as const } } : {}),
+        ...(!recurring && s?.mode === "offline"
+          ? {
+              settlement: {
+                mode: "offline" as const,
+                invoiceId: offlineInvoiceFor.get(i.componentId) ?? null,
+                payment: {
+                  method: s.payment.method,
+                  reference: s.payment.reference ?? null,
+                  receivedAt: s.payment.receivedAt ?? null,
+                },
+              },
+            }
+          : {}),
       };
     }),
     domainUrl: p.domainUrl?.trim() || null,
+    ...(p.billFromMonth ? { billFromMonth: p.billFromMonth } : {}),
   }));
   const [invite] = await db
     .insert(onboardingInvites)
@@ -177,9 +288,14 @@ export async function createClientSetup(opts: {
     actorUserId: opts.actorUserId,
     kind: "client_setup_created",
     payload: {
-      products: opts.products.map((p) => ({ productId: p.productId, items: p.items.length })),
+      products: opts.products.map((p) => ({
+        productId: p.productId,
+        items: p.items.length,
+        billFromMonth: p.billFromMonth ?? null,
+      })),
       email,
       superseded: supersededIds.length,
+      offlineInvoiceIds: [...offlineInvoiceFor.values()],
     },
   });
 
@@ -199,11 +315,39 @@ export async function createClientSetup(opts: {
   return { link, inviteId: invite.id, tenantId, superseded: supersededIds.length, emailError };
 }
 
+/**
+ * Ops started this product directly: any open setup link that still offers it
+ * is superseded (the client must never pay a stale link into a slot that is
+ * now taken). Same cleanup as createClientSetup's supersede step.
+ */
+export async function revokePendingSetupsForProduct(
+  tenantId: string,
+  productId: string,
+  actorUserId: string,
+): Promise<number> {
+  const open = await db.query.onboardingInvites.findMany({
+    where: and(eq(onboardingInvites.tenantId, tenantId), eq(onboardingInvites.status, "pending")),
+  });
+  const ids = open.filter((o) => o.products.some((e) => e.productId === productId)).map((o) => o.id);
+  if (ids.length === 0) return 0;
+  await db.update(onboardingInvites).set({ status: "revoked" }).where(inArray(onboardingInvites.id, ids));
+  await db.delete(tenantPriceOverrides).where(inArray(tenantPriceOverrides.sourceInviteId, ids));
+  await writeAudit({
+    tenantId,
+    actorUserId,
+    kind: "client_setup_revoked",
+    payload: { inviteIds: ids, supersededBy: "ops_start", productId },
+  });
+  return ids.length;
+}
+
 /** The "your setup is ready" email — at creation, on regenerate, and on resend. Throws when mail is configured but failed. */
 export async function sendSetupLinkEmail(inviteId: string, link: string): Promise<string | null> {
   const proposal = await assembleProposal(inviteId);
   if (!proposal) return null;
   const names = proposal.products.map((p) => p.productName).join(" + ");
+  const paidCents = proposal.products.flatMap((p) => p.lines).filter((l) => l.settled).reduce((s, l) => s + l.amountCents, 0);
+  const billFrom = proposal.products.find((p) => p.billFromMonth)?.billFromMonth ?? null;
   const r = await sendEmail({
     to: proposal.clientEmail,
     subject: "Your Plaidware setup is ready",
@@ -211,6 +355,10 @@ export async function sendSetupLinkEmail(inviteId: string, link: string): Promis
       `Welcome, ${proposal.clientName.trim()}`,
       `<p>Your ${names ? `${names} ` : ""}services are configured and ready to activate. One step: open the link below, ${proposal.needsPassword ? "choose a password, " : "sign in, "}and complete payment.</p>` +
         `<p><strong>Due today: ${formatCents(proposal.dueTodayCents)}</strong>${proposal.monthlyCents ? ` · then ${formatCents(proposal.monthlyCents)}/mo` : ""}${proposal.yearlyCents ? ` + ${formatCents(proposal.yearlyCents)}/yr` : ""}</p>` +
+        (paidCents ? `<p>Already paid: <strong>${formatCents(paidCents)}</strong> — thank you.</p>` : "") +
+        (billFrom
+          ? `<p style="color:#8b93b2;font-size:13px">Your service is billed from ${formatMonth(billFrom)}; today's payment covers the months since then, and renewals run on the 1st.</p>`
+          : "") +
         (proposal.products.length > 1
           ? `<p style="color:#8b93b2;font-size:13px">Your card will be charged separately for each service — ${proposal.products.length} charges totaling ${formatCents(proposal.dueTodayCents)} today.</p>`
           : "") +
@@ -446,6 +594,54 @@ export type FinalizeState =
       }[];
     };
 
+/**
+ * What createCheckout is told for one invite product: quantities and
+ * settlement from the entry, unit prices held → override → list, and the
+ * catch-up computed as of now when the entry is backdated.
+ */
+export async function checkoutTermsForEntry(
+  entry: InviteProductEntry,
+  tenantId: string,
+  now = new Date(),
+): Promise<{ itemPlan: CheckoutItemPlan[]; backdate?: CheckoutBackdate }> {
+  const ids = entryComponentIds(entry);
+  const [comps, overrides] = await Promise.all([
+    ids.length ? db.query.productComponents.findMany({ where: inArray(productComponents.id, ids) }) : [],
+    getTenantOverrides(tenantId, ids),
+  ]);
+  const held = entryPriceMap(entry);
+  const itemPlan = entryItemPlan(entry).map((p) => ({
+    ...p,
+    amountCents:
+      p.settlement?.mode === "waive"
+        ? 0
+        : (held.get(p.componentId) ??
+          overrides.get(p.componentId)?.amountCents ??
+          comps.find((c) => c.id === p.componentId)?.amountCents ??
+          0),
+  }));
+  if (!entry.billFromMonth) return { itemPlan };
+  const cu = buildCatchUp({
+    billFromMonth: entry.billFromMonth,
+    now,
+    lines: itemPlan.flatMap((p) => {
+      const c = comps.find((x) => x.id === p.componentId);
+      if (!c || !isRecurringKind(c.kind)) return [];
+      return [{
+        componentId: c.id,
+        name: c.name,
+        kind: c.kind,
+        interval: c.interval,
+        intervalCount: c.intervalCount,
+        amountCents: p.amountCents,
+        quantity: c.role === "base" ? 1 : (p.quantity ?? 1),
+      }];
+    }),
+  });
+  if (!cu.ok) throw new Error(cu.error);
+  return { itemPlan, backdate: cu.backdate };
+}
+
 const SETTLED = ["active", "trialing"];
 
 /**
@@ -536,6 +732,42 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
   // Fan out: every entry beyond those already settled.
   const settledNow = new Set<string>(); // productIds paid within this run
   const recovery: Extract<FinalizeState, { state: "pending" }>["items"] = [];
+
+  // A backdated primary is active from birth; its Hub-made catch-up invoice
+  // (a product invoice carrying the bill-from month) stays open until the
+  // card the client just saved pays it.
+  let catchUpPending = false;
+  const openCatchUps = await db.query.invoices.findMany({
+    where: and(
+      eq(invoices.subscriptionId, primarySub.id),
+      eq(invoices.status, "open"),
+      eq(invoices.kind, "product"),
+      isNotNull(invoices.billingMonth),
+    ),
+  });
+  for (const inv of openCatchUps) {
+    if (!inv.stripeInvoiceId) continue;
+    const outcome = await payInvoiceOffSession(stripe, inv.stripeInvoiceId, pm);
+    if (outcome === "paid") {
+      await db
+        .update(invoices)
+        .set({ status: "paid", paidAt: new Date(), amountPaidCents: inv.amountDueCents })
+        .where(and(eq(invoices.id, inv.id), eq(invoices.status, "open")));
+      continue;
+    }
+    catchUpPending = true;
+    const detailed = await stripe.invoices.retrieve(inv.stripeInvoiceId, { expand: ["confirmation_secret"] });
+    const secret = detailed.confirmation_secret?.client_secret;
+    if (secret) {
+      recovery.push({
+        productId: primary.productId,
+        productName: productRows.find((p) => p.id === primary.productId)?.name ?? "your service",
+        status: outcome,
+        clientSecret: secret,
+      });
+    }
+  }
+
   for (const entry of entries) {
     const existing = subFor(entry.productId);
     if (existing && SETTLED.includes(existing.status)) continue;
@@ -574,6 +806,7 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
         tenantId: invite.tenantId,
         productId: entry.productId,
         componentIds: entryComponentIds(entry),
+        ...(await checkoutTermsForEntry(entry, invite.tenantId)),
         contact: { email: clientUser.email, name: clientUser.name },
         skipAutoPromos: true,
         userId: invite.userId,
@@ -627,7 +860,7 @@ export async function runFinalize(inviteId: string): Promise<FinalizeState> {
     const sub = liveSubs.find((s) => s.productId === e.productId);
     return sub && (SETTLED.includes(sub.status) || settledNow.has(e.productId));
   });
-  if (!allSettled) {
+  if (!allSettled || catchUpPending) {
     return recovery.length ? { state: "pending", items: recovery } : { state: "awaiting_payment" };
   }
 
@@ -706,15 +939,20 @@ export async function revokeSetup(inviteId: string, actorUserId?: string): Promi
     .update(onboardingInvites)
     .set({ status: "revoked" })
     .where(and(eq(onboardingInvites.id, inviteId), inArray(onboardingInvites.status, ["pending", "expired"])))
-    .returning({ tenantId: onboardingInvites.tenantId });
+    .returning({ tenantId: onboardingInvites.tenantId, products: onboardingInvites.products });
   if (!row) throw new Error("Only a pending or expired setup link can be revoked");
   // Prices held for this link die with it (Phase 2: invite-held pricing).
+  // Offline payments recorded when it was made do NOT: the money is real —
+  // refund in Stripe if the deal is off. Their invoices are named here.
   await db.delete(tenantPriceOverrides).where(eq(tenantPriceOverrides.sourceInviteId, inviteId));
+  const offlineInvoiceIds = row.products.flatMap((e) =>
+    (e.items ?? []).flatMap((i) => (i.settlement?.mode === "offline" && i.settlement.invoiceId ? [i.settlement.invoiceId] : [])),
+  );
   await writeAudit({
     tenantId: row.tenantId,
     actorUserId: actorUserId ?? null,
     kind: "client_setup_revoked",
-    payload: { inviteId },
+    payload: { inviteId, ...(offlineInvoiceIds.length ? { offlineInvoiceIds } : {}) },
   });
 }
 

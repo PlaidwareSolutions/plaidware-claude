@@ -10,8 +10,11 @@ import { account, user } from "../auth/schema";
 import { getUserTenants } from "../tenancy/queries";
 import { needsPasswordSetup } from "./setup-rules";
 import { createCheckout, type CheckoutResult } from "../billing/service";
+import { billFromMonthSchema, startSettlementSchema } from "../billing/contracts";
+import { onboardingInvites } from "./schema";
 import {
   applyInvitePricing,
+  checkoutTermsForEntry,
   completeSetupPassword,
   createClientSetup,
   getSetupByToken,
@@ -37,11 +40,17 @@ const createSchema = z.object({
         productId: z.string().uuid(),
         items: z
           .array(
-            z.object({ componentId: z.string().uuid(), priceCents: z.number().int().min(0).nullable() }),
+            z.object({
+              componentId: z.string().uuid(),
+              priceCents: z.number().int().min(0).nullable(),
+              quantity: z.number().int().min(1).max(999).default(1),
+              settlement: startSettlementSchema.optional(),
+            }),
           )
           .min(1)
           .max(30),
         domainUrl: z.string().max(200).optional(),
+        billFromMonth: billFromMonthSchema.optional(),
       }),
     )
     .min(1)
@@ -51,10 +60,12 @@ const createSchema = z.object({
       "Each product can appear only once",
     ),
   sendEmailToClient: z.boolean().default(false),
+  /** Existing client: the workspace the link is for (its owner's email must be clientEmail). */
+  tenantId: z.string().min(1).optional(),
 });
 
 export async function createClientSetupAction(
-  input: z.infer<typeof createSchema>,
+  input: z.input<typeof createSchema>,
 ): Promise<
   { ok: true; link: string; tenantId: string; superseded: number; emailError: string | null } | { ok: false; error: string }
 > {
@@ -123,10 +134,14 @@ export async function startSetupCheckoutAction(
     }
     await applyInvitePricing(proposal.inviteId, session.user.id);
     const primary = proposal.products[proposal.primaryIndex];
+    const invite = await db.query.onboardingInvites.findFirst({ where: eq(onboardingInvites.id, proposal.inviteId) });
+    const entry = invite?.products.find((e) => e.productId === primary.productId);
+    if (!entry) throw new Error("Setup link not found");
     const result = await createCheckout({
       tenantId: proposal.tenantId,
       productId: primary.productId,
       componentIds: primary.componentIds,
+      ...(await checkoutTermsForEntry(entry, proposal.tenantId)),
       contact: { email: session.user.email, name: session.user.name },
       skipAutoPromos: true, // the quoted price is the final price
       userId: session.user.id,
