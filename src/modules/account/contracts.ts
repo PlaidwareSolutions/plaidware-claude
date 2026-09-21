@@ -19,5 +19,5 @@ export const profileSchema = z.object({
 export type ProfileInput = z.input<typeof profileSchema>;
 
 export const emailChangeSchema = z.object({
-  newEmail: z.email("Enter a valid email address").transform((s) => s.trim().toLowerCase()),
+  newEmail: z.string().trim().toLowerCase().pipe(z.email("Enter a valid email address")),
 });
