@@ -1,0 +1,86 @@
+{
+  "$comment": "Drivorata client review follow-ups (2026-09-20). Imported with scripts/work-import.ts; idempotent by title.",
+  "items": [
+    {
+      "title": "Route customers to the right location phone number (Cypress, Pasadena, Sugar Land)",
+      "type": "bug",
+      "priority": "high",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["website", "contact", "locations"],
+      "description": "The business has separate phone numbers for Cypress, Pasadena and Sugar Land, but customers currently reach the wrong number and have to be redirected by hand.\n\nPublish the correct number for each location and associate them clearly on the website so a customer knows whom to contact.\n\nAcceptance: every location page and every contact surface shows that location's own number; no shared or wrong number remains anywhere on the site."
+    },
+    {
+      "title": "Simplify the class schedule and enrollment flow into a tabular schedule with Enroll Now",
+      "type": "feature",
+      "priority": "urgent",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["website", "enrollment", "schedule", "conversion"],
+      "description": "The current way classes are presented is harder to understand than the older schedule format. Replace it with a simple table: class/date, time, relevant comments or details, and an Enroll Now action.\n\nThe class code is not useful to customers — remove it or de-emphasise it. What matters is which class and which date the customer is registering for.\n\nCustomer journey: view upcoming classes → choose a class/date → Enroll → enter customer information → pay → receive confirmation.\n\nTarget experience (the overall objective for the site): a first-time visitor, including a parent looking for a class for their child, immediately understands what classes are available → where they are offered → when they occur → what they cost → how to enroll → how to pay, and completes registration without needing to call. After payment the customer receives a clear confirmation, and the owner automatically receives a complete enrollment notification with everything needed to manage that student."
+    },
+    {
+      "title": "Make owner enrollment notifications reliable and complete",
+      "type": "bug",
+      "priority": "urgent",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["notifications", "email", "enrollment"],
+      "description": "Customers are completing or attempting registrations, but the owner does not consistently receive the enrollment notification email — while customers do receive confirmations in at least some cases.\n\nFix delivery and make the owner notification actionable. It must clearly include: customer name and contact information, package or course, selected class/date, amount, payment status, payment method, and the transaction timestamp/reference.\n\nAcceptance: every completed enrollment produces exactly one owner notification carrying those fields, verified end to end (see also the email troubleshooting item for tracing)."
+    },
+    {
+      "title": "Tie registration, class selection, customer and payment into one enrollment record",
+      "type": "feature",
+      "priority": "urgent",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["enrollment", "payments", "data-model"],
+      "description": "Matching a payment to the class the customer actually selected is a major operational problem: looking at Stripe alone does not make it obvious which class/date the customer intended to enroll in.\n\nRegistration, class selection, customer and payment must be tied together as a single enrollment record, so the owner never has to reconcile website registrations, emails, customer calls and payment records manually.\n\nAcceptance: from any payment you can see the enrollment (class/date, customer), and from any enrollment you can see its payment and status."
+    },
+    {
+      "title": "Make payment-status emails unmistakable (started → pending → completed → confirmed)",
+      "type": "enhancement",
+      "priority": "high",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["notifications", "email", "payments"],
+      "description": "During the review several emails initially looked like registrations or payments, but some actually reported events such as \"payment created\" that never completed.\n\nEvery notification must make the state unmistakable, for example:\nEnrollment started → Payment pending → Payment completed → Enrollment confirmed.\n\nAcceptance: an abandoned checkout can no longer be mistaken for a completed registration by the owner or the customer."
+    },
+    {
+      "title": "Email-delivery troubleshooting procedure and monitoring (Resend)",
+      "type": "task",
+      "priority": "medium",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["email", "ops", "runbook"],
+      "description": "The website sends through Resend; its logs show whether a given notification was generated, sent, delivered or failed. Troubleshooting needs specifics rather than a general \"an email wasn't received\".\n\nWrite the procedure and the intake checklist for future incidents: customer name, customer email, approximate registration time, selected class/package, related payment information or screenshot, and any emails that were received — enough to trace the complete transaction and email path.\n\nAdd monitoring or alerting for failed deliveries if feasible."
+    },
+    {
+      "title": "Replace Stripe with Chase payment processing via Authorize.net",
+      "type": "feature",
+      "priority": "high",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["payments", "authorize-net", "chase", "stripe"],
+      "description": "The owner is dissatisfied with Stripe, including the payment-processing experience and settlement timing, and wants payment processing moved to the Chase solution. The Chase setup uses Authorize.net as the gateway/integration layer, so the direction is:\n\nWebsite → Authorize.net → Chase payment processing\n\nrather than continuing with Stripe.\n\nDepends on the Authorize.net integration setup item. Must preserve the single enrollment record (registration + class + customer + payment) and the unambiguous payment statuses."
+    },
+    {
+      "title": "Authorize.net integration setup: procedure, credentials, developer role",
+      "type": "task",
+      "priority": "high",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["payments", "authorize-net", "setup"],
+      "description": "The Chase/Authorize.net account appears to be established, but the website integration still needs to be completed. The account has areas for API settings, API credentials, transaction keys, users/roles and the transaction-processing mode.\n\nBefore generating or changing production credentials, research and follow the correct integration procedure (sandbox first).\n\nIdentify the appropriate developer/integration access for the developer instead of granting account-owner privileges."
+    },
+    {
+      "title": "Increase qualified website traffic through advertising and marketing",
+      "type": "task",
+      "priority": "medium",
+      "status": "todo",
+      "source": "client_request",
+      "labels": ["marketing", "traffic"],
+      "description": "There was reportedly little or no meaningful website traffic for roughly ten days, and the owner believes additional advertising is needed.\n\nThis is a separate but related workstream: improving the registration experience alone is not sufficient if customers are not reaching the website. Website conversion (find classes, understand schedules, enroll, pay) and traffic generation (advertising and other marketing) run in parallel.\n\nPlan and run advertising and other marketing efforts to raise qualified traffic, and measure the result."
+    }
+  ]
+}

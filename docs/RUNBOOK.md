@@ -145,3 +145,12 @@ Better Auth's raw `/update-user` and `/change-email` routes are disabled.
   Legacy duplicate rows still add up in the MHub/partner feeds.
 - **Migrations 0024/0025**: `ALTER TYPE payment_method ADD VALUE 'cash'` (its
   own migration; PG ≥ 12) and the `quantity` column.
+
+## Importing work items in bulk
+
+`scripts/work-import.ts <product-slug> <items.json> --actor <email> [--assignee <email>]
+[--requester <workspace slug|name|id>] [--dry-run]` creates items through the work
+service (numbering, ranks, events) and is idempotent by title. Item files live in
+`scripts/data/`. Against production: `railway run -p <project> -e production -s Postgres --
+node --import tsx scripts/work-import.ts …` (the script composes DATABASE_URL from the
+Postgres TCP-proxy variables); `--list-workspaces` prints the workspaces to pick a requester.
