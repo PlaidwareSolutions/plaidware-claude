@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatDay, formatMonth, formatRelative, formatUtcHour, isoDay } from "./dates";
+import {
+  formatDate,
+  formatDateTime,
+  formatDay,
+  formatMonth,
+  formatRelative,
+  formatUtcHour,
+  fromIsoDay,
+  isoDay,
+  monthBounds,
+  monthKey,
+  monthKeysBetween,
+} from "./dates";
 
 // Tests run without NEXT_PUBLIC_DISPLAY_TZ → display zone is UTC.
 const T = new Date("2026-09-13T14:05:30Z");
@@ -39,5 +51,39 @@ describe("dates", () => {
 
   it("formats month keys", () => {
     expect(formatMonth("2026-09")).toBe("September 2026");
+  });
+});
+
+describe("calendar helpers", () => {
+  it("fromIsoDay pins a calendar day to noon UTC so it renders as itself everywhere", () => {
+    expect(fromIsoDay("2026-09-20")).toBe("2026-09-20T12:00:00.000Z");
+    expect(formatDate(fromIsoDay("2026-09-20"))).toBe("Sep 20, 2026");
+    expect(isoDay(fromIsoDay("2026-09-20"), "America/Chicago")).toBe("2026-09-20");
+    expect(() => fromIsoDay("2026-9-2")).toThrow();
+  });
+
+  it("monthKey is the display-zone month", () => {
+    expect(monthKey("2026-09-13T14:05:30Z")).toBe("2026-09");
+    expect(monthKey("2026-10-01T03:00:00Z", "America/Chicago")).toBe("2026-09");
+    expect(monthKey("2026-10-01T03:00:00Z", "UTC")).toBe("2026-10");
+  });
+
+  it("monthBounds are local midnights on the 1st, DST-safe", () => {
+    const utc = monthBounds("2026-07", "UTC");
+    expect(utc.start.toISOString()).toBe("2026-07-01T00:00:00.000Z");
+    expect(utc.end.toISOString()).toBe("2026-08-01T00:00:00.000Z");
+    const chi = monthBounds("2026-07", "America/Chicago"); // CDT = UTC-5
+    expect(chi.start.toISOString()).toBe("2026-07-01T05:00:00.000Z");
+    const dec = monthBounds("2026-12", "America/Chicago"); // CST = UTC-6, year rollover
+    expect(dec.start.toISOString()).toBe("2026-12-01T06:00:00.000Z");
+    expect(dec.end.toISOString()).toBe("2027-01-01T06:00:00.000Z");
+    expect(() => monthBounds("2026-13")).toThrow();
+  });
+
+  it("monthKeysBetween is inclusive and ordered", () => {
+    expect(monthKeysBetween("2026-07", "2026-09")).toEqual(["2026-07", "2026-08", "2026-09"]);
+    expect(monthKeysBetween("2026-11", "2027-01")).toEqual(["2026-11", "2026-12", "2027-01"]);
+    expect(monthKeysBetween("2026-09", "2026-09")).toEqual(["2026-09"]);
+    expect(monthKeysBetween("2026-10", "2026-09")).toEqual([]);
   });
 });

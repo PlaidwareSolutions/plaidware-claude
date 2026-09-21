@@ -17,6 +17,7 @@ import { invoices } from "./schema";
 export const paymentMethod = pgEnum("payment_method", [
   "stripe_card",
   "stripe_ach",
+  "cash",
   "check",
   "zelle",
   "wire",

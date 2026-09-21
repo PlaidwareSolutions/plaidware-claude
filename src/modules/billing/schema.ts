@@ -112,13 +112,29 @@ export const subscriptionItems = pgTable(
     name: text("name").notNull(),
     amountCents: integer("amount_cents").notNull(),
     currency: text("currency").notNull().default("usd"),
+    /** Units of this component (Stripe item quantity). Legacy multiples are duplicate rows; readers sum both. */
+    quantity: integer("quantity").notNull().default(1),
     status: subscriptionItemStatus("status").notNull().default("active"),
     stripePriceId: text("stripe_price_id"),
     stripeSubscriptionItemId: text("stripe_subscription_item_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => [index("subscription_items_subscription_idx").on(t.subscriptionId)],
+  (t) => [
+    index("subscription_items_subscription_idx").on(t.subscriptionId),
+    check("subscription_items_quantity_chk", sql`${t.quantity} >= 1`),
+  ],
 );
+
+/** A mirrored invoice line; quantity/unit/period are present on lines the Hub built (billing v2). */
+export type InvoiceLineItem = {
+  name: string;
+  amountCents: number;
+  quantity?: number;
+  unitAmountCents?: number;
+  /** ISO instants for a service period (catch-up months, hosting). */
+  periodStart?: string;
+  periodEnd?: string;
+};
 
 export const invoices = pgTable(
   "invoices",
@@ -138,7 +154,7 @@ export const invoices = pgTable(
     currency: text("currency").notNull().default("usd"),
     description: text("description"),
     lineItems: jsonb("line_items")
-      .$type<{ name: string; amountCents: number }[]>()
+      .$type<InvoiceLineItem[]>()
       .notNull()
       .default([]),
     stripeInvoiceId: text("stripe_invoice_id").unique(),
@@ -150,7 +166,8 @@ export const invoices = pgTable(
     paidAt: timestamp("paid_at"),
     /** Pre-due reminder dedupe (billing v2). */
     upcomingReminderSentAt: timestamp("upcoming_reminder_sent_at"),
-    /** YYYY-MM for hosting invoices — idempotency key with the partial unique. */
+    /** YYYY-MM for hosting invoices — idempotency key with the partial unique.
+     *  On a product invoice it marks a backdated start's catch-up (the bill-from month). */
     billingMonth: text("billing_month"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at")

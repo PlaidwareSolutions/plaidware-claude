@@ -33,6 +33,8 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   subscription_suspended: { label: "Subscription suspended", group: "billing" },
   subscription_reactivated: { label: "Subscription reactivated", group: "billing" },
   subscription_items_changed: { label: "Add-ons changed", group: "billing" },
+  subscription_started_by_ops: { label: "Subscription started by ops", group: "billing" },
+  offline_payment_recorded: { label: "Offline payment recorded", group: "billing" },
   domain_changed: { label: "Domain changed", group: "provisioning" },
   dns_config_changed: { label: "DNS verification configured", group: "provisioning" },
   dns_verified: { label: "DNS verification run", group: "provisioning" },
@@ -103,6 +105,28 @@ export function describeAudit(
       return `${str(payload.source) ?? "dunning"}${str(payload.note) ? ` — ${payload.note}` : ""}${str(payload.invoiceNumber) ? ` (invoice ${payload.invoiceNumber})` : ""}`;
     case "subscription_reactivated":
       return `was ${str(payload.source) ?? "dunning"} hold`;
+    case "offline_payment_recorded":
+      return num(payload.amountCents) != null
+        ? [
+            `${fmt.cents(payload.amountCents as number)} · ${str(payload.method) ?? "offline"}`,
+            str(payload.reference) ? `· ${payload.reference}` : null,
+            str(payload.invoiceNumber) ? `(invoice ${payload.invoiceNumber})` : null,
+            payload.settled ? "· settled" : "· partial",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        : null;
+    case "subscription_started_by_ops": {
+      const how = str(payload.collection);
+      return [
+        how === "send_invoice" ? "invoice by email" : how === "charge_card_now" ? "charged card on file" : how,
+        str(payload.billFromMonth) ? `billed from ${payload.billFromMonth}` : null,
+        num(payload.firstInvoiceCents) != null ? `first invoice ${fmt.cents(payload.firstInvoiceCents as number)}` : null,
+        num(payload.offlineCents) ? `paid offline ${fmt.cents(payload.offlineCents as number)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || null;
+    }
     case "workspace_status_changed":
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}${str(payload.note) ? ` — ${payload.note}` : ""}`;
     case "member_invited":

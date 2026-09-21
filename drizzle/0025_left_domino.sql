@@ -1,0 +1,2 @@
+ALTER TABLE "subscription_items" ADD COLUMN "quantity" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "subscription_items" ADD CONSTRAINT "subscription_items_quantity_chk" CHECK ("subscription_items"."quantity" >= 1);

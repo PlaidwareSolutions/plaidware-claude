@@ -89,3 +89,72 @@ export function formatMonth(yyyyMm: string | null | undefined): string {
   const x = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
   return fmt({ month: "long", year: "numeric" }, "UTC").format(x);
 }
+
+/**
+ * Noon UTC on a "YYYY-MM-DD" day, as ISO — a calendar day that still renders
+ * as itself in any display zone (midnight UTC would show as the day before
+ * in the Americas).
+ */
+export function fromIsoDay(day: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!m) throw new Error("Invalid day");
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)).toISOString();
+}
+
+/** "2026-09" — the calendar month of an instant in the display zone. */
+export function monthKey(d: DateInput = new Date(), timeZone = DISPLAY_TZ): string {
+  return isoDay(d, timeZone).slice(0, 7);
+}
+
+function tzOffsetMs(d: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(d);
+  const get = (t: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return asUtc - Math.floor(d.getTime() / 1000) * 1000;
+}
+
+/** The instant of local midnight on the 1st of a month in the given zone (DST-safe). */
+function zonedMonthStart(y: number, mo: number, timeZone: string): Date {
+  const naive = Date.UTC(y, mo - 1, 1);
+  let guess = naive;
+  for (let i = 0; i < 2; i++) guess = naive - tzOffsetMs(new Date(guess), timeZone);
+  return new Date(guess);
+}
+
+/**
+ * Bounds of a "YYYY-MM" month in the display zone: `start` is local midnight
+ * on the 1st, `end` the same for the following month (exclusive).
+ */
+export function monthBounds(yyyyMm: string, timeZone = DISPLAY_TZ): { start: Date; end: Date } {
+  const m = /^(\d{4})-(\d{2})$/.exec(yyyyMm);
+  const mo = m ? Number(m[2]) : 0;
+  if (!m || mo < 1 || mo > 12) throw new Error("Invalid month");
+  const y = Number(m[1]);
+  return {
+    start: zonedMonthStart(y, mo, timeZone),
+    end: zonedMonthStart(mo === 12 ? y + 1 : y, mo === 12 ? 1 : mo + 1, timeZone),
+  };
+}
+
+/** Inclusive "YYYY-MM" keys from one month through another; empty when `from` is later. */
+export function monthKeysBetween(from: string, to: string): string[] {
+  const idx = (k: string) => {
+    const m = /^(\d{4})-(\d{2})$/.exec(k);
+    if (!m) throw new Error("Invalid month");
+    return Number(m[1]) * 12 + Number(m[2]) - 1;
+  };
+  const a = idx(from);
+  const b = idx(to);
+  const out: string[] = [];
+  for (let i = a; i <= b; i++) out.push(`${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`);
+  return out;
+}
