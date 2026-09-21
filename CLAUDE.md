@@ -62,6 +62,22 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   invoice.upcoming renewal notices + pre-due reminders (billing_policy).
   First paid invoice promotes the card to customer default (standalone
   invoice auto-charge depends on it). Smokes: scripts/smoke-*.ts.
+- Ops start (2026-09-20): `/ops/clients/[id]/billing` → Start subscription
+  (`billing/start-service.ts`, pure rules in `start-logic.ts`): negotiated unit
+  prices, `subscription_items.quantity` (Stripe item quantity; MRR and the
+  outbound/partner contracts multiply), one-time work charged / already paid
+  offline / waived, collection by emailed invoice (`collection_method:
+  send_invoice`, no card) or the card on file, and a "Bill from" month: Stripe
+  is created with `backdate_start_date` + `billing_cycle_anchor` (1st of next
+  month) + `proration_behavior: none`, and the Hub issues ONE catch-up invoice
+  tied to the subscription (per-month lines with periods; `invoices.billing_month`
+  marks it). Offline money = `createOfflinePaidInvoice` (auto_advance off,
+  paid out-of-band, `metadata.settlement=offline` stops the webhook echo from
+  touching the subscription). Payment method `cash` exists. Setup links carry
+  the same terms (quantity/settlement/billFromMonth on the invite; offline cash
+  is invoiced when the link is made; finalize pays the catch-up with the saved
+  card). Smoke: scripts/smoke-ops-start.ts; Stripe behavior spike:
+  scripts/spike-backdate.ts.
 
 ## MHub integration (2026-08-23)
 

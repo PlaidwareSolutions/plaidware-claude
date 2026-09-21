@@ -72,6 +72,7 @@ async function main() {
   assert(appItem?.amountCents === 4000, "override snapshotted on item");
   const domItem = items.find((i) => i.componentId === domain.id);
   assert(domItem?.interval === "year", "yearly interval snapshotted");
+  assert(items.every((i) => i.quantity === 1), "self-serve checkout snapshots quantity 1");
 
   // Sync local status via Stripe (webhookless in this script)
   const localSub = (await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, co.subscriptionId) }))!;

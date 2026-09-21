@@ -136,6 +136,23 @@ async function main() {
   });
   assert(hostInv?.billingMonth === month && hostInv.amountDueCents === 7900, "hosting invoice $79 for last month");
 
+  console.log("7) manual invoice already paid offline (cash) — no email, paid at once…");
+  const cash = await createManualInvoice({
+    tenantId: org.id,
+    lineItems: [{ name: "Training binders", amountCents: 2500 }],
+    daysUntilDue: 14,
+    contact: { email: u.email, name: u.name },
+    collect: "paid_offline",
+    payment: { method: "cash", reference: "cash 9/20" },
+    recordedByUserId: u.id,
+  });
+  assert(cash.settledOffline, "settledOffline");
+  const cashRow = (await db.query.invoices.findFirst({ where: eq(invoices.id, cash.invoiceId) }))!;
+  assert(cashRow.status === "paid" && cashRow.kind === "manual", "cash invoice paid locally");
+  assert((await stripe.invoices.retrieve(cashRow.stripeInvoiceId!)).status === "paid", "cash invoice paid in Stripe");
+  const cashPays = await db.query.payments.findMany({ where: eq(payments.invoiceId, cash.invoiceId) });
+  assert(cashPays.length === 1 && cashPays[0].method === "cash", "one cash payment row");
+
   console.log("cleanup…");
   for (const i of await db.query.invoices.findMany({ where: eq(invoices.tenantId, org.id) })) {
     if (i.stripeInvoiceId && i.status !== "paid") {

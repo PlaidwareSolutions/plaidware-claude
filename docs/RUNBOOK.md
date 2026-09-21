@@ -114,3 +114,34 @@ Better Auth's raw `/update-user` and `/change-email` routes are disabled.
   re-mails the same invitation and moves the expiry forward; the link shows
   who invited whom where and locks signup to the invited address; accepting
   needs a verified session matching that address.
+
+## Ops-started subscriptions, backdating and offline payments (2026-09)
+
+- **Start subscription** (client Billing tab, ops admin) creates the Stripe
+  subscription directly. "Start now — Stripe emails the invoice" uses
+  `collection_method: send_invoice`; Stripe emails the subscription's own
+  invoices only when the Dashboard setting *Billing → Subscriptions and
+  emails → "Email finalized invoices to customers"* is ON. The Hub calls
+  `sendInvoice` itself only for invoices it creates (manual invoices and the
+  backdated catch-up). Verify once per Stripe account in test mode.
+- **Bill from (backdating).** Verified on the API (scripts/spike-backdate.ts):
+  `backdate_start_date` + a future `billing_cycle_anchor` + `proration_behavior:
+  "none"` yields an active subscription with NO Stripe first invoice and no
+  Stripe-generated lines; pending invoice items would only be swept into the
+  anchor's invoice. So the Hub issues the catch-up itself: one invoice tied to
+  the subscription (`invoices.create({ subscription })` — never combine with
+  `pending_invoice_items_behavior`) with one line per elapsed month per
+  monthly item (periods set) plus a prorated line for yearly/other intervals.
+  Month boundaries use `NEXT_PUBLIC_DISPLAY_TZ`.
+- **Offline money** (cash/check/Zelle/wire) is a real Stripe invoice created
+  with `auto_advance: false` and marked `paid_out_of_band` immediately, so the
+  client's Stripe history and the Hub ledger agree and nobody is emailed a
+  bill. Its `metadata.settlement = offline` makes the `invoice.paid` echo skip
+  `onInvoicePaid`. Offline invoices created for a setup link survive a
+  revoke/expiry (the money is real) — refund in Stripe if the deal is off; the
+  revoke audit row lists their ids.
+- **Quantities.** `subscription_items.quantity` is passed to Stripe; a
+  Dashboard quantity edit is mirrored by `customer.subscription.updated`.
+  Legacy duplicate rows still add up in the MHub/partner feeds.
+- **Migrations 0024/0025**: `ALTER TYPE payment_method ADD VALUE 'cash'` (its
+  own migration; PG ≥ 12) and the `quantity` column.
