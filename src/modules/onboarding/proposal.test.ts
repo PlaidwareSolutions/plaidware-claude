@@ -132,3 +132,89 @@ describe("invite-held pricing (items shape)", () => {
     expect(p.componentIds).toEqual(["a", "b", "c"]);
   });
 });
+
+describe("quantities, settlement and backdating on a setup link", () => {
+  const comps = [
+    comp({ id: "onb", name: "School Onboarding", kind: "one_time", interval: null, amountCents: 120000, sortOrder: 0 }),
+    comp({ id: "sub", name: "Subscription", amountCents: 12900, sortOrder: 1 }),
+    comp({ id: "extra", name: "Extra Location", amountCents: 5900, sortOrder: 2 }),
+    comp({ id: "maint", name: "Maintenance", interval: "year", amountCents: 12000, sortOrder: 3 }),
+  ];
+  const dealEntry: InviteProductEntry = {
+    productId: "drivorata",
+    items: [
+      { componentId: "onb", priceCents: 50000, settlement: { mode: "offline", invoiceId: "inv_1", payment: { method: "cash", reference: null, receivedAt: null } } },
+      { componentId: "sub", priceCents: 4000 },
+      { componentId: "extra", priceCents: 100, quantity: 2 },
+      { componentId: "maint", priceCents: 100 },
+    ],
+    domainUrl: null,
+  };
+
+  it("multiplies by quantity and leaves offline-settled work out of due today", () => {
+    const p = buildProductProposal(dealEntry, "Drivorata", comps, new Map());
+    expect(p.lines.map((l) => [l.name, l.amountCents, l.quantity, l.settled])).toEqual([
+      ["School Onboarding", 50000, 1, true],
+      ["Subscription", 4000, 1, false],
+      ["Extra Location", 200, 2, false],
+      ["Maintenance", 100, 1, false],
+    ]);
+    expect(p.dueTodayCents).toBe(4300);
+    expect(p.monthlyCents).toBe(4200);
+    expect(p.yearlyCents).toBe(100);
+    expect(p.catchUpCents).toBe(0);
+    expect(p.items).toEqual([
+      { componentId: "onb", quantity: 1, settlement: { mode: "offline", invoiceId: "inv_1" } },
+      { componentId: "sub", quantity: 1 },
+      { componentId: "extra", quantity: 2 },
+      { componentId: "maint", quantity: 1 },
+    ]);
+  });
+
+  it("waived lines are $0 and flagged", () => {
+    const p = buildProductProposal(
+      { productId: "p", items: [{ componentId: "onb", priceCents: 0, settlement: { mode: "waive" } }, { componentId: "sub", priceCents: null }], domainUrl: null },
+      "P",
+      comps.slice(0, 2),
+      new Map(),
+    );
+    expect(p.lines[0]).toMatchObject({ amountCents: 0, waived: true, settled: false });
+    expect(p.dueTodayCents).toBe(12900);
+    expect(p.items[0]).toEqual({ componentId: "onb", quantity: 1, settlement: { mode: "waive" } });
+  });
+
+  it("a backdated entry replaces the first period with per-month catch-up lines as of now", () => {
+    const p = buildProductProposal({ ...dealEntry, billFromMonth: "2026-07" }, "Drivorata", comps, new Map(), {
+      now: new Date("2026-09-20T15:00:00Z"),
+      timeZone: "UTC",
+    });
+    const catchUp = p.lines.filter((l) => l.catchUp);
+    expect(catchUp.map((l) => [l.name, l.amountCents])).toEqual([
+      ["Subscription — July 2026", 4000],
+      ["Subscription — August 2026", 4000],
+      ["Subscription — September 2026", 4000],
+      ["Extra Location ×2 — July 2026", 200],
+      ["Extra Location ×2 — August 2026", 200],
+      ["Extra Location ×2 — September 2026", 200],
+      ["Maintenance — Jul 1 – Sep 30, 2026 (prorated)", 25],
+    ]);
+    expect(p.catchUpCents).toBe(12625);
+    expect(p.dueTodayCents).toBe(12625);
+    expect(p.billFromMonth).toBe("2026-07");
+    expect(p.monthlyCents).toBe(4200);
+    // Paid a month later: October joins the catch-up.
+    const later = buildProductProposal({ ...dealEntry, billFromMonth: "2026-07" }, "Drivorata", comps, new Map(), {
+      now: new Date("2026-10-03T15:00:00Z"),
+      timeZone: "UTC",
+    });
+    expect(later.lines.filter((l) => l.catchUp && l.name.startsWith("Subscription")).length).toBe(4);
+  });
+
+  it("legacy entries map to quantity-1 plans", async () => {
+    const { entryItemPlan } = await import("./proposal");
+    expect(entryItemPlan({ productId: "p", componentIds: ["a", "b"], domainUrl: null })).toEqual([
+      { componentId: "a", quantity: 1 },
+      { componentId: "b", quantity: 1 },
+    ]);
+  });
+});
