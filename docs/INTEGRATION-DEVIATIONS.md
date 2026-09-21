@@ -7,11 +7,11 @@ Hub picked a behavior MHub should be aware of.
 
 ## Deviations
 
-1. **`addon_components[].quantity` is always the per-name row count.**
-   `subscription_items` has no quantity column — buying the same add-on twice
-   creates two rows. The payload aggregates duplicates by component name, so
-   `quantity` is ≥1 and correct in aggregate, but there is no way to set a
-   quantity in one purchase today.
+1. **`addon_components[].quantity` is the summed item quantity per name.**
+   `subscription_items.quantity` (billing v2, 2026-09) is passed to Stripe as
+   the item quantity; ops can start a subscription with "Extra Location ×2" in
+   one purchase. Legacy multiples (duplicate rows from before the column
+   existed) still aggregate by component name, so `quantity` is ≥1 either way.
 
 ## Clarifications
 

@@ -48,6 +48,7 @@ export async function listPartnerSubscriptions(
           subscriptionId: subscriptionItems.subscriptionId,
           name: subscriptionItems.name,
           status: subscriptionItems.status,
+          quantity: subscriptionItems.quantity,
           role: productComponents.role,
         })
         .from(subscriptionItems)
@@ -55,11 +56,12 @@ export async function listPartnerSubscriptions(
         .where(inArray(subscriptionItems.subscriptionId, ids))
     : [];
 
+  // quantity = sum of item quantities per name (legacy duplicate rows still add up)
   const addonsBySub = new Map<string, Map<string, number>>();
   for (const it of items) {
     if (it.role === "base" || it.status === "canceled") continue;
     const bucket = addonsBySub.get(it.subscriptionId) ?? new Map<string, number>();
-    bucket.set(it.name, (bucket.get(it.name) ?? 0) + 1);
+    bucket.set(it.name, (bucket.get(it.name) ?? 0) + it.quantity);
     addonsBySub.set(it.subscriptionId, bucket);
   }
 

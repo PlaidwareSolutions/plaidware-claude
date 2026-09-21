@@ -37,7 +37,7 @@ export const PERMISSIONS_REFERENCE: readonly PermissionEntry[] = [
   { area: "ops", surface: "Clients", action: "Invite, change role, remove a member; fix a phone; decide role requests", requires: ops("admin"), note: "Ops admins bypass workspace membership and status." },
   { area: "ops", surface: "Accounts (Access)", action: "Change a platform role, add staff, send a set-password link", requires: ops("admin") },
   { area: "ops", surface: "Accounts (Access)", action: "Disable or re-enable an account, revoke sessions", requires: ops("admin") },
-  { area: "ops", surface: "Billing", action: "Manual invoices, offline payments, hosting fees, dunning, billing policy, price overrides, subscription holds", requires: ops("admin") },
+  { area: "ops", surface: "Billing", action: "Start subscriptions (incl. backdated), manual invoices, offline payments, hosting fees, dunning, billing policy, price overrides, subscription holds", requires: ops("admin") },
   { area: "ops", surface: "Products", action: "Create or edit products, components, defaults, metric definitions", requires: ops("admin") },
   { area: "ops", surface: "Provisioning", action: "Configure and run DNS verification, manage or reveal credentials", requires: ops("admin") },
   { area: "ops", surface: "Monitoring", action: "Acknowledge an incident", requires: ops("support"), note: "First-responder triage." },

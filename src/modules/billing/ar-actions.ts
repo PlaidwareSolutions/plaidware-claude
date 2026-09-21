@@ -19,6 +19,9 @@ import {
 } from "./ar-service";
 import { cancelSubscription, changeSubscriptionItems } from "./service";
 import { revalidateClientViews } from "@/lib/ops-revalidate";
+import { offlinePaymentDetailsSchema, startSubscriptionSchema, type StartSubscriptionInput } from "./contracts";
+import { startSubscriptionByOps, tenantOwnerContact, type StartSubscriptionResult } from "./start-service";
+import { revokePendingSetupsForProduct } from "../onboarding/service";
 
 /** Every ops surface that renders billing state. */
 function revalidateBilling(tenantId?: string) {
@@ -37,13 +40,18 @@ const manualInvoiceSchema = z.object({
     .array(z.object({ name: z.string().min(1).max(120), amountCents: z.number().int().min(1) }))
     .min(1)
     .max(20),
-  daysUntilDue: z.number().int().min(1).max(90),
+  daysUntilDue: z.number().int().min(1).max(90).default(14),
   memo: z.string().max(500).optional(),
-  collect: z.enum(["auto", "send"]).default("send"),
+  collect: z.enum(["auto", "send", "paid_offline"]).default("send"),
+  /** Required when collect is "paid_offline". */
+  payment: offlinePaymentDetailsSchema.optional(),
+}).refine((v) => v.collect !== "paid_offline" || Boolean(v.payment), {
+  message: "Offline payment details required",
+  path: ["payment"],
 });
 
 export async function createManualInvoiceAction(
-  input: z.infer<typeof manualInvoiceSchema>,
+  input: z.input<typeof manualInvoiceSchema>,
 ): Promise<ActionResult> {
   try {
     const session = await requireOps();
@@ -51,6 +59,7 @@ export async function createManualInvoiceAction(
     await createManualInvoice({
       ...p,
       contact: { email: session.user.email, name: session.user.name },
+      recordedByUserId: session.user.id,
     });
     revalidateBilling(p.tenantId);
     return { ok: true };
@@ -59,17 +68,13 @@ export async function createManualInvoiceAction(
   }
 }
 
-const offlinePaymentSchema = z.object({
+const offlinePaymentSchema = offlinePaymentDetailsSchema.extend({
   invoiceId: z.string().uuid(),
   amountCents: z.number().int().min(1),
-  method: z.enum(["check", "zelle", "wire", "other"]),
-  reference: z.string().max(120).optional(),
-  receivedAt: z.string().optional(), // ISO date
-  note: z.string().max(300).optional(),
 });
 
 export async function recordOfflinePaymentAction(
-  input: z.infer<typeof offlinePaymentSchema>,
+  input: z.input<typeof offlinePaymentSchema>,
 ): Promise<{ ok: true; settled: boolean } | { ok: false; error: string }> {
   try {
     const session = await requireOps();
@@ -82,6 +87,7 @@ export async function recordOfflinePaymentAction(
       receivedAt: p.receivedAt ? new Date(p.receivedAt) : undefined,
       recordedByUserId: session.user.id,
       note: p.note,
+      sendReceipt: p.sendReceipt,
     });
     revalidateBilling();
     return { ok: true, settled: r.settled };
@@ -260,17 +266,22 @@ export async function opsReactivateSubscriptionAction(subscriptionId: string): P
 const itemsSchema = z.object({
   subscriptionId: z.string().uuid(),
   addComponentIds: z.array(z.string().uuid()).max(20).default([]),
+  /** Add with a quantity (recurring add-ons); an add-on already on the sub grows by it. */
+  addItems: z
+    .array(z.object({ componentId: z.string().uuid(), quantity: z.number().int().min(1).max(999).default(1) }))
+    .max(20)
+    .default([]),
   removeItemIds: z.array(z.string().uuid()).max(20).default([]),
 });
 
 /** Ops-side add-on changes: recurring prorates now, one-time invoices + charges now. */
 export async function opsChangeSubscriptionItemsAction(
-  input: z.infer<typeof itemsSchema>,
+  input: z.input<typeof itemsSchema>,
 ): Promise<{ ok: true; added: number; removed: number } | { ok: false; error: string }> {
   try {
     const session = await requireOps();
     const p = itemsSchema.parse(input);
-    if (p.addComponentIds.length === 0 && p.removeItemIds.length === 0) {
+    if (p.addComponentIds.length === 0 && p.addItems.length === 0 && p.removeItemIds.length === 0) {
       throw new Error("Nothing to change");
     }
     const r = await changeSubscriptionItems({ ...p, actorUserId: session.user.id });
@@ -305,5 +316,30 @@ export async function sendCardSetupLinkAction(
     return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not create the link" };
+  }
+}
+
+/**
+ * Ops starts a subscription with negotiated terms — no card needed when
+ * collection is by emailed invoice. Any open setup link for the same product
+ * is superseded first.
+ */
+export async function opsStartSubscriptionAction(
+  input: StartSubscriptionInput,
+): Promise<({ ok: true } & StartSubscriptionResult) | { ok: false; error: string }> {
+  try {
+    const session = await requireOps();
+    const p = startSubscriptionSchema.parse(input);
+    const owner = await tenantOwnerContact(p.tenantId);
+    await revokePendingSetupsForProduct(p.tenantId, p.productId, session.user.id);
+    const r = await startSubscriptionByOps({
+      ...p,
+      actorUserId: session.user.id,
+      contact: owner ?? { email: session.user.email, name: session.user.name },
+    });
+    revalidateBilling(p.tenantId);
+    return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not start the subscription" };
   }
 }

@@ -1,10 +1,10 @@
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../../db";
 import { getStripe } from "../../lib/stripe";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
 import { formatCents } from "../../lib/money";
-import { formatDate } from "../../lib/dates";
+import { formatDate, formatMonth } from "../../lib/dates";
 import { env } from "../../env";
 import { tenantStatusAllows, tenantStatusMessage } from "../../policy/tenant-status";
 import { member, organization, user } from "../auth/schema";
@@ -23,7 +23,10 @@ import {
   mapStripeInvoiceStatus,
   mapStripeSubscriptionStatus,
   resolveInterval,
+  type LocalSubscriptionStatus,
 } from "./mappers";
+import { isOfflinePaymentMethod } from "./payment-methods";
+import type { CheckoutItemPlan, StartBackdate } from "./start-logic";
 import {
   deleteMintedCoupon,
   recordRedemption,
@@ -131,6 +134,49 @@ export async function ensureOverrideStripePrice(
   return price.id;
 }
 
+/**
+ * The Stripe Price for a component at a given unit amount: the tenant's
+ * override price when it matches, the catalog price at list, else an ad-hoc
+ * price minted for this checkout (a negotiated deal not saved as an override).
+ */
+export async function ensureStripePriceForAmount(
+  component: typeof productComponents.$inferSelect,
+  productName: string,
+  tenantId: string,
+  amountCents: number,
+  override?: typeof tenantPriceOverrides.$inferSelect,
+): Promise<string> {
+  if (override && override.amountCents === amountCents) {
+    return ensureOverrideStripePrice(override, component, productName);
+  }
+  if (amountCents === component.amountCents) return ensureComponentStripePrice(component, productName);
+  const stripeProductId = await ensureStripeProductFor(component, productName);
+  const iv = resolveInterval(component);
+  const price = await getStripe().prices.create({
+    product: stripeProductId,
+    unit_amount: amountCents,
+    currency: component.currency,
+    ...(iv ? { recurring: { interval: iv.interval, interval_count: iv.intervalCount } } : {}),
+    metadata: { component_id: component.id, tenant_id: tenantId, adhoc: "1" },
+  });
+  return price.id;
+}
+
+/** The customer's default card, else the one saved on any of their live Stripe subscriptions. */
+export async function findCustomerPaymentMethod(stripeCustomerId: string): Promise<string | null> {
+  const stripe = getStripe();
+  const customer = (await stripe.customers.retrieve(stripeCustomerId)) as Stripe.Customer;
+  const def = customer.invoice_settings?.default_payment_method;
+  if (def) return typeof def === "string" ? def : def.id;
+  const subs = await stripe.subscriptions.list({ customer: stripeCustomerId, status: "all", limit: 20 });
+  for (const s of subs.data) {
+    if (["canceled", "incomplete_expired"].includes(s.status)) continue;
+    const pm = s.default_payment_method;
+    if (pm) return typeof pm === "string" ? pm : pm.id;
+  }
+  return null;
+}
+
 /** Effective per-tenant pricing map for a product's components. */
 export async function getTenantOverrides(tenantId: string, componentIds: string[]) {
   if (componentIds.length === 0) return new Map<string, typeof tenantPriceOverrides.$inferSelect>();
@@ -161,7 +207,26 @@ export type CheckoutResult = {
     source: "manual" | "auto";
     firstInvoiceSavingsCents: number;
   } | null;
+  stripeSubscriptionId: string | null;
+  /** Local status at return (an invoice-collected or backdated start is active at once). */
+  status: LocalSubscriptionStatus;
+  /** The invoice that bills the start — Stripe's own, or the Hub's catch-up when backdated. */
+  firstInvoice: CheckoutFirstInvoice | null;
 };
+
+export type CheckoutFirstInvoice = {
+  stripeInvoiceId: string;
+  localInvoiceId: string | null;
+  hostedInvoiceUrl: string | null;
+  amountDueCents: number;
+  status: string;
+};
+
+/** Ops "start now" without a card: Stripe emails each invoice with a hosted pay link. */
+export type CheckoutCollection = { method: "send_invoice"; daysUntilDue: number };
+export type CheckoutBackdate = Pick<StartBackdate, "billFromMonth" | "startAt" | "anchorAt" | "lines">;
+
+const toUnix = (d: Date) => Math.floor(d.getTime() / 1000);
 
 export async function createCheckout(opts: {
   tenantId: string;
@@ -176,6 +241,16 @@ export async function createCheckout(opts: {
    *  in the browser (multi-product setup links). Money moves only AFTER the
    *  local row has won the one-live-sub-per-product slot. */
   offSession?: { paymentMethodId: string };
+  /** Ops-decided terms per component (quantity, explicit unit price, one-time
+   *  settlement). Components listed here are selected; base/required still
+   *  join automatically. Absent → self-serve rules (quantity 1, overrides). */
+  itemPlan?: CheckoutItemPlan[];
+  /** Invoice-collected start (no card). */
+  collection?: CheckoutCollection;
+  skipTrial?: boolean;
+  /** Bill calendar months from the past: Stripe starts at `startAt`, bills
+   *  from `anchorAt`, and the Hub invoices the elapsed months now. */
+  backdate?: CheckoutBackdate;
 }): Promise<CheckoutResult> {
   const stripe = getStripe();
 
@@ -201,20 +276,34 @@ export async function createCheckout(opts: {
     ),
   });
   // The base charge and required add-ons are always in; optional add-ons only
-  // when selected (billing v2 main + add-ons model).
+  // when selected (billing v2 main + add-ons model) or planned by ops.
+  const plan = new Map((opts.itemPlan ?? []).map((p) => [p.componentId, p]));
   const selected = allComponents.filter(
-    (c) => c.role === "base" || c.isRequired || opts.componentIds.includes(c.id),
+    (c) => c.role === "base" || c.isRequired || plan.has(c.id) || opts.componentIds.includes(c.id),
   );
+  const planOf = (c: (typeof selected)[number]) => plan.get(c.id);
+  const settlementOf = (c: (typeof selected)[number]) => planOf(c)?.settlement?.mode ?? "invoice";
+  /** Quantity only means something on recurring add-ons. */
+  const qty = (c: (typeof selected)[number]) =>
+    isRecurringKind(c.kind) && c.role !== "base" ? Math.max(1, Math.floor(planOf(c)?.quantity ?? 1)) : 1;
   const recurring = selected.filter((c) => isRecurringKind(c.kind));
   const oneTime = selected.filter((c) => c.kind === "one_time");
+  const oneTimeStripe = oneTime.filter((c) => settlementOf(c) !== "offline");
+  const oneTimeOffline = oneTime.filter((c) => settlementOf(c) === "offline");
   if (recurring.length === 0 && oneTime.length === 0) {
     throw new Error("Select at least one billable component");
   }
+  if (opts.backdate && recurring.length === 0) throw new Error("Backdating needs a recurring item");
+  if (opts.backdate && opts.promoCode) throw new Error("Promo codes can't combine with a backdated start");
 
-  // Per-tenant negotiated prices apply to this checkout (billing v2).
+  // Per-tenant negotiated prices apply to this checkout (billing v2); an
+  // explicit planned price beats them, and a waived one-time item is $0.
   const overrides = await getTenantOverrides(opts.tenantId, selected.map((c) => c.id));
-  const effectiveAmount = (c: (typeof selected)[number]) =>
-    overrides.get(c.id)?.amountCents ?? c.amountCents;
+  const effectiveAmount = (c: (typeof selected)[number]) => {
+    const p = planOf(c);
+    if (p?.settlement?.mode === "waive") return 0;
+    return p?.amountCents ?? overrides.get(c.id)?.amountCents ?? c.amountCents;
+  };
 
   // Pre-check the one-live-subscription rule for a friendly error;
   // the partial unique index is the race-proof backstop.
@@ -232,12 +321,10 @@ export async function createCheckout(opts: {
   const customerId = await ensureTenantStripeCustomer(opts.tenantId, opts.contact);
   const priceIds = new Map<string, string>();
   for (const c of selected) {
-    const ov = overrides.get(c.id);
+    if (settlementOf(c) === "offline") continue; // paid outside Stripe — no price needed
     priceIds.set(
       c.id,
-      ov
-        ? await ensureOverrideStripePrice(ov, c, product.name)
-        : await ensureComponentStripePrice(c, product.name),
+      await ensureStripePriceForAmount(c, product.name, opts.tenantId, effectiveAmount(c), overrides.get(c.id)),
     );
   }
 
@@ -245,19 +332,23 @@ export async function createCheckout(opts: {
   // suppressed when the tenant has negotiated (override) pricing on any
   // selected item, or when the caller opts out (client-setup links) — a
   // negotiated deal must never be silently discounted further.
-  const negotiated = [...overrides.keys()].some((id) => selected.some((c) => c.id === id));
+  const negotiated =
+    [...overrides.keys()].some((id) => selected.some((c) => c.id === id)) ||
+    selected.some((c) => planOf(c)?.amountCents != null && planOf(c)!.amountCents !== c.amountCents);
   const allowAuto = !negotiated && !opts.skipAutoPromos;
-  const promosOn = env.PROMOS_ENABLED === "true";
+  const promosOn = env.PROMOS_ENABLED === "true" && !opts.backdate;
   const resolvedPromo =
     promosOn && (opts.promoCode || allowAuto)
       ? await resolveCheckoutPromo({
           tenantId: opts.tenantId,
           productId: opts.productId,
-          items: selected.map((c) => ({
-            componentId: c.id,
-            kind: c.kind,
-            amountCents: effectiveAmount(c),
-          })),
+          items: selected
+            .filter((c) => settlementOf(c) !== "offline")
+            .map((c) => ({
+              componentId: c.id,
+              kind: c.kind,
+              amountCents: effectiveAmount(c) * qty(c),
+            })),
           code: opts.promoCode,
         })
       : null;
@@ -266,25 +357,42 @@ export async function createCheckout(opts: {
   let clientSecret: string | null = null;
   let mode: CheckoutResult["mode"] = "none";
   let trialEndsAt: Date | null = null;
-  let localStatus: "incomplete" | "trialing" = "incomplete";
+  let localStatus: LocalSubscriptionStatus = "incomplete";
   let firstInvoiceId: string | null = null;
   let firstInvoiceDueCents = 0;
+  let firstInvoice: CheckoutFirstInvoice | null = null;
+  /** Standalone Stripe invoices made in this call — voided on failure. */
+  const madeInvoiceIds: string[] = [];
+  const allOffline = recurring.length === 0 && oneTimeStripe.length === 0;
+  const collectionParams = opts.collection
+    ? { collection_method: "send_invoice" as const, days_until_due: opts.collection.daysUntilDue }
+    : null;
 
   try {
     if (recurring.length > 0) {
-      const trialDays = product.trialDays ?? 0;
+      const trialDays = opts.skipTrial || opts.backdate ? 0 : (product.trialDays ?? 0);
       const sub = await stripe.subscriptions.create({
         customer: customerId,
-        items: recurring.map((c) => ({ price: priceIds.get(c.id)! })),
+        items: recurring.map((c) => ({ price: priceIds.get(c.id)!, quantity: qty(c) })),
         billing_mode: { type: "flexible" },
-        payment_behavior: "default_incomplete",
-        payment_settings: { save_default_payment_method: "on_subscription" },
-        ...(opts.offSession
-          ? { default_payment_method: opts.offSession.paymentMethodId }
-          : {}),
+        ...(collectionParams ?? {
+          payment_behavior: "default_incomplete" as const,
+          payment_settings: { save_default_payment_method: "on_subscription" as const },
+          ...(opts.offSession ? { default_payment_method: opts.offSession.paymentMethodId } : {}),
+        }),
         ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
-        // One-time components ride the first invoice (PRD §4.4)
-        add_invoice_items: oneTime.map((c) => ({ price: priceIds.get(c.id)! })),
+        ...(opts.backdate
+          ? {
+              // Stripe records the true start and bills from the anchor; the
+              // elapsed months (and one-time work) go on the catch-up invoice below.
+              backdate_start_date: toUnix(opts.backdate.startAt),
+              billing_cycle_anchor: toUnix(opts.backdate.anchorAt),
+              proration_behavior: "none" as const,
+            }
+          : {
+              // One-time components ride the first invoice (PRD §4.4)
+              add_invoice_items: oneTimeStripe.map((c) => ({ price: priceIds.get(c.id)!, quantity: qty(c) })),
+            }),
         ...(resolvedPromo
           ? { discounts: [{ coupon: resolvedPromo.stripeCouponId }] }
           : {}),
@@ -292,14 +400,18 @@ export async function createCheckout(opts: {
       });
       stripeSubscriptionId = sub.id;
       // Mirror Stripe: a trial with a required one-time fee starts
-      // `incomplete` and flips to `trialing` when that fee is paid.
+      // `incomplete` and flips to `trialing` when that fee is paid; an
+      // invoice-collected or backdated start is active at once.
       if (sub.status === "trialing") localStatus = "trialing";
+      else if (sub.status === "active") localStatus = "active";
       trialEndsAt = sub.trial_end ? new Date(sub.trial_end * 1000) : null;
       const latestInvoice = sub.latest_invoice as Stripe.Invoice | null;
       firstInvoiceId = latestInvoice?.id ?? null;
       firstInvoiceDueCents = latestInvoice?.amount_due ?? 0;
       const confirmation = latestInvoice?.confirmation_secret ?? null;
-      if (confirmation?.client_secret) {
+      if (opts.collection) {
+        mode = "none"; // nothing to confirm in the browser — Stripe emails the invoice
+      } else if (confirmation?.client_secret) {
         clientSecret = confirmation.client_secret;
         mode = "payment";
       } else if (
@@ -309,6 +421,18 @@ export async function createCheckout(opts: {
         clientSecret = sub.pending_setup_intent.client_secret;
         mode = "setup";
       }
+      if (latestInvoice) {
+        firstInvoice = {
+          stripeInvoiceId: latestInvoice.id!,
+          localInvoiceId: null,
+          hostedInvoiceUrl: latestInvoice.hosted_invoice_url ?? null,
+          amountDueCents: latestInvoice.amount_due,
+          status: latestInvoice.status ?? "draft",
+        };
+      }
+    } else if (allOffline) {
+      // Everything was paid outside Stripe: no Stripe objects, live at once.
+      localStatus = "active";
     }
 
     // Insert the local row inside the try so a unique-violation race
@@ -321,44 +445,201 @@ export async function createCheckout(opts: {
         status: localStatus,
         stripeSubscriptionId,
         trialEndsAt,
+        ...(opts.backdate ? { subscribedAt: opts.backdate.startAt } : {}),
       })
       .returning();
 
-    // A trial is live immediately — MHub gets its activation now, not at
-    // first payment (webhooks_out no-ops for non-marketing products).
-    if (localStatus === "trialing") {
+    // A trial or an ops start is live immediately — MHub gets its activation
+    // now, not at first payment (webhooks_out no-ops for non-marketing products).
+    if (localStatus !== "incomplete") {
       await emitSubscriptionLifecycle(subRow.id, "subscription.activated");
     }
 
-    if (recurring.length === 0) {
+    if (recurring.length === 0 && !allOffline) {
       // One-time-only purchase: finalized invoice + PaymentIntent, no subscription.
       const invoice = await stripe.invoices.create({
         customer: customerId,
         auto_advance: false,
+        ...(collectionParams ?? {}),
         ...(resolvedPromo
           ? { discounts: [{ coupon: resolvedPromo.stripeCouponId }] }
           : {}),
         metadata: { subscription_id: subRow.id, tenant_id: opts.tenantId },
       });
-      for (const c of oneTime) {
+      madeInvoiceIds.push(invoice.id!);
+      for (const c of oneTimeStripe) {
         await stripe.invoiceItems.create({
           customer: customerId,
           invoice: invoice.id,
           pricing: { price: priceIds.get(c.id)! },
+          quantity: qty(c),
         });
       }
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id!, {
         expand: ["confirmation_secret"],
       });
+      if (opts.collection) await stripe.invoices.sendInvoice(finalized.id!).catch(() => {});
       firstInvoiceId = finalized.id ?? null;
       firstInvoiceDueCents = finalized.amount_due;
-      clientSecret = finalized.confirmation_secret?.client_secret ?? null;
+      clientSecret = opts.collection ? null : (finalized.confirmation_secret?.client_secret ?? null);
       mode = clientSecret ? "payment" : "none";
+      firstInvoice = {
+        stripeInvoiceId: finalized.id!,
+        localInvoiceId: null,
+        hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
+        amountDueCents: finalized.amount_due,
+        status: finalized.status ?? "open",
+      };
     } else if (stripeSubscriptionId) {
       // Tag the Stripe subscription with our id so webhooks route directly.
       await stripe.subscriptions.update(stripeSubscriptionId, {
         metadata: { subscription_id: subRow.id, tenant_id: opts.tenantId },
       });
+    }
+
+    if (opts.backdate && stripeSubscriptionId) {
+      // Backdated start: the catch-up (elapsed months + one-time work) is a
+      // Hub-made invoice tied to the subscription — Stripe issues none itself
+      // when the cycle anchor is ahead and prorations are off (verified in
+      // scripts/spike-backdate.ts).
+      const bd = opts.backdate;
+      const description = `${product.name} — billed from ${formatMonth(bd.billFromMonth)}`;
+      const invoice = await stripe.invoices.create({
+        customer: customerId,
+        subscription: stripeSubscriptionId,
+        auto_advance: false,
+        ...(collectionParams ?? { collection_method: "charge_automatically" as const }),
+        description,
+        metadata: {
+          subscription_id: subRow.id,
+          tenant_id: opts.tenantId,
+          catch_up: "1",
+          bill_from_month: bd.billFromMonth,
+        },
+      });
+      madeInvoiceIds.push(invoice.id!);
+      for (const l of bd.lines) {
+        await stripe.invoiceItems.create({
+          customer: customerId,
+          invoice: invoice.id,
+          description: l.name,
+          amount: l.cents,
+          currency: "usd",
+          period: { start: toUnix(l.periodStart), end: toUnix(l.periodEnd) },
+          metadata: {
+            component_id: l.componentId,
+            quantity: String(l.quantity),
+            unit_amount_cents: String(l.unitCents),
+            catch_up: "1",
+          },
+        });
+      }
+      for (const c of oneTimeStripe) {
+        await stripe.invoiceItems.create({
+          customer: customerId,
+          invoice: invoice.id,
+          pricing: { price: priceIds.get(c.id)! },
+          quantity: qty(c),
+        });
+      }
+      const finalized = await stripe.invoices.finalizeInvoice(invoice.id!, {
+        expand: ["confirmation_secret"],
+      });
+      if (opts.collection) await stripe.invoices.sendInvoice(finalized.id!).catch(() => {});
+      firstInvoiceId = finalized.id ?? null;
+      firstInvoiceDueCents = finalized.amount_due;
+      // Card paths pay this invoice: off-session below, or on-session when no
+      // setup intent was offered. A setup link keeps mode "setup" — the card
+      // is saved first and finalize charges the open invoice.
+      if (!opts.collection && !clientSecret && finalized.confirmation_secret?.client_secret) {
+        clientSecret = finalized.confirmation_secret.client_secret;
+        mode = "payment";
+      }
+      const [row] = await db
+        .insert(invoices)
+        .values({
+          tenantId: opts.tenantId,
+          subscriptionId: subRow.id,
+          kind: "product",
+          invoiceNumber: finalized.number ?? `INV-${finalized.id!.slice(-8).toUpperCase()}`,
+          status: "open",
+          amountDueCents: finalized.amount_due,
+          currency: finalized.currency,
+          description,
+          billingMonth: bd.billFromMonth, // marks a catch-up invoice (product kind)
+          lineItems: [
+            ...bd.lines.map((l) => ({
+              name: l.name,
+              amountCents: l.cents,
+              quantity: l.quantity,
+              unitAmountCents: l.unitCents,
+              periodStart: l.periodStart.toISOString(),
+              periodEnd: l.periodEnd.toISOString(),
+            })),
+            ...oneTimeStripe.map((c) => ({
+              name: c.name,
+              amountCents: effectiveAmount(c) * qty(c),
+              quantity: qty(c),
+              unitAmountCents: effectiveAmount(c),
+            })),
+          ],
+          stripeInvoiceId: finalized.id!,
+          hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
+          invoicePdfUrl: finalized.invoice_pdf ?? null,
+          periodStart: bd.startAt,
+          periodEnd: bd.anchorAt,
+          dueDate: finalized.due_date ? new Date(finalized.due_date * 1000) : null,
+        })
+        .onConflictDoNothing({ target: invoices.stripeInvoiceId })
+        .returning({ id: invoices.id });
+      firstInvoice = {
+        stripeInvoiceId: finalized.id!,
+        localInvoiceId: row?.id ?? null,
+        hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
+        amountDueCents: finalized.amount_due,
+        status: finalized.status ?? "open",
+      };
+    } else if (opts.collection && firstInvoice && stripeSubscriptionId) {
+      // Invoice-collected start: mirror Stripe's first invoice now so ops can
+      // record a payment before the webhook lands.
+      const stripeInv = await stripe.invoices.retrieve(firstInvoice.stripeInvoiceId, { expand: ["lines"] });
+      const [row] = await db
+        .insert(invoices)
+        .values({
+          tenantId: opts.tenantId,
+          subscriptionId: subRow.id,
+          kind: "product",
+          invoiceNumber: stripeInv.number ?? `INV-${stripeInv.id!.slice(-8).toUpperCase()}`,
+          status: mapStripeInvoiceStatus(stripeInv.status, "invoice.created"),
+          amountDueCents: stripeInv.amount_due,
+          currency: stripeInv.currency,
+          description: stripeInv.description,
+          lineItems: stripeInv.lines.data.map((l) => ({
+            name: l.description ?? "Line item",
+            amountCents: l.amount,
+            quantity: l.quantity ?? 1,
+            ...(l.period
+              ? {
+                  periodStart: new Date(l.period.start * 1000).toISOString(),
+                  periodEnd: new Date(l.period.end * 1000).toISOString(),
+                }
+              : {}),
+          })),
+          stripeInvoiceId: stripeInv.id!,
+          hostedInvoiceUrl: stripeInv.hosted_invoice_url ?? null,
+          invoicePdfUrl: stripeInv.invoice_pdf ?? null,
+          periodStart: stripeInv.period_start ? new Date(stripeInv.period_start * 1000) : null,
+          periodEnd: stripeInv.period_end ? new Date(stripeInv.period_end * 1000) : null,
+          dueDate: stripeInv.due_date ? new Date(stripeInv.due_date * 1000) : null,
+        })
+        .onConflictDoNothing({ target: invoices.stripeInvoiceId })
+        .returning({ id: invoices.id });
+      firstInvoice = {
+        ...firstInvoice,
+        localInvoiceId: row?.id ?? null,
+        hostedInvoiceUrl: stripeInv.hosted_invoice_url ?? firstInvoice.hostedInvoiceUrl,
+        status: stripeInv.status ?? firstInvoice.status,
+      };
     }
 
     // Snapshot line items at purchase prices.
@@ -368,6 +649,7 @@ export async function createCheckout(opts: {
     await db.insert(subscriptionItems).values(
       selected.map((c) => {
         const iv = resolveInterval(c);
+        const offline = settlementOf(c) === "offline";
         return {
           subscriptionId: subRow.id,
           componentId: c.id,
@@ -376,9 +658,15 @@ export async function createCheckout(opts: {
           intervalCount: iv?.intervalCount ?? 1,
           name: c.name,
           amountCents: effectiveAmount(c),
+          quantity: qty(c),
           currency: c.currency,
-          status: c.kind === "one_time" ? ("pending" as const) : ("active" as const),
-          stripePriceId: priceIds.get(c.id),
+          status:
+            c.kind === "one_time"
+              ? offline
+                ? ("paid" as const)
+                : ("pending" as const)
+              : ("active" as const),
+          stripePriceId: priceIds.get(c.id) ?? null,
           stripeSubscriptionItemId:
             stripeSub?.items.data.find(
               (si) => si.price.id === priceIds.get(c.id),
@@ -386,6 +674,23 @@ export async function createCheckout(opts: {
         };
       }),
     );
+
+    // Offline-paid invoices made when a setup link was created now belong to
+    // this subscription (local row + Stripe metadata, best effort).
+    for (const c of oneTimeOffline) {
+      const s = planOf(c)?.settlement;
+      if (s?.mode !== "offline" || !s.invoiceId) continue;
+      const [linked] = await db
+        .update(invoices)
+        .set({ subscriptionId: subRow.id })
+        .where(and(eq(invoices.id, s.invoiceId), eq(invoices.tenantId, opts.tenantId), isNull(invoices.subscriptionId)))
+        .returning({ stripeInvoiceId: invoices.stripeInvoiceId });
+      if (linked?.stripeInvoiceId) {
+        await stripe.invoices
+          .update(linked.stripeInvoiceId, { metadata: { subscription_id: subRow.id } })
+          .catch(() => {});
+      }
+    }
 
     // Every subscription gets an ingest credential at birth (PRD §4.8).
     void mintIngestKey(subRow.id).catch(() => {});
@@ -418,6 +723,7 @@ export async function createCheckout(opts: {
           paymentStatus = "paid";
           mode = "none";
           clientSecret = null;
+          if (firstInvoice) firstInvoice = { ...firstInvoice, status: "paid" };
         } catch (err) {
           const code = (err as { code?: string })?.code ?? "";
           const msg = err instanceof Error ? err.message : String(err);
@@ -439,6 +745,9 @@ export async function createCheckout(opts: {
       clientSecret,
       mode,
       paymentStatus,
+      stripeSubscriptionId,
+      status: localStatus,
+      firstInvoice,
       appliedPromo: resolvedPromo
         ? {
             code: resolvedPromo.promo.code,
@@ -451,6 +760,9 @@ export async function createCheckout(opts: {
   } catch (e) {
     // Race-safe compensation: never leave orphaned Stripe billing objects.
     await deleteMintedCoupon(resolvedPromo);
+    for (const id of madeInvoiceIds) {
+      await stripe.invoices.voidInvoice(id).catch(() => stripe.invoices.del(id).catch(() => {}));
+    }
     if (stripeSubscriptionId) {
       await stripe.subscriptions
         .cancel(stripeSubscriptionId)
@@ -502,6 +814,8 @@ export async function cancelSubscription(subscriptionId: string): Promise<void> 
 export async function changeSubscriptionItems(opts: {
   subscriptionId: string;
   addComponentIds?: string[];
+  /** Ops: add with a quantity; an add-on already on the subscription grows by it (prorated). */
+  addItems?: { componentId: string; quantity?: number }[];
   removeItemIds?: string[];
   actorUserId: string;
 }): Promise<{ added: number; removed: number }> {
@@ -544,16 +858,37 @@ export async function changeSubscriptionItems(opts: {
   }
 
   // ---- additions ------------------------------------------------------------
-  const overrides = await getTenantOverrides(sub.tenantId, opts.addComponentIds ?? []);
-  for (const componentId of opts.addComponentIds ?? []) {
+  const adds = [
+    ...(opts.addComponentIds ?? []).map((componentId) => ({ componentId, quantity: 1 })),
+    ...(opts.addItems ?? []).map((a) => ({
+      componentId: a.componentId,
+      quantity: Math.max(1, Math.floor(a.quantity ?? 1)),
+    })),
+  ];
+  const overrides = await getTenantOverrides(sub.tenantId, adds.map((a) => a.componentId));
+  for (const { componentId, quantity: wanted } of adds) {
     const c = await db.query.productComponents.findFirst({
       where: eq(productComponents.id, componentId),
     });
     if (!c || !c.isActive || c.productId !== sub.productId) {
       throw new Error("That add-on doesn't belong to this product");
     }
-    if (existingItems.some((i) => i.componentId === c.id && ["active", "pending"].includes(i.status))) {
-      continue; // already on the subscription
+    const quantity = isRecurringKind(c.kind) && c.role !== "base" ? wanted : 1;
+    const current = existingItems.find((i) => i.componentId === c.id && ["active", "pending"].includes(i.status));
+    if (current) {
+      // Already on the subscription: a live recurring add-on grows by the
+      // asked quantity (prorated); anything else is a no-op.
+      if (!isRecurringKind(c.kind) || c.role === "base" || current.status !== "active" || !current.stripeSubscriptionItemId) {
+        continue;
+      }
+      const next = current.quantity + quantity;
+      await stripe.subscriptionItems.update(current.stripeSubscriptionItemId, {
+        quantity: next,
+        proration_behavior: "create_prorations",
+      });
+      await db.update(subscriptionItems).set({ quantity: next }).where(eq(subscriptionItems.id, current.id));
+      added++;
+      continue;
     }
     const ov = overrides.get(c.id);
     const priceId = ov
@@ -567,6 +902,7 @@ export async function changeSubscriptionItems(opts: {
       const si = await stripe.subscriptionItems.create({
         subscription: sub.stripeSubscriptionId,
         price: priceId,
+        quantity,
         proration_behavior: "create_prorations",
       });
       await db.insert(subscriptionItems).values({
@@ -577,6 +913,7 @@ export async function changeSubscriptionItems(opts: {
         intervalCount: iv?.intervalCount ?? 1,
         name: c.name,
         amountCents: amount,
+        quantity,
         currency: c.currency,
         status: "active",
         stripePriceId: priceId,
@@ -602,6 +939,7 @@ export async function changeSubscriptionItems(opts: {
         customer: org!.stripeCustomerId!,
         invoice: invoice.id,
         pricing: { price: priceId },
+        quantity,
       });
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id!);
       if (hasPm) await stripe.invoices.pay(finalized.id!).catch(() => {});
@@ -619,7 +957,7 @@ export async function changeSubscriptionItems(opts: {
           amountDueCents: finalized.amount_due,
           currency: finalized.currency,
           description: `${c.name} — added mid-subscription`,
-          lineItems: [{ name: c.name, amountCents: amount }],
+          lineItems: [{ name: c.name, amountCents: amount * quantity, quantity, unitAmountCents: amount }],
           stripeInvoiceId: finalized.id!,
           hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
           invoicePdfUrl: finalized.invoice_pdf ?? null,
@@ -632,6 +970,7 @@ export async function changeSubscriptionItems(opts: {
         kind: c.kind,
         name: c.name,
         amountCents: amount,
+        quantity,
         currency: c.currency,
         status: "pending", // flips to paid via the invoice.paid webhook
         stripePriceId: priceId,
@@ -741,6 +1080,13 @@ export async function applyInvoiceEvent(
     lineItems: (invoice.lines?.data ?? []).map((l) => ({
       name: l.description ?? "Line item",
       amountCents: l.amount,
+      quantity: l.quantity ?? 1,
+      ...(l.period
+        ? {
+            periodStart: new Date(l.period.start * 1000).toISOString(),
+            periodEnd: new Date(l.period.end * 1000).toISOString(),
+          }
+        : {}),
     })),
     stripeInvoiceId: invoice.id!,
     hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
@@ -763,13 +1109,18 @@ export async function applyInvoiceEvent(
         lineItems: values.lineItems,
         hostedInvoiceUrl: values.hostedInvoiceUrl,
         invoicePdfUrl: values.invoicePdfUrl,
-        paidAt: values.paidAt,
+        // An echo never moves a paid date ops already set (offline payments).
+        paidAt: sql`coalesce(${invoices.paidAt}, excluded.paid_at)`,
       },
     })
     .returning({ id: invoices.id });
 
+  // An invoice the Hub settled out-of-band (cash, check…) says nothing about
+  // the subscription's other items or its activation — only Stripe-collected
+  // money does.
+  const settledOffline = invoice.metadata?.settlement === "offline";
   if (status === "paid") {
-    if (localSub) {
+    if (localSub && !settledOffline) {
       await onInvoicePaid(localSub);
       // Savings ledger: accumulate the actual discounted dollars (PRD §4.6).
       await reconcileInvoiceDiscounts(invoice, localSub.id);
@@ -781,11 +1132,12 @@ export async function applyInvoiceEvent(
         where: eq(payments.invoiceId, localInvoice.id),
       });
       if (!already) {
+        const metaMethod = invoice.metadata?.payment_method;
         await recordPaymentRow({
           invoiceId: localInvoice.id,
           tenantId,
           amountCents: invoice.amount_paid,
-          method: "stripe_card",
+          method: settledOffline && metaMethod && isOfflinePaymentMethod(metaMethod) ? metaMethod : "stripe_card",
           reference: invoice.id ?? null,
           sendReceipt: true,
         });
@@ -916,20 +1268,24 @@ export async function applySubscriptionEvent(
     })
     .where(eq(subscriptions.id, localSub.id));
 
-  // Reconcile recurring items so mid-cycle changes made anywhere stay mirrored.
-  const liveStripeItemIds = new Set(stripeSub.items.data.map((i) => i.id));
+  // Reconcile recurring items so mid-cycle changes made anywhere stay
+  // mirrored: a Stripe item that vanished cancels the local row, a changed
+  // quantity (Dashboard edit) wins over the local one.
+  const stripeQty = new Map(stripeSub.items.data.map((i) => [i.id, i.quantity ?? 1]));
   const localItems = await db.query.subscriptionItems.findMany({
     where: eq(subscriptionItems.subscriptionId, localSub.id),
   });
   for (const item of localItems) {
-    if (
-      item.status === "active" &&
-      item.stripeSubscriptionItemId &&
-      !liveStripeItemIds.has(item.stripeSubscriptionItemId)
-    ) {
+    if (item.status !== "active" || !item.stripeSubscriptionItemId) continue;
+    if (!stripeQty.has(item.stripeSubscriptionItemId)) {
       await db
         .update(subscriptionItems)
         .set({ status: "canceled" })
+        .where(eq(subscriptionItems.id, item.id));
+    } else if (stripeQty.get(item.stripeSubscriptionItemId) !== item.quantity) {
+      await db
+        .update(subscriptionItems)
+        .set({ quantity: stripeQty.get(item.stripeSubscriptionItemId)! })
         .where(eq(subscriptionItems.id, item.id));
     }
   }
@@ -1006,7 +1362,7 @@ export async function sendTrialEndingReminder(stripeSub: Stripe.Subscription) {
   });
   const monthly = items
     .filter((i) => isRecurringKind(i.kind) && i.status === "active")
-    .reduce((s, i) => s + itemMrrCents(i, i.amountCents), 0);
+    .reduce((s, i) => s + itemMrrCents(i, i.amountCents * i.quantity), 0);
   await sendEmail({
     to: owner[0].email,
     subject: `Your ${product.name} trial ends in 3 days`,

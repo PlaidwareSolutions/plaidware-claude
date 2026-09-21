@@ -18,6 +18,7 @@ import {
 import { createBillingPortalSession, ensureTenantStripeCustomer } from "./service";
 import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 import { writeAudit } from "../audit/service";
+import type { OfflinePaymentDetails, OfflinePaymentMethod, PaymentMethod } from "./payment-methods";
 import { TENANT } from "@/lib/routes";
 
 // ---------------------------------------------------------------------------
@@ -99,9 +100,25 @@ export async function createManualInvoice(opts: {
   memo?: string;
   contact: { email: string; name: string };
   /** "auto" charges the card on file immediately (falls back to a hosted
-   *  payment link when none exists); "send" always emails the link. */
-  collect?: "auto" | "send";
-}): Promise<{ invoiceId: string; hostedInvoiceUrl: string | null; autoCharged: boolean }> {
+   *  payment link when none exists); "send" always emails the link;
+   *  "paid_offline" records money already received — no email, no charge. */
+  collect?: "auto" | "send" | "paid_offline";
+  payment?: OfflinePaymentDetails;
+  recordedByUserId?: string;
+}): Promise<{ invoiceId: string; hostedInvoiceUrl: string | null; autoCharged: boolean; settledOffline: boolean }> {
+  if (opts.collect === "paid_offline") {
+    if (!opts.payment || !opts.recordedByUserId) throw new Error("Offline payment details required");
+    const r = await createOfflinePaidInvoice({
+      tenantId: opts.tenantId,
+      kind: "manual",
+      contact: opts.contact,
+      description: opts.memo,
+      lines: opts.lineItems,
+      payment: opts.payment,
+      recordedByUserId: opts.recordedByUserId,
+    });
+    return { invoiceId: r.invoiceId, hostedInvoiceUrl: r.hostedInvoiceUrl, autoCharged: false, settledOffline: true };
+  }
   const stripe = getStripe();
   const customerId = await ensureTenantStripeCustomer(opts.tenantId, opts.contact);
 
@@ -163,7 +180,124 @@ export async function createManualInvoice(opts: {
     invoiceId: row.id,
     hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
     autoCharged: autoCharge,
+    settledOffline: false,
   };
+}
+
+export type OfflineInvoiceLine =
+  | { priceId: string; quantity: number; name: string; unitAmountCents: number }
+  | { name: string; amountCents: number };
+
+/**
+ * An invoice for money that already arrived outside Stripe (cash, check…):
+ * created with auto-advance off so Stripe never charges or emails, finalized,
+ * then marked paid out-of-band with the payment recorded — ledger, local row
+ * and Stripe agree from the first second. `settlement: offline` metadata
+ * keeps the webhook echo from touching the subscription (billing v2).
+ */
+export async function createOfflinePaidInvoice(opts: {
+  tenantId: string;
+  subscriptionId?: string | null;
+  contact: { email: string; name: string };
+  kind: "product" | "manual";
+  description?: string | null;
+  lines: OfflineInvoiceLine[];
+  payment: OfflinePaymentDetails;
+  recordedByUserId: string;
+}): Promise<{
+  invoiceId: string;
+  stripeInvoiceId: string;
+  invoiceNumber: string;
+  amountCents: number;
+  hostedInvoiceUrl: string | null;
+}> {
+  const stripe = getStripe();
+  if (opts.lines.length === 0) throw new Error("Nothing to invoice");
+  const receivedAt = opts.payment.receivedAt ? new Date(opts.payment.receivedAt) : undefined;
+  if (receivedAt && Number.isNaN(receivedAt.getTime())) throw new Error("Invalid received date");
+  const customerId = await ensureTenantStripeCustomer(opts.tenantId, opts.contact);
+
+  const invoice = await stripe.invoices.create({
+    customer: customerId,
+    auto_advance: false,
+    collection_method: "charge_automatically",
+    description: opts.description ?? undefined,
+    metadata: {
+      tenant_id: opts.tenantId,
+      ...(opts.subscriptionId ? { subscription_id: opts.subscriptionId } : {}),
+      ...(opts.kind === "manual" ? { invoice_kind: "manual" } : {}),
+      settlement: "offline",
+      payment_method: opts.payment.method,
+    },
+  });
+  let localId: string | null = null;
+  try {
+    for (const li of opts.lines) {
+      await stripe.invoiceItems.create({
+        customer: customerId,
+        invoice: invoice.id,
+        description: li.name,
+        ...("priceId" in li
+          ? { pricing: { price: li.priceId }, quantity: li.quantity }
+          : { amount: li.amountCents, currency: "usd" }),
+      });
+    }
+    const finalized = await stripe.invoices.finalizeInvoice(invoice.id!);
+    const lineItems = opts.lines.map((li) =>
+      "priceId" in li
+        ? { name: li.name, amountCents: li.unitAmountCents * li.quantity, quantity: li.quantity, unitAmountCents: li.unitAmountCents }
+        : { name: li.name, amountCents: li.amountCents },
+    );
+    const [row] = await db
+      .insert(invoices)
+      .values({
+        tenantId: opts.tenantId,
+        subscriptionId: opts.subscriptionId ?? null,
+        kind: opts.kind,
+        invoiceNumber: finalized.number ?? `${opts.kind === "manual" ? "MAN" : "INV"}-${finalized.id!.slice(-8).toUpperCase()}`,
+        status: "open",
+        amountDueCents: finalized.amount_due,
+        currency: finalized.currency,
+        description: opts.description ?? null,
+        lineItems,
+        stripeInvoiceId: finalized.id!,
+        hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
+        invoicePdfUrl: finalized.invoice_pdf ?? null,
+        dueDate: finalized.due_date ? new Date(finalized.due_date * 1000) : null,
+      })
+      .onConflictDoUpdate({
+        target: invoices.stripeInvoiceId,
+        set: { kind: opts.kind, subscriptionId: opts.subscriptionId ?? null, description: opts.description ?? null, lineItems },
+      })
+      .returning();
+    localId = row.id;
+    await recordOfflinePayment({
+      invoiceId: row.id,
+      amountCents: finalized.amount_due,
+      method: opts.payment.method,
+      reference: opts.payment.reference ?? null,
+      receivedAt,
+      recordedByUserId: opts.recordedByUserId,
+      note: opts.payment.note ?? null,
+      sendReceipt: opts.payment.sendReceipt,
+    });
+    return {
+      invoiceId: row.id,
+      stripeInvoiceId: finalized.id!,
+      invoiceNumber: row.invoiceNumber,
+      amountCents: finalized.amount_due,
+      hostedInvoiceUrl: finalized.hosted_invoice_url ?? null,
+    };
+  } catch (e) {
+    // Never leave a half-made invoice behind: delete a draft / void an open
+    // one in Stripe and drop the mirror. A Stripe-paid invoice is kept — the
+    // webhook echo brings the local row up to date.
+    const cur = await stripe.invoices.retrieve(invoice.id!).catch(() => null);
+    if (cur?.status === "draft") await stripe.invoices.del(invoice.id!).catch(() => {});
+    else if (cur && cur.status !== "paid" && cur.status !== "void") await stripe.invoices.voidInvoice(invoice.id!).catch(() => {});
+    if (localId && cur?.status !== "paid") await db.delete(invoices).where(eq(invoices.id, localId)).catch(() => {});
+    throw e;
+  }
 }
 
 /** Pre-due reminders (billing v2): open invoices with a due date inside the
@@ -411,7 +545,7 @@ export async function recordPaymentRow(opts: {
   invoiceId: string;
   tenantId: string;
   amountCents: number;
-  method: "stripe_card" | "stripe_ach" | "check" | "zelle" | "wire" | "other";
+  method: PaymentMethod;
   reference?: string | null;
   receivedAt?: Date;
   recordedByUserId?: string | null;
@@ -446,21 +580,29 @@ export async function recordPaymentRow(opts: {
   }
 }
 
-/** Ops records an offline payment (check/Zelle/wire). Partials supported;
- *  full coverage marks the Stripe invoice paid out-of-band. */
+/** Ops records an offline payment (cash/check/Zelle/wire). Partials supported;
+ *  full coverage marks the Stripe invoice paid out-of-band. `receivedAt` is
+ *  the day the money arrived and becomes the invoice's paid date. */
 export async function recordOfflinePayment(opts: {
   invoiceId: string;
   amountCents: number;
-  method: "check" | "zelle" | "wire" | "other";
-  reference?: string;
+  method: OfflinePaymentMethod;
+  reference?: string | null;
   receivedAt?: Date;
   recordedByUserId: string;
-  note?: string;
+  note?: string | null;
+  sendReceipt?: boolean;
 }): Promise<{ settled: boolean }> {
   const inv = await db.query.invoices.findFirst({ where: eq(invoices.id, opts.invoiceId) });
   if (!inv) throw new Error("Invoice not found");
   if (inv.status === "paid" || inv.status === "void") {
     throw new Error(`Invoice is already ${inv.status}`);
+  }
+  if (
+    opts.receivedAt &&
+    (Number.isNaN(opts.receivedAt.getTime()) || opts.receivedAt.getTime() > Date.now() + 86_400_000)
+  ) {
+    throw new Error("Received date can't be in the future");
   }
 
   await recordPaymentRow({ ...opts, tenantId: inv.tenantId });
@@ -474,7 +616,7 @@ export async function recordOfflinePayment(opts: {
     }
     await db
       .update(invoices)
-      .set({ status: "paid", paidAt: new Date(), amountPaidCents: inv.amountDueCents })
+      .set({ status: "paid", paidAt: opts.receivedAt ?? new Date(), amountPaidCents: inv.amountDueCents })
       .where(eq(invoices.id, inv.id));
     await resolveDunningForInvoice(inv.id);
   } else {
@@ -483,6 +625,20 @@ export async function recordOfflinePayment(opts: {
       .set({ amountPaidCents: await paidTotalCents(inv.id) })
       .where(eq(invoices.id, inv.id));
   }
+  await writeAudit({
+    tenantId: inv.tenantId,
+    subscriptionId: inv.subscriptionId,
+    actorUserId: opts.recordedByUserId,
+    kind: "offline_payment_recorded",
+    payload: {
+      invoiceId: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      amountCents: opts.amountCents,
+      method: opts.method,
+      reference: opts.reference ?? null,
+      settled: covered,
+    },
+  });
   return { settled: covered };
 }
 

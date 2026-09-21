@@ -58,18 +58,19 @@ async function buildSubscriptionPayload(
     .select({
       name: subscriptionItems.name,
       status: subscriptionItems.status,
+      quantity: subscriptionItems.quantity,
       role: productComponents.role,
     })
     .from(subscriptionItems)
     .innerJoin(productComponents, eq(subscriptionItems.componentId, productComponents.id))
     .where(eq(subscriptionItems.subscriptionId, sub.id));
 
-  // No quantity column exists — multiples are duplicate item rows, so the
-  // contract's quantity is the per-name row count.
+  // The contract's quantity is the sum of item quantities per name (legacy
+  // multiples were duplicate rows; they still add up).
   const counts = new Map<string, number>();
   for (const it of items) {
     if (it.role === "base" || it.status === "canceled") continue;
-    counts.set(it.name, (counts.get(it.name) ?? 0) + 1);
+    counts.set(it.name, (counts.get(it.name) ?? 0) + it.quantity);
   }
 
   return {

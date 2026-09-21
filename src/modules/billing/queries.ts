@@ -1,13 +1,13 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../../db";
 import { getStripe, stripeConfigured } from "../../lib/stripe";
-import { organization } from "../auth/schema";
+import { member, organization, user } from "../auth/schema";
 import { productComponents, products } from "../catalog/schema";
 import { listAllProductsOps } from "../catalog/queries";
 import { subscriptionProvisioning } from "../provisioning/schema";
 import { dunningStates, payments } from "./ar-schema";
-import { invoices, subscriptionItems, subscriptions, tenantPriceOverrides } from "./schema";
+import { invoices, subscriptionItems, subscriptions, tenantPriceOverrides, type InvoiceLineItem } from "./schema";
 import { intervalLabel, isRecurringKind, itemMrrCents, LIVE_SUBSCRIPTION_STATUSES, MRR_STATUSES } from "./mappers";
 
 export type SubscriptionItemDto = {
@@ -16,7 +16,9 @@ export type SubscriptionItemDto = {
   interval: string | null;
   intervalCount: number;
   name: string;
+  /** Unit price; the line is amountCents × quantity. */
   amountCents: number;
+  quantity: number;
   status: string;
 };
 
@@ -94,7 +96,7 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
       )
         ? own
             .filter((i) => i.status === "active")
-            .reduce((sum, i) => sum + itemMrrCents(i, i.amountCents), 0)
+            .reduce((sum, i) => sum + itemMrrCents(i, i.amountCents * i.quantity), 0)
         : 0,
       items: own.map((i) => ({
         id: i.id,
@@ -103,6 +105,7 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
         intervalCount: i.intervalCount,
         name: i.name,
         amountCents: i.amountCents,
+        quantity: i.quantity,
         status: i.status,
       })),
     };
@@ -160,7 +163,7 @@ export async function getPlatformBillingStats() {
         ),
       })
     : [];
-  const mrrCents = items.reduce((s, i) => s + itemMrrCents(i, i.amountCents), 0);
+  const mrrCents = items.reduce((s, i) => s + itemMrrCents(i, i.amountCents * i.quantity), 0);
   const failed = await db.query.invoices.findMany({
     where: eq(invoices.status, "failed"),
     columns: { id: true, amountDueCents: true, amountPaidCents: true },
@@ -246,6 +249,7 @@ export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
       intervalCount: subscriptionItems.intervalCount,
       name: subscriptionItems.name,
       amountCents: subscriptionItems.amountCents,
+      quantity: subscriptionItems.quantity,
       status: subscriptionItems.status,
       role: productComponents.role,
     })
@@ -261,15 +265,16 @@ export async function listAllSubscriptionsOps(): Promise<OpsSubscriptionDto[]> {
     const monthlyCents = live
       ? own
           .filter((i) => i.status === "active")
-          .reduce((sum, i) => sum + itemMrrCents(i, i.amountCents), 0)
+          .reduce((sum, i) => sum + itemMrrCents(i, i.amountCents * i.quantity), 0)
       : 0;
     const oneTimeCents = own
       .filter((i) => !isRecurringKind(i.kind) && i.status !== "canceled")
-      .reduce((sum, i) => sum + i.amountCents, 0);
+      .reduce((sum, i) => sum + i.amountCents * i.quantity, 0);
+    // Quantity is a column now; legacy multiples (duplicate rows) still add up.
     const addonCounts = new Map<string, number>();
     for (const i of own) {
       if (i.role === "base" || i.status !== "active") continue;
-      addonCounts.set(i.name, (addonCounts.get(i.name) ?? 0) + 1);
+      addonCounts.set(i.name, (addonCounts.get(i.name) ?? 0) + i.quantity);
     }
     return {
       id: s.id,
@@ -310,6 +315,9 @@ export type OpsInvoiceDto = {
   dueDate: string | null;
   paidAt: string | null;
   createdAt: string;
+  description: string | null;
+  /** Mirrored lines; catch-up months carry a period. */
+  lineItems: InvoiceLineItem[];
   /** Failed, or open and past its due date — computed once here so views stay pure. */
   pastDue: boolean;
   /** Open (unresolved) dunning case, if any. */
@@ -336,6 +344,8 @@ export async function listAllInvoicesOps(
       dueDate: invoices.dueDate,
       paidAt: invoices.paidAt,
       createdAt: invoices.createdAt,
+      description: invoices.description,
+      lineItems: invoices.lineItems,
     })
     .from(invoices)
     .innerJoin(organization, eq(invoices.tenantId, organization.id))
@@ -580,4 +590,96 @@ export async function listAddonOptions(
       ];
     }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Ops → Client: what the "Start subscription" dialog needs
+// ---------------------------------------------------------------------------
+
+export type StartOptionComponent = {
+  id: string;
+  name: string;
+  role: string;
+  kind: string;
+  interval: string | null;
+  intervalCount: number;
+  isRequired: boolean;
+  listCents: number;
+  overrideCents: number | null;
+};
+
+export type StartOptionsDto = {
+  products: {
+    id: string;
+    name: string;
+    slug: string;
+    color: string | null;
+    trialDays: number | null;
+    /** Already live for this client — can't be started again. */
+    hasLiveSubscription: boolean;
+    components: StartOptionComponent[];
+  }[];
+  /** Live Stripe read: the customer has a default card (charge-now is possible). */
+  cardOnFile: boolean;
+  ownerEmail: string | null;
+  ownerName: string | null;
+  stripeConfigured: boolean;
+};
+
+export async function getStartSubscriptionOptions(tenantId: string): Promise<StartOptionsDto> {
+  const [prods, comps, overrides, live, org, owners] = await Promise.all([
+    db.query.products.findMany({ where: eq(products.isActive, true), orderBy: [asc(products.sortOrder)] }),
+    db.query.productComponents.findMany({
+      where: eq(productComponents.isActive, true),
+      orderBy: [asc(productComponents.sortOrder)],
+    }),
+    db.query.tenantPriceOverrides.findMany({ where: eq(tenantPriceOverrides.tenantId, tenantId) }),
+    db.query.subscriptions.findMany({
+      where: and(eq(subscriptions.tenantId, tenantId), inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES)),
+      columns: { productId: true },
+    }),
+    db.query.organization.findFirst({ where: eq(organization.id, tenantId), columns: { stripeCustomerId: true } }),
+    db
+      .select({ email: user.email, name: user.name })
+      .from(member)
+      .innerJoin(user, eq(member.userId, user.id))
+      .where(and(eq(member.organizationId, tenantId), eq(member.role, "owner")))
+      .limit(1),
+  ]);
+  const liveProductIds = new Set(live.map((s) => s.productId));
+  const override = new Map(overrides.map((o) => [o.componentId, o.amountCents]));
+  let cardOnFile = false;
+  if (org?.stripeCustomerId && stripeConfigured()) {
+    cardOnFile = await getStripe()
+      .customers.retrieve(org.stripeCustomerId)
+      .then((c) => Boolean((c as Stripe.Customer).invoice_settings?.default_payment_method))
+      .catch(() => false);
+  }
+  return {
+    products: prods.map((p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      color: p.color,
+      trialDays: p.trialDays,
+      hasLiveSubscription: liveProductIds.has(p.id),
+      components: comps
+        .filter((c) => c.productId === p.id)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          role: c.role,
+          kind: c.kind,
+          interval: c.interval,
+          intervalCount: c.intervalCount,
+          isRequired: c.isRequired,
+          listCents: c.amountCents,
+          overrideCents: override.get(c.id) ?? null,
+        })),
+    })),
+    cardOnFile,
+    ownerEmail: owners[0]?.email ?? null,
+    ownerName: owners[0]?.name ?? null,
+    stripeConfigured: stripeConfigured(),
+  };
 }
