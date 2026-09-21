@@ -5,14 +5,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, Copy, Link2, Plus, Trash2 } from "lucide-react";
-import type { ProductDto } from "@/modules/catalog/queries";
+import type { ComponentDto, ProductDto } from "@/modules/catalog/queries";
 import { setContactStatusAction } from "@/modules/contact/actions";
 import { createClientSetupAction, lookupClientEmailAction } from "../actions";
-import { buildProductProposal, combineTotals } from "../proposal";
-import { formatCents, toCents } from "@/lib/money";
+import { buildProductProposal, combineTotals, type InviteProductEntry } from "../proposal";
+import { formatCents } from "@/lib/money";
+import { formatMonth, isoDay, monthKey } from "@/lib/dates";
 import { normalizePhone } from "@/lib/phone";
 import { OPS } from "@/lib/routes";
-import { intervalLabel, isRecurringKind } from "@/modules/billing/mappers";
+import { isRecurringKind } from "@/modules/billing/mappers";
+import { rowsToItems, seedTermRows, type TermComponent, type TermRow } from "@/modules/billing/start-form";
+import { ProductTermsEditor } from "@/modules/billing/components/product-terms-editor";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,14 +34,13 @@ import {
 const STEPS = ["Client", "Workspace", "Products & pricing", "Domains", "Review"] as const;
 type Step = 0 | 1 | 2 | 3 | 4;
 
-const cadence = (c: { kind: string; interval?: string | null; intervalCount?: number | null }) =>
-  c.kind === "one_time" ? "one-time" : intervalLabel(c);
-
 type Section = {
   productId: string;
   domainUrl: string;
-  /** componentId → included + price as a dollars string (prefilled with list). */
-  items: Record<string, { included: boolean; price: string }>;
+  /** "YYYY-MM" or "" — bill calendar months from here (the catch-up rides the link's payment). */
+  billFromMonth: string;
+  /** componentId → negotiated terms (prefilled with list). */
+  items: Record<string, TermRow>;
 };
 
 type Lookup =
@@ -47,6 +49,48 @@ type Lookup =
   | { state: "existing"; name: string; needsPassword: boolean; workspace: { id: string; name: string } | null };
 
 export type OnboardInitial = { clientName?: string; clientEmail?: string; tenantName?: string; phone?: string };
+
+const toTerm = (c: ComponentDto): TermComponent => ({
+  id: c.id,
+  name: c.name,
+  kind: c.kind,
+  role: c.role,
+  interval: c.interval,
+  intervalCount: c.intervalCount,
+  isRequired: c.isRequired,
+  isActive: true,
+  listCents: c.amountCents,
+  overrideCents: null,
+});
+
+/** The invite entry a section describes — the shape the server stores and the welcome page prices. Throws on a bad amount. */
+function sectionEntry(product: ProductDto, s: Section): InviteProductEntry {
+  const items = rowsToItems(product.components.map(toTerm), s.items);
+  return {
+    productId: product.id,
+    items: items.map((i) => {
+      const c = product.components.find((x) => x.id === i.componentId)!;
+      const st = i.settlement;
+      return {
+        componentId: i.componentId,
+        priceCents: i.amountCents === c.amountCents ? null : i.amountCents,
+        ...(i.quantity > 1 ? { quantity: i.quantity } : {}),
+        ...(st?.mode === "waive" ? { settlement: { mode: "waive" as const } } : {}),
+        ...(st?.mode === "offline"
+          ? {
+              settlement: {
+                mode: "offline" as const,
+                invoiceId: null,
+                payment: { method: st.payment.method, reference: st.payment.reference ?? null, receivedAt: st.payment.receivedAt ?? null },
+              },
+            }
+          : {}),
+      };
+    }),
+    domainUrl: s.domainUrl.trim() || null,
+    billFromMonth: s.billFromMonth || null,
+  };
+}
 
 export function OnboardClientPage({
   products,
@@ -67,7 +111,7 @@ export function OnboardClientPage({
   });
   const [lookup, setLookup] = useState<Lookup>({ state: "idle" });
   const [tenantName, setTenantName] = useState(initial?.tenantName ?? "");
-  const [sections, setSections] = useState<Section[]>([{ productId: "", domainUrl: "", items: {} }]);
+  const [sections, setSections] = useState<Section[]>([{ productId: "", domainUrl: "", billFromMonth: "", items: {} }]);
   const [sendEmail, setSendEmail] = useState(true);
   const [result, setResult] = useState<{ link: string; tenantId: string; superseded: number } | null>(null);
 
@@ -92,18 +136,7 @@ export function OnboardClientPage({
     const p = products.find((x) => x.id === productId);
     setSections((prev) =>
       prev.map((s, i) =>
-        i === index
-          ? {
-              ...s,
-              productId,
-              items: Object.fromEntries(
-                (p?.components ?? []).map((c) => [
-                  c.id,
-                  { included: c.role === "base" || c.isRequired, price: (c.amountCents / 100).toFixed(2) },
-                ]),
-              ),
-            }
-          : s,
+        i === index ? { ...s, productId, items: p ? seedTermRows(p.components.map(toTerm), isoDay()) : {} } : s,
       ),
     );
   }
@@ -117,14 +150,7 @@ export function OnboardClientPage({
         const product = productOf(s)!;
         const chosen = product.components.filter((c) => s.items[c.id]?.included);
         return buildProductProposal(
-          {
-            productId: product.id,
-            items: chosen.map((c) => {
-              const cents = toCents(s.items[c.id].price);
-              return { componentId: c.id, priceCents: cents === c.amountCents ? null : cents };
-            }),
-            domainUrl: s.domainUrl || null,
-          },
+          sectionEntry(product, s),
           product.name,
           chosen.map((c, i) => ({ ...c, sortOrder: i })),
           new Map(),
@@ -152,16 +178,20 @@ export function OnboardClientPage({
         clientEmail: client.email.trim(),
         phone: client.phone.trim() || undefined,
         tenantName: attachTo ? attachTo.name : tenantName.trim(),
+        tenantId: attachTo?.id,
         products: ready.map((s) => {
           const product = productOf(s)!;
-          const chosen = product.components.filter((c) => s.items[c.id]?.included);
+          const items = rowsToItems(product.components.map(toTerm), s.items);
           return {
             productId: product.id,
-            items: chosen.map((c) => {
-              const cents = toCents(s.items[c.id].price);
-              return { componentId: c.id, priceCents: cents === c.amountCents ? null : cents };
-            }),
+            items: items.map((i) => ({
+              componentId: i.componentId,
+              priceCents: i.amountCents,
+              quantity: i.quantity,
+              settlement: i.settlement,
+            })),
             domainUrl: s.domainUrl.trim() || undefined,
+            billFromMonth: s.billFromMonth || undefined,
           };
         }),
         sendEmailToClient: sendEmail,
@@ -181,8 +211,8 @@ export function OnboardClientPage({
       );
       if (leadId) void setContactStatusAction(leadId, "contacted");
       router.refresh();
-    } catch {
-      toast.error("Check the price fields");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Check the price fields");
     } finally {
       setBusy(false);
     }
@@ -190,6 +220,7 @@ export function OnboardClientPage({
 
   if (result) {
     const domainsToVerify = ready.filter((s) => s.domainUrl.trim()).length;
+    const paidOffline = proposal?.products.flatMap((p) => p.lines).filter((l) => l.settled).reduce((s, l) => s + l.amountCents, 0) ?? 0;
     return (
       <div className="flex max-w-2xl flex-col gap-6">
         <Card className="border-success/40">
@@ -222,6 +253,11 @@ export function OnboardClientPage({
                 {sendEmail ? "The client received the link by email." : "Send the client the link above."}{" "}
                 Their payment activates {ready.length === 1 ? "the product" : `all ${ready.length} products`} and saves the card for renewals.
               </li>
+              {paidOffline > 0 && (
+                <li>
+                  {formatCents(paidOffline)} paid offline is already recorded as a paid invoice on the client&apos;s Billing tab; the link charges only the rest.
+                </li>
+              )}
               {domainsToVerify > 0 && (
                 <li>
                   Once live, the domain{domainsToVerify === 1 ? "" : "s"} get a verification token automatically — send the client the DNS records from the{" "}
@@ -353,46 +389,35 @@ export function OnboardClientPage({
                     {product && (
                       <div className="grid gap-2">
                         <Label>Items & prices — edit any price; it applies to this client&apos;s onboarding only</Label>
-                        {product.components.map((c) => {
-                          const st = section.items[c.id] ?? { included: false, price: "" };
-                          const locked = c.role === "base";
-                          let custom = false;
-                          try { custom = st.included && st.price.trim() !== "" && toCents(st.price) !== c.amountCents; } catch { custom = false; }
-                          return (
-                            <div key={c.id} className="flex items-center gap-2 rounded-md border p-2">
-                              <Checkbox checked={st.included} disabled={locked} onCheckedChange={(v) => updateSection(i, { items: { ...section.items, [c.id]: { ...st, included: Boolean(v) } } })} />
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm text-heading">
-                                  {c.name}
-                                  {locked && <span className="ml-1.5 text-[10px] uppercase text-coral">main</span>}
-                                  {custom && <Badge variant="warning" className="ml-1.5 text-[10px]">custom</Badge>}
-                                </div>
-                                <div className="text-[11px] text-muted-foreground">list {formatCents(c.amountCents)} {cadence(c)}</div>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-xs text-muted-foreground">$</span>
-                                <Input
-                                  className="h-8 w-24 text-right text-sm"
-                                  value={st.price}
-                                  onChange={(e) =>
-                                    updateSection(i, {
-                                      // Typing a price for an unticked item includes it — nobody prices what they're not selling.
-                                      items: { ...section.items, [c.id]: { included: st.included || locked || e.target.value.trim() !== "", price: e.target.value } },
-                                    })
-                                  }
-                                />
-                                <span className="w-14 text-[11px] text-muted-foreground">{cadence(c)}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
+                        <ProductTermsEditor
+                          mode="setup_link"
+                          components={product.components.map(toTerm)}
+                          rows={section.items}
+                          onChange={(rows) => updateSection(i, { items: rows })}
+                        />
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Label htmlFor={`bill-from-${i}`} className="text-xs">Bill from</Label>
+                          <Input
+                            id={`bill-from-${i}`}
+                            type="month"
+                            max={monthKey()}
+                            className="h-8 w-40 text-xs"
+                            value={section.billFromMonth}
+                            onChange={(e) => updateSection(i, { billFromMonth: e.target.value })}
+                          />
+                          <span className="text-[11px] text-muted-foreground">
+                            {section.billFromMonth
+                              ? `The client pays ${formatMonth(section.billFromMonth)} through this month on the link; renewals then run on the 1st.`
+                              : "Leave empty to start on the day they pay."}
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>
                 );
               })}
               {chosenIds.length < products.length && (
-                <Button variant="outline" className="w-fit gap-2" onClick={() => setSections((prev) => [...prev, { productId: "", domainUrl: "", items: {} }])}>
+                <Button variant="outline" className="w-fit gap-2" onClick={() => setSections((prev) => [...prev, { productId: "", domainUrl: "", billFromMonth: "", items: {} }])}>
                   <Plus className="size-4" /> Add another product
                 </Button>
               )}
@@ -431,12 +456,21 @@ export function OnboardClientPage({
                     <span className="font-semibold text-heading">{p.productName}</span>
                     {p.domainUrl && <span className="text-xs text-muted-foreground">{p.domainUrl}</span>}
                   </div>
-                  {p.lines.map((l) => (
+                  {p.lines.filter((l) => !l.catchUp).map((l) => (
                     <div key={l.name} className="flex justify-between gap-2">
-                      <span className="text-muted-foreground">{l.name}</span>
+                      <span className="text-muted-foreground">
+                        {l.name}{l.quantity > 1 ? ` ×${l.quantity}` : ""}
+                        {l.settled && <Badge variant="success" className="ml-1.5 text-[10px]">paid offline</Badge>}
+                        {l.waived && <Badge variant="outline" className="ml-1.5 text-[10px]">waived</Badge>}
+                      </span>
                       <span className="tabular-nums text-heading">{formatCents(l.amountCents)} <span className="text-xs text-muted-foreground">{l.oneTime ? "one-time" : l.cadence}</span></span>
                     </div>
                   ))}
+                  {p.billFromMonth && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Billed from {formatMonth(p.billFromMonth)} — the link charges the {formatCents(p.catchUpCents)} catch-up; renewals run on the 1st.
+                    </div>
+                  )}
                 </div>
               ))}
               <div className="flex justify-between border-t pt-2 text-base font-semibold text-heading">

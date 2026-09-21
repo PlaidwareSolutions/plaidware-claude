@@ -12,6 +12,8 @@ import { completeSetupPasswordAction, finalizeSetupAction, startSetupCheckoutAct
 import { PaymentForm } from "@/modules/billing/components/checkout-flow";
 import { authClient, useSession } from "@/lib/auth-client";
 import { formatCents } from "@/lib/money";
+import { formatMonth } from "@/lib/dates";
+import { Badge } from "@/components/ui/badge";
 import { AUTH, TENANT, withQuery } from "@/lib/routes";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
@@ -228,15 +230,35 @@ export function WelcomeFlow({
                   {p.productName}
                 </div>
               )}
-              {p.lines.map((l) => (
-                <div key={l.name} className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">{l.name}</span>
-                  <span className="tabular-nums text-heading">
-                    {formatCents(l.amountCents)}
-                    <span className="text-xs text-muted-foreground"> {l.oneTime ? "one-time" : l.cadence}</span>
-                  </span>
+              {p.lines
+                .filter((l) => !l.catchUp)
+                .map((l) => (
+                  <div key={l.name} className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      {l.name}
+                      {l.quantity > 1 ? ` ×${l.quantity}` : ""}
+                      {l.settled && <Badge variant="outline" className="ml-1.5 text-[10px]">paid</Badge>}
+                      {l.waived && <Badge variant="outline" className="ml-1.5 text-[10px]">waived</Badge>}
+                    </span>
+                    <span className={`tabular-nums ${l.settled ? "text-muted-foreground" : "text-heading"}`}>
+                      {formatCents(l.amountCents)}
+                      <span className="text-xs text-muted-foreground"> {l.oneTime ? "one-time" : l.cadence}</span>
+                    </span>
+                  </div>
+                ))}
+              {p.billFromMonth && p.lines.some((l) => l.catchUp) && (
+                <div className="mt-1 rounded-md border bg-secondary/40 px-2 py-1.5">
+                  <div className="text-xs font-semibold text-heading">Billed from {formatMonth(p.billFromMonth)}</div>
+                  {p.lines
+                    .filter((l) => l.catchUp)
+                    .map((l) => (
+                      <div key={l.name} className="flex justify-between gap-2 text-xs">
+                        <span className="text-muted-foreground">{l.name}</span>
+                        <span className="tabular-nums text-heading">{formatCents(l.amountCents)}</span>
+                      </div>
+                    ))}
                 </div>
-              ))}
+              )}
             </div>
           ))}
           <div className="mt-2 flex justify-between border-t pt-2 text-base font-semibold text-heading">
@@ -302,7 +324,9 @@ export function WelcomeFlow({
           <CardHeader>
             <CardTitle className="text-base">
               {payment.mode === "setup"
-                ? "Save your payment method"
+                ? primary.dueTodayCents > 0
+                  ? "Save your card"
+                  : "Save your payment method"
                 : proposal.products.length > 1
                   ? `Payment — ${primary.productName}`
                   : "Payment"}
@@ -316,6 +340,12 @@ export function WelcomeFlow({
                 onSuccess={() => void settle()}
               />
             </Elements>
+            {payment.mode === "setup" && primary.dueTodayCents > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Your card is saved first; {formatCents(primary.dueTodayCents)} for {primary.productName} is charged to it
+                right after.
+              </p>
+            )}
             {others.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 Paying {formatCents(primary.dueTodayCents)} for {primary.productName} now;{" "}

@@ -150,7 +150,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
 
       <Section title="Products" icon={Package} count={live.length} actions={<Link href={OPS.clientTab(id, "billing")} className="text-sm text-primary hover:underline">Manage →</Link>}>
         {subscriptions.length === 0 ? (
-          <EmptyState icon={Package} title="No products yet" description="Products appear once the client completes a setup link or a checkout." />
+          <EmptyState icon={Package} title="No products yet" description="Products appear once ops starts a subscription or the client completes a setup link or checkout." />
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
             {subscriptions.map((s) => {

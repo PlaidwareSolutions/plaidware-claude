@@ -152,7 +152,7 @@ export function OpsCustomPricing({
     <Section
       title="Custom pricing"
       icon={BadgeDollarSign}
-      description="Standing prices for this client's future checkouts and add-ons; existing subscriptions keep their locked-in prices. Prices from a setup link apply to that onboarding only. Clear a field to return to list."
+      description="Standing prices for this client's future subscriptions, add-ons and renewals; existing subscriptions keep their locked-in prices. Starting a subscription can save its prices here; prices from a setup link apply to that onboarding only. Clear a field to return to list."
     >
       <div className="flex flex-col gap-4">
         {subscribedGroups.length === 0 && (

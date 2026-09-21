@@ -1,14 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { CreditCard, FilePlus2, Receipt, Timer } from "lucide-react";
-import type { AddonOption, OpsInvoiceDto, PricingRow, SubscriptionAutomation, SubscriptionDto } from "../queries";
+import { CreditCard, FilePlus2, Plus, Receipt, Timer } from "lucide-react";
+import type {
+  AddonOption,
+  OpsInvoiceDto,
+  PricingRow,
+  StartOptionsDto,
+  SubscriptionAutomation,
+  SubscriptionDto,
+} from "../queries";
 import { formatUtcHour } from "@/lib/dates";
 import { Section } from "@/components/section";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { useOpsAccess } from "@/components/ops-access";
 import { NewInvoiceDialog, type TenantTarget } from "./ops-billing-dialogs";
+import { StartSubscriptionDialog } from "./start-subscription-dialog";
 import { SubscriptionCard } from "./subscription-card";
 import { InvoicesTable } from "./invoices-table";
 import { OpsCustomPricing } from "./ops-custom-pricing";
@@ -24,6 +32,7 @@ export function OpsClientBilling({
   policy,
   nextSweepUtc,
   stripeTestMode,
+  startable,
 }: {
   tenant: { id: string; name: string };
   subscriptions: SubscriptionDto[];
@@ -34,21 +43,63 @@ export function OpsClientBilling({
   policy: BillingPolicyDto;
   nextSweepUtc: string;
   stripeTestMode: boolean;
+  startable: StartOptionsDto;
 }) {
   const [invoiceFor, setInvoiceFor] = useState<TenantTarget | null>(null);
+  const [startOpen, setStartOpen] = useState(false);
+  const [startKey, setStartKey] = useState(0);
   const { canMutate } = useOpsAccess();
   const autoById = new Map(automation.map((a) => [a.subscriptionId, a]));
   const open = subscriptions.filter((s) => !["canceled", "expired"].includes(s.status));
   const closed = subscriptions.filter((s) => ["canceled", "expired"].includes(s.status));
   const pastDue = invoices.filter((i) => i.pastDue).length;
+  const canStart = canMutate && startable.products.some((p) => !p.hasLiveSubscription);
+  const openStart = () => {
+    setStartKey((k) => k + 1); // fresh dialog state per open
+    setStartOpen(true);
+  };
+  const startCta = canStart ? (
+    <Button size="sm" onClick={openStart}>
+      Start subscription
+    </Button>
+  ) : undefined;
 
   return (
     <div className="flex flex-col gap-8">
-      <Section title="Subscriptions" icon={CreditCard} count={open.length}>
+      <Section
+        title="Subscriptions"
+        icon={CreditCard}
+        count={open.length}
+        actions={
+          canStart ? (
+            <Button size="sm" className="gap-2" onClick={openStart}>
+              <Plus className="size-4" /> Start subscription
+            </Button>
+          ) : undefined
+        }
+      >
         {subscriptions.length === 0 ? (
-          <EmptyState icon={CreditCard} title="No subscriptions" description="Products appear here once the client completes a setup link or checkout." />
+          <EmptyState
+            icon={CreditCard}
+            title="No subscriptions"
+            description={
+              canMutate
+                ? "Start one with the client's negotiated terms, or send a setup link so they add a card. Checkouts land here too."
+                : "Products appear here once ops starts a subscription or the client completes a setup link or checkout."
+            }
+            action={startCta}
+          />
         ) : (
           <div className="flex flex-col gap-3">
+            {open.length === 0 && (
+              <EmptyState
+                compact
+                icon={CreditCard}
+                title="No live subscriptions"
+                description="Every subscription for this client is closed."
+                action={startCta}
+              />
+            )}
             {open.map((s) => (
               <SubscriptionCard
                 key={s.id}
@@ -109,6 +160,16 @@ export function OpsClientBilling({
       </Section>
 
       <NewInvoiceDialog key={invoiceFor?.id ?? "none"} target={invoiceFor} onOpenChange={(o) => !o && setInvoiceFor(null)} />
+      {canMutate && (
+        <StartSubscriptionDialog
+          key={startKey}
+          tenant={tenant}
+          options={startable}
+          priorSubscriptions={subscriptions}
+          open={startOpen}
+          onOpenChange={setStartOpen}
+        />
+      )}
     </div>
   );
 }

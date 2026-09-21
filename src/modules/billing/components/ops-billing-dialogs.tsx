@@ -8,7 +8,10 @@ import {
   recordOfflinePaymentAction,
   setHostingFeeAction,
 } from "../ar-actions";
-import { toCents } from "@/lib/money";
+import { formatCents, toCents } from "@/lib/money";
+import { fromIsoDay, isoDay } from "@/lib/dates";
+import { useAction } from "@/lib/use-action";
+import { OFFLINE_PAYMENT_METHODS, PAYMENT_METHOD_LABEL, type OfflinePaymentMethod } from "../payment-methods";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,6 +34,7 @@ import {
  * The three ops billing dialogs, shared by the tenant page and the Billing
  * board. Each is open while its target is non-null. Render with
  * `key={target?.id ?? "none"}` so form state resets per target.
+ * Offline money (cash, check…) is recorded with the day it arrived.
  */
 
 export type TenantTarget = { id: string; name: string };
@@ -53,41 +57,56 @@ export type HostingTarget = {
 type DialogProps<T> = { target: T | null; onOpenChange: (open: boolean) => void };
 
 export function NewInvoiceDialog({ target, onOpenChange }: DialogProps<TenantTarget>) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const { run, pending } = useAction();
   const [lines, setLines] = useState([{ name: "", amount: "" }]);
   const [daysUntilDue, setDaysUntilDue] = useState("14");
-  const [collect, setCollect] = useState<"send" | "auto">("send");
+  const [collect, setCollect] = useState<"send" | "auto" | "paid_offline">("send");
   const [memo, setMemo] = useState("");
+  const [payment, setPayment] = useState<{ method: OfflinePaymentMethod; reference: string; receivedAt: string }>({
+    method: "cash",
+    reference: "",
+    receivedAt: isoDay(),
+  });
 
   async function submit() {
     if (!target) return;
-    setBusy(true);
+    let lineItems: { name: string; amountCents: number }[];
     try {
-      const lineItems = lines
-        .filter((l) => l.name && l.amount)
-        .map((l) => ({ name: l.name, amountCents: toCents(l.amount) }));
-      const res = await createManualInvoiceAction({
-        tenantId: target.id,
-        lineItems,
-        daysUntilDue: parseInt(daysUntilDue, 10),
-        memo: memo || undefined,
-        collect,
-      });
-      if (res.ok) {
-        toast.success(
-          collect === "auto"
-            ? "Invoice created — charging the card on file"
-            : "Invoice created — Stripe emailed the payment link",
-        );
-        onOpenChange(false);
-        router.refresh();
-      } else toast.error(res.error);
+      lineItems = lines.filter((l) => l.name && l.amount).map((l) => ({ name: l.name, amountCents: toCents(l.amount) }));
     } catch {
       toast.error("Check the line-item amounts");
-    } finally {
-      setBusy(false);
+      return;
     }
+    const total = lineItems.reduce((s, l) => s + l.amountCents, 0);
+    const res = await run(
+      () =>
+        createManualInvoiceAction({
+          tenantId: target.id,
+          lineItems,
+          daysUntilDue: parseInt(daysUntilDue, 10) || 14,
+          memo: memo || undefined,
+          collect,
+          ...(collect === "paid_offline"
+            ? {
+                payment: {
+                  method: payment.method,
+                  reference: payment.reference || undefined,
+                  receivedAt: payment.receivedAt ? fromIsoDay(payment.receivedAt) : undefined,
+                },
+              }
+            : {}),
+        }),
+      {
+        key: "invoice",
+        success:
+          collect === "auto"
+            ? "Invoice created — charging the card on file"
+            : collect === "send"
+              ? "Invoice created — Stripe emailed the payment link"
+              : `Invoice created and recorded as paid — ${formatCents(total)} by ${PAYMENT_METHOD_LABEL[payment.method].toLowerCase()}`,
+      },
+    );
+    if (res?.ok) onOpenChange(false);
   }
 
   return (
@@ -115,16 +134,18 @@ export function NewInvoiceDialog({ target, onOpenChange }: DialogProps<TenantTar
             Add line
           </Button>
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Days until due</Label>
-              <Input value={daysUntilDue} onChange={(e) => setDaysUntilDue(e.target.value)} />
-            </div>
+            {collect !== "paid_offline" && (
+              <div className="grid gap-2">
+                <Label>Days until due</Label>
+                <Input value={daysUntilDue} onChange={(e) => setDaysUntilDue(e.target.value)} />
+              </div>
+            )}
             <div className="grid gap-2">
               <Label>Memo (optional)</Label>
               <Input value={memo} onChange={(e) => setMemo(e.target.value)} />
             </div>
           </div>
-          <div className="flex gap-4 text-sm">
+          <div className="flex flex-wrap gap-4 text-sm">
             <label className="flex items-center gap-1.5">
               <input type="radio" checked={collect === "send"} onChange={() => setCollect("send")} />
               Email payment link
@@ -133,15 +154,47 @@ export function NewInvoiceDialog({ target, onOpenChange }: DialogProps<TenantTar
               <input type="radio" checked={collect === "auto"} onChange={() => setCollect("auto")} />
               Charge card on file now
             </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={collect === "paid_offline"} onChange={() => setCollect("paid_offline")} />
+              Already paid offline — record only
+            </label>
           </div>
+          {collect === "paid_offline" && (
+            <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-3">
+              <div className="grid gap-1.5">
+                <Label>Method</Label>
+                <Select value={payment.method} onValueChange={(v) => setPayment({ ...payment, method: v as OfflinePaymentMethod })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OFFLINE_PAYMENT_METHODS.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {PAYMENT_METHOD_LABEL[m]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Reference</Label>
+                <Input placeholder="receipt #, check #…" value={payment.reference} onChange={(e) => setPayment({ ...payment, reference: e.target.value })} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Received on</Label>
+                <Input type="date" max={isoDay()} value={payment.receivedAt} onChange={(e) => setPayment({ ...payment, receivedAt: e.target.value })} />
+              </div>
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
-            Auto-charge falls back to the emailed link when no card is on
-            file. Offline payments can be recorded against either.
+            {collect === "paid_offline"
+              ? "Creates the invoice already paid — no email asking for payment. It appears as paid on the client's billing page and they get a receipt."
+              : "Auto-charge falls back to the emailed link when no card is on file. Offline payments can be recorded against either."}
           </p>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy || !lines.some((l) => l.name && l.amount)}>
-            {busy ? "Creating…" : "Create & send"}
+          <Button onClick={submit} disabled={pending || !lines.some((l) => l.name && l.amount)}>
+            {pending ? "Creating…" : collect === "paid_offline" ? "Create & record" : "Create & send"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -150,34 +203,35 @@ export function NewInvoiceDialog({ target, onOpenChange }: DialogProps<TenantTar
 }
 
 export function RecordPaymentDialog({ target, onOpenChange }: DialogProps<InvoiceTarget>) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({
+  const { run, pending } = useAction();
+  const [form, setForm] = useState<{ amount: string; method: OfflinePaymentMethod; reference: string; receivedAt: string }>({
     amount: target ? ((target.amountDueCents - target.amountPaidCents) / 100).toFixed(2) : "",
-    method: "check",
+    method: "cash",
     reference: "",
+    receivedAt: isoDay(),
   });
 
   async function submit() {
     if (!target) return;
-    setBusy(true);
+    let amountCents: number;
     try {
-      const res = await recordOfflinePaymentAction({
-        invoiceId: target.id,
-        amountCents: toCents(form.amount),
-        method: form.method as "check" | "zelle" | "wire" | "other",
-        reference: form.reference || undefined,
-      });
-      if (res.ok) {
-        toast.success(res.settled ? "Payment recorded — invoice settled" : "Partial payment recorded");
-        onOpenChange(false);
-        router.refresh();
-      } else toast.error(res.error);
+      amountCents = toCents(form.amount);
     } catch {
       toast.error("Enter a valid amount");
-    } finally {
-      setBusy(false);
+      return;
     }
+    const res = await run(
+      () =>
+        recordOfflinePaymentAction({
+          invoiceId: target.id,
+          amountCents,
+          method: form.method,
+          reference: form.reference || undefined,
+          receivedAt: form.receivedAt ? fromIsoDay(form.receivedAt) : undefined,
+        }),
+      { key: "pay", success: (r) => (r.settled ? "Payment recorded — invoice settled" : "Partial payment recorded") },
+    );
+    if (res?.ok) onOpenChange(false);
   }
 
   return (
@@ -194,20 +248,29 @@ export function RecordPaymentDialog({ target, onOpenChange }: DialogProps<Invoic
             </div>
             <div className="grid gap-2">
               <Label>Method</Label>
-              <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v as OfflinePaymentMethod })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="check">Check</SelectItem>
-                  <SelectItem value="zelle">Zelle</SelectItem>
-                  <SelectItem value="wire">Wire</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
+                  {OFFLINE_PAYMENT_METHODS.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {PAYMENT_METHOD_LABEL[m]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
-          <div className="grid gap-2">
-            <Label>Reference (check #, confirmation…)</Label>
-            <Input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Reference (check #, confirmation…)</Label>
+              <Input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
+            </div>
+            <div className="grid gap-2">
+              <Label>Received on</Label>
+              <Input type="date" max={isoDay()} value={form.receivedAt} onChange={(e) => setForm({ ...form, receivedAt: e.target.value })} />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
             Partial amounts are fine — the invoice settles when payments cover
@@ -215,8 +278,8 @@ export function RecordPaymentDialog({ target, onOpenChange }: DialogProps<Invoic
           </p>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={busy || !form.amount}>
-            {busy ? "Recording…" : "Record payment"}
+          <Button onClick={submit} disabled={pending || !form.amount}>
+            {pending ? "Recording…" : "Record payment"}
           </Button>
         </DialogFooter>
       </DialogContent>

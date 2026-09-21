@@ -190,11 +190,12 @@ export function BillingView({
                         <li key={i.id} className="flex justify-between gap-2">
                           <span className="text-muted-foreground">
                             {i.name}
+                            {i.quantity > 1 && <span className="ml-1 text-xs">×{i.quantity}</span>}
                             {i.status === "paid" && <Badge variant="outline" className="ml-1.5 text-[10px]">paid</Badge>}
                             {i.status === "pending" && <Badge variant="outline" className="ml-1.5 text-[10px]">awaiting payment</Badge>}
                           </span>
                           <span className="tabular-nums">
-                            {formatCents(i.amountCents)}
+                            {i.quantity > 1 ? `${formatCents(i.amountCents)} ea · ${formatCents(i.amountCents * i.quantity)}` : formatCents(i.amountCents)}
                             <span className="text-xs text-muted-foreground">{cadence(i)}</span>
                           </span>
                         </li>

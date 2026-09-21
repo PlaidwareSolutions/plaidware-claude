@@ -105,6 +105,12 @@ export function SubscriptionCard({
             {formatDate(sub.subscribedAt)}
             {a && (a.cardOnFile ? " · card on file" : " · no card on file")}
           </div>
+          {live && a?.collectionMethod === "send_invoice" && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Stripe emails each invoice{a.cardOnFile ? "" : " — no card on file"}; record cash or check payments from the
+              invoices table below.
+            </p>
+          )}
           {sub.status === "suspended" && (
             <p className="mt-1 text-xs text-destructive">
               {sub.suspensionSource === "manual" ? "Manual hold" : "Suspended by dunning"}
@@ -137,11 +143,14 @@ export function SubscriptionCard({
         <ul className="grid gap-1 text-sm sm:grid-cols-2">
           {items.map((i) => (
             <li key={i.id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-1.5">
-              <span className="truncate text-heading">{i.name}</span>
+              <span className="truncate text-heading">
+                {i.name}
+                {i.quantity > 1 && <span className="ml-1 text-xs text-muted-foreground">×{i.quantity}</span>}
+              </span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
-                {formatCents(i.amountCents)}
+                {i.quantity > 1 ? `${formatCents(i.amountCents)} ea · ${formatCents(i.amountCents * i.quantity)}` : formatCents(i.amountCents)}
                 <span className="text-xs"> {isRecurringKind(i.kind) ? intervalLabel(i) : "one-time"}</span>
-                {i.status !== "active" && i.status !== "paid" && (
+                {(!isRecurringKind(i.kind) || (i.status !== "active" && i.status !== "paid")) && (
                   <StatusBadge kind="subscriptionItem" status={i.status} className="ml-1.5 text-[10px]" />
                 )}
               </span>

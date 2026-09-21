@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requireOpsPage } from "@/policy";
 import {
   getBillingAutomationStatus,
+  getStartSubscriptionOptions,
   listAddonOptions,
   listAllInvoicesOps,
   listTenantPricingRows,
@@ -25,12 +26,13 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
   const client = await loadClient(id);
   if (!client) notFound();
 
-  const [subscriptions, invoices, automation, pricingRows, policy] = await Promise.all([
+  const [subscriptions, invoices, automation, pricingRows, policy, startable] = await Promise.all([
     listTenantSubscriptions(id),
     listAllInvoicesOps(200, { tenantId: id }),
     getBillingAutomationStatus({ tenantId: id }), // live Stripe reads — never cached
     listTenantPricingRows(id),
     getBillingPolicy(),
+    getStartSubscriptionOptions(id), // one live Stripe read for the card-on-file flag
   ]);
   const addonOptions = await listAddonOptions(id, subscriptions);
 
@@ -50,6 +52,7 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
       }}
       nextSweepUtc={nextDailyRunUtc(BILLING_SCHEDULE.dunningSweep.hourUtc).toISOString()}
       stripeTestMode={stripeTestMode()}
+      startable={startable}
     />
   );
 }

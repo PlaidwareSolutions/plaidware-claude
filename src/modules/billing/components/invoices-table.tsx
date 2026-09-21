@@ -6,7 +6,7 @@ import { ExternalLink, HandCoins, Receipt } from "lucide-react";
 import type { OpsInvoiceDto } from "../queries";
 import { toggleDunningPauseAction } from "../ar-actions";
 import { formatCents } from "@/lib/money";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDay } from "@/lib/dates";
 import { OPS } from "@/lib/routes";
 import { useAction } from "@/lib/use-action";
 import { StatusBadge } from "@/components/status-badge";
@@ -78,6 +78,29 @@ export function InvoicesTable({
                     {inv.dunning?.suspendedAt && <StatusBadge kind="dunning" status="suspended" className="text-[10px]" />}
                     {inv.dunning?.paused && <StatusBadge kind="dunning" status="paused" label="dunning paused" className="text-[10px]" />}
                   </div>
+                  {inv.lineItems.length > 1 || inv.lineItems.some((l) => l.periodStart) ? (
+                    <details className="mt-1 text-[11px] text-muted-foreground">
+                      <summary className="cursor-pointer">
+                        {inv.lineItems.length} line{inv.lineItems.length === 1 ? "" : "s"}
+                        {inv.description ? ` · ${inv.description}` : ""}
+                      </summary>
+                      <ul className="mt-0.5 grid gap-0.5">
+                        {inv.lineItems.map((l, i) => (
+                          <li key={i} className="flex justify-between gap-3">
+                            <span>
+                              {l.name}
+                              {l.periodStart && l.periodEnd
+                                ? ` · ${formatDay(l.periodStart)} – ${formatDate(new Date(new Date(l.periodEnd).getTime() - 1))}`
+                                : ""}
+                            </span>
+                            <span className="tabular-nums">{formatCents(l.amountCents)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : inv.description ? (
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">{inv.description}</div>
+                  ) : null}
                   {inv.payments.length > 0 && (
                     <div className="mt-1 text-[11px] text-muted-foreground">
                       {inv.payments.map((p) => (
