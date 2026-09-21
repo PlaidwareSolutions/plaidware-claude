@@ -87,8 +87,7 @@ export function PendingSubscriptionCard({
           <Link2 className="size-3.5" /> Manage every setup link from the{" "}
           <Link href={OPS.client(tenantId)} className="hover:text-primary">
             Overview tab
-          </Link>
-          .
+          </Link>.
         </div>
       </CardContent>
     </Card>
