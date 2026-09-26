@@ -21,6 +21,8 @@ export type NavItem = {
   countKey?: keyof OpsNavCounts | "my";
   /** Tenant nav: shown only to roles holding this capability (ops see all). */
   cap?: TenantCapability;
+  /** Work nav: shown to developers only (ops reach the same thing through the ops portal). */
+  developerOnly?: boolean;
 };
 
 /** Attention counts shown as pills in the ops sidebar. */

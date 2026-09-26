@@ -28,9 +28,11 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
 - **Roles**: one table in `src/lib/roles.ts`. Tenant roles
   owner/admin/billing/member (caps read/billing/write/team; owner only by
   transfer); platform roles customer/developer/ops_support/ops_admin
-  (developer = the /work area only, never tenants/billing/monitoring;
-  support = read ops portal + messaging/triage + work; admin = everything,
-  bypasses membership). `org-roles.ts` derives Better Auth's statements from
+  (developer = the /work area only, never tenant pages/billing/monitoring —
+  a membership an ops admin adds from `/ops/users/[id]/workspaces` only
+  unlocks that client's read-only brief at `/work/clients/[id]` and names
+  the client on its items; support = read ops portal + messaging/triage +
+  work; admin = everything, bypasses membership). `org-roles.ts` derives Better Auth's statements from
   it. Platform roles are granted only via /ops/system/access (audited; "Add
   staff" creates accounts there) or scripts/{create-ops-admin,set-platform-role}.ts.
   Members request tenant role changes from /team; owners/admins/ops decide.
@@ -110,7 +112,9 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   Pages call module `queries.ts` only — no raw `db.query` in page.tsx.
 - User management: `/ops/users/[id]` (layout + tabs Overview|workspaces|sessions|activity,
   module `src/modules/access`) is one account — role, disable/re-enable (Better Auth
-  session hook refuses disabled accounts), set-password link, session revocation, and
+  session hook refuses disabled accounts), set-password link, session revocation,
+  workspace memberships (Add to workspace = direct `tenancy.opsAddMember`, no
+  invitation, audited `member_added`; Remove), and
   a cross-workspace audit timeline. `/ops/system/roles` is the read-only roles &
   permissions reference (`src/lib/role-matrices.ts` derived from the role tables;
   `src/lib/permissions-reference.ts` hand-kept — update it when a guard changes).
@@ -134,9 +138,14 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   `requireWork`/`requireWorkPage` (developer or any ops level),
   `requireWorkManage` (ops admin: settings, delete). `getTenantContext()`
   bounces developers to `/work`.
-- **Client references never reach developers**: `dto.toCardDto` spreads
-  `requester` only for ops viewers, `visibleEvents` drops `requester_changed`,
-  `item_created` never names a client. Ops-side reads (`listItemsForTenant`,
+- **Client references reach developers only through membership**:
+  `policy.workViewer()` (async) carries `tenantIds` = the developer's
+  workspaces; `dto.toCardDto` spreads `requester` for ops or when the item's
+  client is one of them, `visibleEvents` drops `requester_changed` naming any
+  other client, `item_created` never names a client. `/work/clients` +
+  `/work/clients/[id]` (developers only; ops are redirected to `/ops/clients`)
+  are the read-only briefs (`listClientWorkspaces`, `getClientWorkspace`: products
+  without money, people, requests). Ops-side reads (`listItemsForTenant`,
   `boardSummaryForProduct`) are called only from ops pages.
 - Work actions call `refresh()` from `next/cache` after revalidating, so the
   kanban's optimistic move and the fresh tree land in one transition; client

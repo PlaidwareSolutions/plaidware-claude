@@ -52,12 +52,15 @@ export const TENANT = {
 /**
  * The work area (development queues, boards, sprints) — developers' whole Hub,
  * also reachable by ops. Boards are addressed by product slug, items by their
- * per-board number, so a key-prefix change never breaks a link. `/work/my` is
- * a static segment: a product with slug "my" would be shadowed.
+ * per-board number, so a key-prefix change never breaks a link. `/work/my` and
+ * `/work/clients` are static segments: a product with either slug would be shadowed.
  */
 export const WORK = {
   home: "/work",
   my: "/work/my",
+  /** Developers only: the client workspaces they've been added to (ops use /ops/clients). */
+  clients: "/work/clients",
+  client: (id: string) => `/work/clients/${id}`,
   board: (slug: string) => `/work/${slug}`,
   tab: (slug: string, tab: WorkTab) => `/work/${slug}/${tab}`,
   backlog: (slug: string) => `/work/${slug}/backlog`,

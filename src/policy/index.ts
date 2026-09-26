@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { AUTH, OPS, TENANT, WORK, withQuery } from "../lib/routes";
 import { hasOpsLevel, normalizePlatformRole, opsLevelOf, roleHasWorkAccess, type OpsLevel } from "../lib/roles";
@@ -77,15 +77,18 @@ export function hasWorkAccess(session: SessionLike) {
   return roleHasWorkAccess(session.user.platformRole);
 }
 
-export type WorkViewer = { userId: string; isOps: boolean };
+export type WorkViewer = { userId: string; isOps: boolean; tenantIds: readonly string[] };
 
 /**
  * Who is reading the work area. Work queries build client-facing DTOs from
- * this and strip the requesting-client reference unless `isOps` — so a
- * developer's payload never carries a tenant id or name.
+ * this: ops see every client; a developer sees a client reference only for
+ * the workspaces an ops admin added them to (their memberships), and their
+ * payload never carries any other tenant id or name.
  */
-export function workViewer(session: SessionLike & { user: { id: string } }): WorkViewer {
-  return { userId: session.user.id, isOps: isOps(session) };
+export async function workViewer(session: SessionLike & { user: { id: string } }): Promise<WorkViewer> {
+  const ops = isOps(session);
+  const tenantIds = ops ? [] : (await getUserTenants(session.user.id)).map((t) => t.id);
+  return { userId: session.user.id, isOps: ops, tenantIds };
 }
 
 /** Work-area server actions: create/edit/move/comment/plan sprints. */
@@ -101,6 +104,29 @@ export async function requireWorkPage() {
   if (!session) redirect(AUTH.login);
   if (!hasWorkAccess(session)) redirect(TENANT.dashboard);
   return session;
+}
+
+/**
+ * /work/clients — a developer's client list. Ops have the full client pages,
+ * so they are sent to the ops portal instead of a thinner copy.
+ */
+export async function requireWorkClientsPage() {
+  const session = await requireWorkPage();
+  if (isOps(session)) redirect(OPS.clients);
+  return { session, viewer: await workViewer(session) };
+}
+
+/**
+ * /work/clients/[id] — the read-only brief of one client workspace. The
+ * developer must be a member of it (404 otherwise, never a hint that it
+ * exists); ops go to the client's ops page.
+ */
+export async function requireWorkClientPage(tenantId: string) {
+  const session = await requireWorkPage();
+  if (isOps(session)) redirect(OPS.client(tenantId));
+  const viewer = await workViewer(session);
+  if (!viewer.tenantIds.includes(tenantId)) notFound();
+  return { session, viewer };
 }
 
 /** Board settings, item deletion, developer accounts: ops admins only. */

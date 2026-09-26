@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MyWorkPage() {
   const session = await requireWorkPage();
-  const groups = await listMyWork(workViewer(session));
+  const groups = await listMyWork(await workViewer(session));
   const total = groups.reduce((s, g) => s + g.cards.length, 0);
 
   return (

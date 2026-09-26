@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { TENANT } from "@/lib/routes";
-import { revalidateClientViews } from "@/lib/ops-revalidate";
+import { revalidateClientViews, revalidateUserViews, revalidateWorkViews } from "@/lib/ops-revalidate";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../../lib/auth";
@@ -12,6 +12,7 @@ import {
   assertNotOwner,
   deleteTenant,
   deleteTenantPreview,
+  opsAddMember,
   opsCancelInvite,
   opsInviteMember,
   opsRemoveMember,
@@ -139,6 +140,30 @@ export async function removeMemberAction(tenantId: string, memberId: string): Pr
     return { ok: true };
   } catch (e) {
     return fail(e);
+  }
+}
+
+const addMemberSchema = z.object({
+  tenantId: z.string().min(1),
+  userId: z.string().min(1),
+  role: z.enum(ASSIGNABLE_TENANT_ROLES),
+});
+
+/** Ops admin puts an existing account onto a workspace from the account's page (no invitation). */
+export async function opsAddMemberAction(
+  input: z.infer<typeof addMemberSchema>,
+): Promise<{ ok: true; tenantName: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireOps();
+    const parsed = addMemberSchema.parse(input);
+    const { tenantName } = await opsAddMember({ ...parsed, actorUserId: session.user.id });
+    revalidateTeam(parsed.tenantId);
+    revalidateUserViews(parsed.userId);
+    // A developer's Work → Clients list and their requester chips change with the membership.
+    revalidateWorkViews();
+    return { ok: true, tenantName };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Something went wrong" };
   }
 }
 

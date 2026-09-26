@@ -187,7 +187,7 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
           <EmptyState
             compact
             title="No requests linked to this client"
-            description="Link a work item from its Requesting client field; developers never see the client."
+            description="Link a work item from its Requesting client field; developers see the client only if they're on its workspace."
           />
         ) : (
           <div className="flex flex-col gap-2">

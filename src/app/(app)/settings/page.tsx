@@ -28,11 +28,9 @@ export default async function SettingsPage({
   if (!session) redirect(AUTH.login);
   const u = session.user;
   const dev = isDeveloper(session);
-  const [sessions, tenants] = await Promise.all([
-    listOwnSessions(u.id, session.session.id),
-    dev ? Promise.resolve([]) : getUserTenants(u.id),
-  ]);
-  const activeTenantId = pickActiveTenant(tenants, session.session.activeOrganizationId)?.id ?? null;
+  // A developer's memberships are listed too (their Work → Clients context), but never as an active workspace.
+  const [sessions, tenants] = await Promise.all([listOwnSessions(u.id, session.session.id), getUserTenants(u.id)]);
+  const activeTenantId = dev ? null : (pickActiveTenant(tenants, session.session.activeOrganizationId)?.id ?? null);
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-8">

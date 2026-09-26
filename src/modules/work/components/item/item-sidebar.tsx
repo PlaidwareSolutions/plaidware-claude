@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { WORK } from "@/lib/routes";
 import { useAction } from "@/lib/use-action";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { Input } from "@/components/ui/input";
@@ -70,8 +72,15 @@ export function ItemSidebar({
         <Field label="Source">
           <SourceSelect value={item.source} disabled={busy("source")} className="w-full" onChange={(v) => void patch("source", { source: v })} />
         </Field>
+        {!canLinkClient && item.requester && (
+          <Field label="Requesting client" hint="Shown because you're on this client's workspace.">
+            <Link href={WORK.client(item.requester.tenantId)} className="font-medium text-heading hover:text-primary">
+              {item.requester.tenantName}
+            </Link>
+          </Field>
+        )}
         {canLinkClient && (
-          <Field label="Requesting client" hint="Developers never see this.">
+          <Field label="Requesting client" hint="Developers see this only if they're on the client's workspace.">
             <RefSelect
               value={item.requester?.tenantId ?? null}
               options={tenants}

@@ -105,7 +105,7 @@ export const PLATFORM_ROLE_META: Record<
   },
   developer: {
     label: "developer",
-    description: "The work area only — no clients, billing or monitoring",
+    description: "The work area only; sees a client only when added to its workspace",
     // Level 0 on purpose: hasOpsLevel() must never treat a developer as ops.
     level: 0,
     grants: ["work"],

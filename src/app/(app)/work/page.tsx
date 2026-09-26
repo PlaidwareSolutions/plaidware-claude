@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 export default async function WorkHomePage() {
   const session = await requireWorkPage();
-  const viewer = workViewer(session);
+  const viewer = await workViewer(session);
   const [boards, sprints] = await Promise.all([listBoardsOverview(viewer), listActiveSprints()]);
 
   const sum = (k: keyof (typeof boards)[number]["counts"]) => boards.reduce((s, b) => s + b.counts[k], 0);

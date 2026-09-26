@@ -43,6 +43,7 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   credential_deleted: { label: "Credential deleted", group: "provisioning" },
   credential_revealed: { label: "Credential revealed", group: "provisioning" },
   member_invited: { label: "Member invited", group: "people" },
+  member_added: { label: "Member added by ops", group: "people" },
   invite_canceled: { label: "Invitation canceled", group: "people" },
   invite_resent: { label: "Invitation re-sent", group: "people" },
   member_role_changed: { label: "Member role changed", group: "people" },
@@ -131,6 +132,8 @@ export function describeAudit(
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}${str(payload.note) ? ` — ${payload.note}` : ""}`;
     case "member_invited":
       return `${str(payload.email) ?? ""} as ${str(payload.role) ?? "member"}`;
+    case "member_added":
+      return `${str(payload.email) ?? ""} as ${str(payload.role) ?? "member"}${str(payload.platformRole) === "developer" ? " · developer (work-area context only)" : ""}`;
     case "member_role_changed":
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
     case "invite_canceled":

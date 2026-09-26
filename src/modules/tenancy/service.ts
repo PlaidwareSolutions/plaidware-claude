@@ -21,6 +21,7 @@ import { onboardingInvites } from "../onboarding/schema";
 import { writeAudit } from "../audit/service";
 import { emitMembershipChanged, emitOrganizationUpdated } from "../webhooks_out/service";
 import { isAssignableTenantRole, type AssignableTenantRole } from "@/lib/roles";
+import { canAddMembership } from "./membership-rules";
 
 export type TenantStatus = "active" | "suspended" | "inactive";
 
@@ -165,6 +166,55 @@ export async function opsInviteMember(opts: {
     payload: { email, role: opts.role, invitationId: id },
   });
   return { invitationId: id };
+}
+
+/**
+ * Ops puts an existing account straight onto a workspace — no invitation, no
+ * email. The one way a developer gets client context (their brief under
+ * Work → Clients); for a customer it is an invitation minus the round trip.
+ * Ops path: writes directly (not subject to the Better Auth org hooks, so it
+ * works on a suspended workspace too), emits to MHub like an accepted
+ * invitation, and audits on the workspace (the row also lands on the
+ * account's Activity tab through payload.userId).
+ */
+export async function opsAddMember(opts: {
+  tenantId: string;
+  userId: string;
+  role: AssignableTenantRole;
+  actorUserId: string;
+}): Promise<{ memberId: string; tenantName: string }> {
+  const [org, target, existing] = await Promise.all([
+    db.query.organization.findFirst({ where: eq(organization.id, opts.tenantId), columns: { id: true, name: true } }),
+    db.query.user.findFirst({
+      where: eq(user.id, opts.userId),
+      columns: { id: true, email: true, platformRole: true, disabledAt: true },
+    }),
+    db.query.member.findFirst({
+      where: and(eq(member.organizationId, opts.tenantId), eq(member.userId, opts.userId)),
+      columns: { role: true },
+    }),
+  ]);
+  if (!org) throw new Error("Workspace not found");
+  if (!target) throw new Error("User not found");
+  const verdict = canAddMembership({ existingRole: existing?.role ?? null, targetDisabled: !!target.disabledAt, role: opts.role });
+  if (!verdict.ok) throw new Error(verdict.reason);
+
+  const memberId = crypto.randomUUID();
+  await db.insert(member).values({
+    id: memberId,
+    organizationId: org.id,
+    userId: target.id,
+    role: opts.role,
+    createdAt: new Date(),
+  });
+  await emitMembershipChanged({ orgId: org.id, userId: target.id, role: opts.role, action: "added" });
+  await writeAudit({
+    tenantId: org.id,
+    actorUserId: opts.actorUserId,
+    kind: "member_added",
+    payload: { userId: target.id, email: target.email, role: opts.role, platformRole: target.platformRole ?? "customer" },
+  });
+  return { memberId, tenantName: org.name };
 }
 
 /**

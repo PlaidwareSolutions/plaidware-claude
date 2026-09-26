@@ -9,10 +9,10 @@ import { getBoardBySlug } from "@/modules/work/queries";
  */
 export const loadBoard = cache(async (slug: string) => {
   const session = await requireWorkPage();
-  const board = await getBoardBySlug(slug);
+  const [board, viewer] = await Promise.all([getBoardBySlug(slug), workViewer(session)]);
   return {
     session,
-    viewer: workViewer(session),
+    viewer,
     isOps: isOps(session),
     canManage: isOpsAdmin(session),
     board,

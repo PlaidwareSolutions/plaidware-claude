@@ -39,8 +39,8 @@ async function main() {
     .insert(products)
     .values({ slug: `smoke-work-${stamp}`, name: "Smoke Work Product", category: "Smoke", description: "smoke", isActive: true, sortOrder: 999 })
     .returning();
-  const ops = { userId: opsId, isOps: true };
-  const dev = { userId: devId, isOps: false };
+  const ops = { userId: opsId, isOps: true, tenantIds: [] as string[] };
+  const dev = { userId: devId, isOps: false, tenantIds: [] as string[] };
   let devAccountId: string | null = null;
 
   try {

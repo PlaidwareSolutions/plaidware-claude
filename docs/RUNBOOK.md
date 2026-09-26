@@ -74,9 +74,21 @@ tab's "Platform activity" feed:
 ### Add staff (developer, ops support, ops admin)
 
 Developers see only the work area (`/work`): product boards, backlogs,
-sprints and items. They never see clients, billing or monitoring, and a
+sprints and items. They never see client pages, billing or monitoring, and a
 developer's item payloads carry no client reference (the "Requesting client"
-field is stripped server-side for them).
+field is stripped server-side for them) — with one deliberate exception:
+
+- **Giving a developer client context** — open the account
+  (`/ops/users/<id>` → Workspaces → **Add to workspace**), pick the client's
+  workspace and a role (the role only decides how the client's People tab
+  lists them). No invitation email is sent; the row is audited as "Member
+  added by ops" on the client and on the account. From then on the developer
+  sees that client under **Work → Clients**: a read-only brief (live products
+  and domains, people, the items the client asked for — never billing,
+  monitoring or messages) and the client's name on its items. They still
+  never reach the workspace itself (`/dashboard` etc. bounce them to `/work`).
+  Remove the membership from the same tab to take the context away. Other
+  clients' references stay stripped.
 
 - **/ops/system/access → Add staff** — an ops admin enters a name, email
   and role (ops admin needs the email typed twice). The account is created

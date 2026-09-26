@@ -3,8 +3,11 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db";
 import { isoDay } from "../../lib/dates";
 import { PLATFORM_ROLES, roleHasWorkAccess } from "../../lib/roles";
-import { organization, user } from "../auth/schema";
+import { member, organization, user } from "../auth/schema";
+import { subscriptions } from "../billing/schema";
+import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
 import { products } from "../catalog/schema";
+import { subscriptionProvisioning } from "../provisioning/schema";
 import { BOARD_COLUMNS, WORK_ITEM_STATUSES, type BoardFilters, type WorkItemStatus } from "./contracts";
 import {
   toCardDto,
@@ -33,7 +36,8 @@ import { OPEN_STATUSES, STATUS_LABELS } from "./transitions";
 
 /**
  * RSC reads for the work area. Every card goes through dto.toCardDto with
- * the viewer, so a developer's payload never carries a client reference.
+ * the viewer, so a developer's payload never carries a client reference
+ * except for the workspaces they're a member of (viewer.tenantIds).
  * The ops-side reads at the bottom are only called from requireOpsPage pages.
  */
 
@@ -43,7 +47,7 @@ const reporter = alias(user, "reporter");
 const DONE_WINDOW_DAYS = 14;
 const WORK_ROLES = PLATFORM_ROLES.filter(roleHasWorkAccess);
 const ON_BOARD: readonly WorkItemStatus[] = ["todo", "in_progress", "in_review"];
-const OPS_VIEWER: WorkViewer = { userId: "", isOps: true };
+const OPS_VIEWER: WorkViewer = { userId: "", isOps: true, tenantIds: [] };
 
 const cardColumns = {
   id: workItems.id,
@@ -559,5 +563,132 @@ export async function boardSummaryForProduct(productId: string, now = new Date()
     open: counts?.open ?? 0,
     inProgress: counts?.inProgress ?? 0,
     activeSprint: active ? { ...toSprintDto(active, isoDay(now)), ...(progress.get(active.id) ?? { done: 0, total: 0 }) } : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Developer-side client reads: the viewer's own memberships (policy.workViewer
+// loads them), never a workspace they're not on. No money, no billing state.
+// ---------------------------------------------------------------------------
+
+export type WorkClientRow = {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  /** The viewer's tenant role on the workspace (context only — developers never reach tenant pages). */
+  role: string;
+  joinedAt: string;
+  products: number;
+  openRequests: number;
+};
+
+/** The client workspaces the viewer is a member of, with how much they've asked for. */
+export async function listClientWorkspaces(viewer: WorkViewer): Promise<WorkClientRow[]> {
+  const ids = [...viewer.tenantIds];
+  if (ids.length === 0) return [];
+  const [orgs, subs, open] = await Promise.all([
+    db
+      .select({
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        status: organization.status,
+        role: member.role,
+        joinedAt: member.createdAt,
+      })
+      .from(member)
+      .innerJoin(organization, eq(member.organizationId, organization.id))
+      .where(and(eq(member.userId, viewer.userId), inArray(organization.id, ids)))
+      .orderBy(asc(organization.name)),
+    db
+      .select({ tenantId: subscriptions.tenantId, n: count() })
+      .from(subscriptions)
+      .where(and(inArray(subscriptions.tenantId, ids), inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES)))
+      .groupBy(subscriptions.tenantId),
+    db
+      .select({ tenantId: workItems.requesterTenantId, n: count() })
+      .from(workItems)
+      .where(and(inArray(workItems.requesterTenantId, ids), inArray(workItems.status, OPEN_STATUSES)))
+      .groupBy(workItems.requesterTenantId),
+  ]);
+  const productCount = new Map(subs.map((s) => [s.tenantId ?? "", Number(s.n)]));
+  const openCount = new Map(open.map((o) => [o.tenantId ?? "", Number(o.n)]));
+  return orgs.map((o) => ({
+    id: o.id,
+    name: o.name,
+    slug: o.slug ?? "",
+    status: o.status ?? "active",
+    role: o.role,
+    joinedAt: o.joinedAt.toISOString(),
+    products: productCount.get(o.id) ?? 0,
+    openRequests: openCount.get(o.id) ?? 0,
+  }));
+}
+
+export type WorkClientBrief = {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  role: string;
+  joinedAt: string;
+  /** Live subscriptions by product — what the client runs and where; never what it costs. */
+  products: { id: string; name: string; slug: string; color: string | null; status: string; domainUrl: string | null }[];
+  people: { userId: string; name: string; email: string; role: string; isViewer: boolean }[];
+  /** Everything the client asked for, newest first (the requester is visible: it's this workspace). */
+  items: TenantWorkItem[];
+};
+
+/** One client workspace as a member developer may see it; null unless the viewer is on it. */
+export async function getClientWorkspace(tenantId: string, viewer: WorkViewer): Promise<WorkClientBrief | null> {
+  if (!viewer.tenantIds.includes(tenantId)) return null;
+  const [mine] = await db
+    .select({
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      status: organization.status,
+      role: member.role,
+      joinedAt: member.createdAt,
+    })
+    .from(member)
+    .innerJoin(organization, eq(member.organizationId, organization.id))
+    .where(and(eq(member.userId, viewer.userId), eq(member.organizationId, tenantId)))
+    .limit(1);
+  if (!mine) return null;
+  const [prods, people, rows] = await Promise.all([
+    db
+      .select({
+        id: subscriptions.id,
+        name: products.name,
+        slug: products.slug,
+        color: products.color,
+        status: subscriptions.status,
+        domainUrl: subscriptionProvisioning.domainUrl,
+      })
+      .from(subscriptions)
+      .innerJoin(products, eq(subscriptions.productId, products.id))
+      .leftJoin(subscriptionProvisioning, eq(subscriptionProvisioning.subscriptionId, subscriptions.id))
+      .where(and(eq(subscriptions.tenantId, tenantId), inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES)))
+      .orderBy(asc(products.sortOrder), asc(products.name)),
+    db
+      .select({ userId: user.id, name: user.name, email: user.email, role: member.role })
+      .from(member)
+      .innerJoin(user, eq(member.userId, user.id))
+      .where(eq(member.organizationId, tenantId))
+      .orderBy(asc(member.createdAt)),
+    cardsWithProduct().where(eq(workItems.requesterTenantId, tenantId)).orderBy(desc(workItems.updatedAt)),
+  ]);
+  return {
+    id: mine.id,
+    name: mine.name,
+    slug: mine.slug ?? "",
+    status: mine.status ?? "active",
+    role: mine.role,
+    joinedAt: mine.joinedAt.toISOString(),
+    products: prods,
+    people: people.map((p) => ({ ...p, isViewer: p.userId === viewer.userId })),
+    items: rows.map((r) => ({ ...toCardDto(r, viewer), product: r.product })),
   };
 }

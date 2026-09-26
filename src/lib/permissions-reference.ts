@@ -34,7 +34,7 @@ export const PERMISSIONS_REFERENCE: readonly PermissionEntry[] = [
   { area: "ops", surface: "Ops portal", action: "Open any /ops page", requires: ops("support"), note: "Support sees every page read-only; mutation controls are hidden and refused." },
   { area: "ops", surface: "Ops portal", action: "Onboard a client (/ops/clients/new)", requires: ops("admin") },
   { area: "ops", surface: "Clients", action: "Suspend, deactivate, reactivate or delete a workspace", requires: ops("admin") },
-  { area: "ops", surface: "Clients", action: "Invite, change role, remove a member; fix a phone; decide role requests", requires: ops("admin"), note: "Ops admins bypass workspace membership and status." },
+  { area: "ops", surface: "Clients", action: "Invite or add an existing account, change role, remove a member; fix a phone; decide role requests", requires: ops("admin"), note: "Ops admins bypass workspace membership and status. Adding from an account's Workspaces tab skips the invitation." },
   { area: "ops", surface: "Accounts (Access)", action: "Change a platform role, add staff, send a set-password link", requires: ops("admin") },
   { area: "ops", surface: "Accounts (Access)", action: "Disable or re-enable an account, revoke sessions", requires: ops("admin") },
   { area: "ops", surface: "Billing", action: "Start subscriptions (incl. backdated), manual invoices, offline payments, hosting fees, dunning, billing policy, price overrides, subscription holds", requires: ops("admin") },
@@ -58,7 +58,8 @@ export const PERMISSIONS_REFERENCE: readonly PermissionEntry[] = [
   // ---- work area
   { area: "work", surface: "Boards", action: "Open the work area; create, edit, move, assign and comment on items; plan, start and complete sprints", requires: work() },
   { area: "work", surface: "Boards", action: "Board settings, delete an item", requires: work(true) },
-  { area: "work", surface: "Boards", action: "Set an item's requesting client", requires: ops("support"), note: "Developers never see client references." },
+  { area: "work", surface: "Boards", action: "Set an item's requesting client", requires: ops("support"), note: "Developers see a client reference only for workspaces they're a member of." },
+  { area: "work", surface: "Clients", action: "See a client's brief in the work area: products (no money), people, the items it asked for", requires: work(), note: "Developers: only workspaces an ops admin added them to (Work → Clients). Ops use the client's ops page." },
   // ---- own account
   { area: "account", surface: "Account", action: "Edit profile, change password or email, manage own sessions", requires: { kind: "signed_in" } },
 ];

@@ -14,11 +14,22 @@ import { sprintDaysLeft, sprintIsOverdue } from "./sprint-logic";
 /**
  * Row → DTO mappers for the work area. This file is the single gate that
  * keeps client references away from developers: `toCardDto` only spreads a
- * `requester` when the viewer is ops, and `visibleEvents` drops ops-only
- * event kinds. Pure, unit-tested; queries.ts never assembles a card by hand.
+ * `requester` the viewer may see (ops: every client; a developer: the
+ * workspaces they're a member of), and `visibleEvents` drops events naming
+ * any other client. Pure, unit-tested; queries.ts never assembles a card by hand.
  */
 
-export type WorkViewer = { userId: string; isOps: boolean };
+export type WorkViewer = {
+  userId: string;
+  isOps: boolean;
+  /** Client workspaces the viewer is a member of (empty for ops, who see all). */
+  tenantIds: readonly string[];
+};
+
+/** Ops see every client; a developer sees only the workspaces they're on. */
+export function canSeeTenant(viewer: WorkViewer, tenantId: string | null | undefined): boolean {
+  return viewer.isOps || (!!tenantId && viewer.tenantIds.includes(tenantId));
+}
 export type WorkUserRef = { id: string; name: string };
 
 export type WorkCardDto = {
@@ -40,7 +51,10 @@ export type WorkCardDto = {
   commentCount: number;
   createdAt: string;
   updatedAt: string;
-  /** Present ONLY for ops viewers; the key is absent (not null) for developers. */
+  /**
+   * Present for ops viewers (null = no client), and for a developer only when
+   * the client is a workspace they're on; otherwise the key is absent (not null).
+   */
   requester?: { tenantId: string; tenantName: string } | null;
 };
 
@@ -87,7 +101,7 @@ export function toCardDto(row: CardRow, viewer: WorkViewer): WorkCardDto {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
-  if (!viewer.isOps) return base;
+  if (!canSeeTenant(viewer, row.requesterTenantId)) return base;
   return {
     ...base,
     requester: row.requesterTenantId
@@ -123,9 +137,29 @@ export function toEventDto(row: EventRow): WorkEventDto {
   };
 }
 
-/** Drops events that name a client unless the viewer is ops. */
-export function visibleEvents<T extends { kind: string }>(rows: T[], viewer: WorkViewer): T[] {
-  return viewer.isOps ? rows : rows.filter((r) => !OPS_ONLY_EVENT_KINDS.has(r.kind));
+/**
+ * Drops ops-only events unless the viewer may see every client they name
+ * (ops see all). An ops-only event naming no client at all stays hidden
+ * from developers — nothing to show them.
+ */
+export function visibleEvents<T extends { kind: string; payload?: unknown }>(rows: T[], viewer: WorkViewer): T[] {
+  if (viewer.isOps) return rows;
+  return rows.filter((r) => {
+    if (!OPS_ONLY_EVENT_KINDS.has(r.kind)) return true;
+    const ids = eventTenantIds(r.payload);
+    return ids.length > 0 && ids.every((id) => canSeeTenant(viewer, id));
+  });
+}
+
+/** The client ids a requester_changed payload names (`before`/`after` refs). */
+function eventTenantIds(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object") return [];
+  const ids: string[] = [];
+  for (const k of ["before", "after"] as const) {
+    const v = (payload as Record<string, unknown>)[k];
+    if (v && typeof v === "object" && typeof (v as { id?: unknown }).id === "string") ids.push((v as { id: string }).id);
+  }
+  return ids;
 }
 
 export type WorkCommentDto = {

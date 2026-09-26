@@ -185,7 +185,7 @@ export function NewItemDialog({
                 <div className="grid gap-2">
                   <Label>Requesting client</Label>
                   <RefSelect size="default" className="w-full" value={form.requesterTenantId} options={tenants} noneLabel="None" onChange={(v) => set("requesterTenantId", v)} ariaLabel="Requesting client" />
-                  <p className="text-[11px] text-muted-foreground">Developers never see this. Keep client names out of titles and comments.</p>
+                  <p className="text-[11px] text-muted-foreground">Developers see this only if they&apos;re on the client&apos;s workspace. Keep client names out of titles and comments.</p>
                 </div>
               </div>
             )}

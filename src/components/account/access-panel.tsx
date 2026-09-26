@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { TenantSummary } from "@/modules/tenancy/queries";
 import { PLATFORM_ROLE_META, TENANT_ROLE_META, isTenantRole, normalizePlatformRole } from "@/lib/roles";
 import { tenantRoleMatrix } from "@/lib/role-matrices";
-import { TENANT } from "@/lib/routes";
+import { TENANT, WORK } from "@/lib/routes";
 import { RoleMatrix } from "@/components/role-matrix";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
@@ -28,7 +28,32 @@ export function AccessPanel({
         <span className="text-muted-foreground">{PLATFORM_ROLE_META[role].description}.</span>
       </div>
       {isDeveloper ? (
-        <p className="text-muted-foreground">Developers don&apos;t hold workspaces; the work area is your whole Hub.</p>
+        tenants.length === 0 ? (
+          <EmptyState
+            compact
+            title="No client workspaces"
+            description="The work area is your whole Hub. When an ops admin adds you to a client's workspace, it appears here and under Work → Clients."
+          />
+        ) : (
+          <>
+            <p className="text-muted-foreground">
+              The work area is your whole Hub; these client workspaces give you their context under Work → Clients.
+            </p>
+            <ul className="divide-y rounded-lg border bg-card">
+              {tenants.map((t) => (
+                <li key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+                  <Link href={WORK.client(t.id)} className="font-medium text-heading hover:text-primary">
+                    {t.name}
+                  </Link>
+                  <StatusBadge kind="tenant" status={t.status} className="text-[10px]" />
+                  <Link href={WORK.client(t.id)} className="ml-auto text-xs text-primary hover:underline">
+                    Open brief
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )
       ) : tenants.length === 0 ? (
         <EmptyState compact title="No workspace memberships yet" description="A workspace appears when you subscribe to a product or accept an invitation." />
       ) : (

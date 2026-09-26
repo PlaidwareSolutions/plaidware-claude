@@ -79,8 +79,11 @@ export function AppShell({
   const dev = user.isDeveloper;
   const tenantUi = !inOps && !inWork && !dev;
   const active = tenants.find((t) => t.id === activeTenantId) ?? null;
-  const nav = (dev || inWork ? WORK_NAV : inOps ? OPS_NAV : TENANT_NAV).filter(
-    (item) => !item.cap || user.isOps || (active !== null && roleHasCapability(active.role, item.cap)),
+  const workNav = dev || inWork;
+  const nav = (workNav ? WORK_NAV : inOps ? OPS_NAV : TENANT_NAV).filter(
+    (item) =>
+      (!item.developerOnly || dev) &&
+      (!item.cap || user.isOps || (active !== null && roleHasCapability(active.role, item.cap))),
   );
 
   function switchTenant(id: string) {
@@ -131,7 +134,7 @@ export function AppShell({
           </Link>
         );
       })}
-      {nav === WORK_NAV && workBoards && workBoards.length > 0 && (
+      {workNav && workBoards && workBoards.length > 0 && (
         <>
           <div className="mt-4 border-t pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3">
             Boards
