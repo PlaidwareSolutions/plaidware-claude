@@ -224,8 +224,10 @@ export async function getPartnerBillingSummary(
     const components = allComponents.filter((c) => c.isActive);
     const roleOf = (componentId: string | null) =>
       allComponents.find((c) => c.id === componentId)?.role === "base" ? "base" : "addon";
-    const shown = items.filter((i) => i.status !== "canceled");
     const live = LIVE_SUBSCRIPTION_STATUSES.includes(sub.status);
+    // Live: what's billed now. Closed (canceled/expired): the plan as it was,
+    // however its items ended, so the partner can show what reactivating buys.
+    const shown = live ? items.filter((i) => i.status !== "canceled") : items.filter((i) => i.status !== "pending");
     const price = (c: (typeof components)[number]) =>
       overrides.find((o) => o.componentId === c.id)?.amountCents ?? c.amountCents;
 

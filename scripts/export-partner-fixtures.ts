@@ -1,4 +1,7 @@
 /**
+ * Every response file is { status, body }; webhook files are
+ * { headers, rawBody, body }.
+ *
  * Export REAL Partner API responses and signed webhooks as JSON fixtures for
  * a partner app's mock (Fixorata's server/hub-mock.ts). Every scenario runs
  * through the actual route handlers against the local DB + Stripe TEST mode:
@@ -99,9 +102,16 @@ async function main() {
   const summary = async (ext: string) => {
     const tenantId = (await db.query.partnerTenantLinks.findFirst({ where: (t, { eq: e }) => e(t.externalTenantId, ext) }))?.tenantId;
     const latest = tenantId ? await subOf(tenantId) : null;
-    if (latest?.stripeSubscriptionId) await applySubscriptionEvent(await stripe.subscriptions.retrieve(latest.stripeSubscriptionId));
+    if (latest?.stripeSubscriptionId) {
+      const ss = await stripe.subscriptions.retrieve(latest.stripeSubscriptionId, { expand: ["latest_invoice"] });
+      await applySubscriptionEvent(ss);
+      const inv = ss.latest_invoice as { status?: string | null } | null;
+      if (inv && inv.status && inv.status !== "draft") {
+        await applyInvoiceEvent(inv as never, inv.status === "paid" ? "invoice.paid" : "invoice.finalized");
+      }
+    }
     forgetStripeFacts((await db.query.organization.findFirst({ where: eq(organization.id, tenantId ?? "") }))?.stripeCustomerId);
-    return (await call("GET", `/tenants/${ext}/billing`, billingRoute.GET, { ext })).body;
+    return call("GET", `/tenants/${ext}/billing`, billingRoute.GET, { ext });
   };
   const waitDefaultPm = async (stripeSubId: string) => {
     for (let i = 0; i < 20; i++) {
@@ -153,9 +163,10 @@ async function main() {
   const e3 = ext("active");
   const r3 = await start(e3, "Active shop");
   tenants.push(r3.body.hub_org_id);
+  await summary(e3); // as staging's webhooks would: records the trial's $0 invoice
   const trialSub = await subOf(r3.body.hub_org_id);
   const canceled = await call("POST", `/tenants/${e3}/subscriptions/${trialSub.id}/cancel`, cancelRoute.POST, { ext: e3, sid: trialSub.id }, { at_period_end: false, reason: "fixture" });
-  keep("responses/billing--canceled.json", "BillingSummary after an immediate cancel (response of POST …/cancel with at_period_end false)", canceled.body);
+  keep("responses/billing--canceled.json", "200 from POST …/cancel with at_period_end false: BillingSummary of the canceled subscription", canceled);
   const react = await call("POST", `/tenants/${e3}/checkout`, checkoutRoute.POST, { ext: e3 }, { success_url: `${ORIGIN}/billing?paid=1`, cancel_url: `${ORIGIN}/billing` });
   keep("responses/post-checkout--reactivate.json", "POST /checkout after canceled/expired: pending, pay link charging $35 now (no second trial)", react);
   keep("responses/billing--pending.json", "BillingSummary while a reactivation awaits its first payment", await summary(e3));
@@ -168,14 +179,17 @@ async function main() {
   await waitDefaultPm(s3.stripeSubscriptionId!);
   await completePayLink(t3);
   keep("responses/billing--active.json", "BillingSummary: active, paid, card on file, next charge", await summary(e3));
-  keep("responses/invoices--page.json", "GET /invoices?limit=1 (with next_offset)", (await call("GET", `/tenants/${e3}/invoices?limit=1`, invoicesRoute.GET, { ext: e3 })).body);
+  keep("responses/invoices--page.json", "GET /invoices?limit=1: first page, next_offset present", await call("GET", `/tenants/${e3}/invoices?limit=1`, invoicesRoute.GET, { ext: e3 }));
+  keep("responses/invoices--last-page.json", "GET /invoices?limit=50: last page, next_offset omitted (never null)", await call("GET", `/tenants/${e3}/invoices?limit=50`, invoicesRoute.GET, { ext: e3 }));
   keep("responses/post-portal-session.json", "POST /portal-session: Stripe Billing Portal URL (single use, short-lived)",
     await call("POST", `/tenants/${e3}/portal-session`, portalRoute.POST, { ext: e3 }, { return_url: `${ORIGIN}/billing` }));
   const scheduled = await call("POST", `/tenants/${e3}/subscriptions/${s3.id}/cancel`, cancelRoute.POST, { ext: e3, sid: s3.id }, { at_period_end: true, reason: "fixture" });
-  keep("responses/billing--cancel-scheduled.json", "BillingSummary: still active, cancel_at_period_end true, no next charge", scheduled.body);
+  keep("responses/billing--cancel-scheduled.json", "200 from POST …/cancel (at period end): still active, cancel_at_period_end true, no next charge", scheduled);
   const { partnerResume } = await import("../src/modules/partners/api-service");
   await partnerResume({ app, actor: { externalUserId: ACTOR.external_user_id, email: ACTOR.email, name: ACTOR.name, role: ACTOR.role }, tenantId: r3.body.hub_org_id, subscriptionId: s3.id });
   await suspendSubscriptionManually(s3.id, { actorUserId: opsAdmin.id, note: "Fixture: manual hold by Plaidware ops" });
+  keep("responses/post-checkout--suspended-manual-hold.json", "POST /checkout on a manually held shop: payment_url null (only ops lift a manual hold)",
+    await call("POST", `/tenants/${e3}/checkout`, checkoutRoute.POST, { ext: e3 }, { success_url: `${ORIGIN}/billing?paid=1` }));
   keep("responses/billing--suspended.json", "BillingSummary: suspended by an ops manual hold (suspension object filled)", await summary(e3));
   keep("responses/error--validation-base-charge.json", "400: the base charge isn't an add-on",
     await call("POST", `/tenants/${e3}/subscriptions/${s3.id}/items`, itemsRoute.POST, { ext: e3, sid: s3.id }, { changes: [{ component_id: base.id, quantity: 2 }] }));
@@ -209,6 +223,41 @@ async function main() {
   await applySubscriptionEvent(await stripe.subscriptions.retrieve(s4.stripeSubscriptionId!));
   keep("responses/billing--expired.json", "BillingSummary: the 30-day trial ended with no card → expired (no invoice, no dunning)", await summary(e4));
   await stripe.testHelpers.testClocks.del(clock.id).catch(() => {});
+
+  // ---- 4b. past_due (card declines at trial end) — Stripe test clock -------
+  console.log("past_due (test clock, ~1 min)…");
+  const e6 = ext("pastdue");
+  const owner6 = await db.insert(user).values({
+    id: crypto.randomUUID(), name: "Fixture Owner", email: `fixture-pastdue-${run}@example.com`, emailVerified: false,
+    firstName: "Fixture", lastName: "Owner", phone: "+15550000000", platformRole: "customer", createdAt: new Date(), updatedAt: new Date(),
+  }).returning();
+  const org6 = await createTenantWithOwner({ name: "Fixture — Card declined", slug: await uniqueSlug(`fixture-pastdue-${run}`), ownerUserId: owner6[0].id });
+  tenants.push(org6.id);
+  await linkPartnerTenant({ partnerAppId: app.id, tenantId: org6.id, externalTenantId: e6, linkedBy: "partner_api" });
+  const now6 = Math.floor(Date.now() / 1000);
+  const clock6 = await stripe.testHelpers.testClocks.create({ frozen_time: now6, name: `fixture-pastdue-${run}` });
+  const cust6 = await stripe.customers.create({ email: owner6[0].email, name: org6.name, test_clock: clock6.id, metadata: { tenant_id: org6.id } });
+  await db.update(organization).set({ stripeCustomerId: cust6.id }).where(eq(organization.id, org6.id));
+  const card6 = await call("POST", `/tenants/${e6}/checkout`, checkoutRoute.POST, { ext: e6 }, { success_url: `${ORIGIN}/billing?paid=1` });
+  const page6 = await getPayPage(String(card6.body.payment_url).split("/pay/")[1]);
+  if (page6.state !== "pay") throw new Error("past_due: save-card page not ready");
+  // Attaches fine, declines every charge — the renewal fails at trial end.
+  await stripe.setupIntents.confirm(page6.clientSecret.split("_secret_")[0], { payment_method: "pm_card_chargeCustomerFail" });
+  const s6 = await subOf(org6.id);
+  await waitDefaultPm(s6.stripeSubscriptionId!);
+  for (const t of [now6 + 31 * 86_400, now6 + 31 * 86_400 + 3 * 3600]) {
+    await stripe.testHelpers.testClocks.advance(clock6.id, { frozen_time: t });
+    for (let i = 0; i < 60; i++) {
+      if ((await stripe.testHelpers.testClocks.retrieve(clock6.id)).status === "ready") break;
+      await wait(2000);
+    }
+  }
+  const ss6 = await stripe.subscriptions.retrieve(s6.stripeSubscriptionId!, { expand: ["latest_invoice"] });
+  await applyInvoiceEvent(ss6.latest_invoice as never, "invoice.payment_failed");
+  keep("responses/billing--past-due.json", "BillingSummary: renewal declined → past_due (Hub dunning running, full access + banner)", await summary(e6));
+  keep("responses/post-checkout--past-due-pay.json", "POST /checkout on a past_due (or dunning-suspended) shop: a pay link for the open invoice that returns to your success_url",
+    await call("POST", `/tenants/${e6}/checkout`, checkoutRoute.POST, { ext: e6 }, { success_url: `${ORIGIN}/billing?paid=1`, cancel_url: `${ORIGIN}/billing` }));
+  await stripe.testHelpers.testClocks.del(clock6.id).catch(() => {});
 
   // ---- 5. custom plan (ops start: negotiated $60, no trial, emailed invoice)
   console.log("custom plan…");
