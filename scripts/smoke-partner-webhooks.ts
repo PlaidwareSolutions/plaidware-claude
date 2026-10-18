@@ -155,6 +155,11 @@ async function main() {
   assert(!("external_tenant_id" in (freshProv.payload as object)), "unlinked handshake carries no external id");
   await runDueDeliveries();
   assert((await hubTenantIdFor(app.id, "fx-org-2")) === orgFresh.id, "link written from the handshake response");
+  const resend = (await deliveriesFor(subFresh.id)).filter((r) => r.event === "subscription.updated");
+  assert(
+    resend.length === 1 && (resend[0].payload as Record<string, unknown>).external_tenant_id === "fx-org-2",
+    "a new link re-sends the current state carrying external_tenant_id",
+  );
 
   console.log("4) handshake answering an external id linked elsewhere is disabled for ops");
   provisionAnswer = { external_tenant_id: "fx-org-1" };

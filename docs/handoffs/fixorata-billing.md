@@ -1,6 +1,6 @@
 # Plaidware Hub billing for Fixorata — integration brief
 
-**Status: DRAFT v0.98 (2026-10-18).** The Partner API is implemented in Hub
+**Status: DRAFT v0.99 (2026-10-18).** The Partner API is implemented in Hub
 and passes its smoke tests locally; it becomes **v1 (frozen)** once it is live
 on hub-staging. Source of truth for the contract: Plaidware Hub
 `docs/PARTNER-API.md`.
@@ -9,6 +9,8 @@ on hub-staging. Source of truth for the contract: Plaidware Hub
 item by item. Where this brief and the review's §A or §E disagree on
 Fixorata's internals, **the review wins**: it was written against `develop`,
 and this brief's first draft was not. §4 now follows the review's build plan.
+
+Changes in v0.99: once Hub records a link from a provision reply, it re-sends the current state as `subscription.updated` (B.19). A duplicate provision reply must still include `external_tenant_id` (B.20).
 
 Changes in v0.98: the answers to review items B.14–B.18 (§7), and re-exported fixtures. Every response file is now `{status, body}`, there's a real `past_due` shop, and the first invoices page has `next_offset`. A closed subscription's `items` now lists the plan as it was, the same way for canceled and expired.
 
@@ -192,6 +194,8 @@ Handle all of them in the UI with friendly messages.
   - If `external_tenant_id` is present, link that existing org; never create a duplicate. Otherwise create the org and invite the owner.
   - Must be idempotent on `hub_subscription_id`: a repeat returns the same org id.
   - Hub waits **10 seconds** for the reply. Create the org row and reply at once, then finish seeding after replying (§7 B.8).
+  - **A Hub-first shop's `subscription.activated` arrives before this handshake** and carries no `external_tenant_id`, so ignoring it is correct. Once Hub has read your reply and recorded the link, it sends a fresh `subscription.updated` that carries your id and the current state, and the mirror converges through that. Don't depend on pulling `GET /billing` right after replying: Hub writes the link only after reading your reply, so an immediate pull can get `tenant_not_linked`. If you pull, retry on that error (§7 B.19).
+  - **Always include `external_tenant_id`**, in duplicate replies too. A 2xx without it is retried until it dead-letters (§7 B.20).
   - Generate your own org slug; never use Hub's `org_slug` (A.11).
   - Any non-2xx response, or a 2xx without `external_tenant_id`, is retried.
 - Lifecycle events: `subscription.activated|updated|past_due|suspended|canceled|expired`.
@@ -285,3 +289,8 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
     - **`past_due`, or `suspended` by dunning:** Hub returns a `payment_url` to its pay page for the **open invoice**. Paying there returns the owner to your `success_url` and clears dunning. Prefer it over `hosted_invoice_url` for "Pay now", since Stripe's hosted invoice page has no way back. Recorded in `post-checkout--past-due-pay.json`.
     - **`suspended` by an ops manual hold:** `payment_url: null`. Only Plaidware lifts it, so show "Contact Plaidware" (`post-checkout--suspended-manual-hold.json`). The summary's `subscription.suspension.source` (`dunning` | `manual`) tells the two apart.
 18. **Closed subscriptions.** `items` now lists the plan as it was for both canceled and expired, and `monthly_total_cents` is `0`. Render the state (and what reactivating costs, from `items`), never "$0 / month". `trial_ends_at` stays as history.
+
+**From step 3's review (v0.99):**
+
+19. **Hub-first activation race.** Fixed on Hub's side. When a provision reply creates the link, Hub immediately queues `subscription.updated` with `external_tenant_id` and the current `billing_status`, `plan_key` and `occurred_at`. The receiver needs nothing new: it mirrors that event like any other. A post-reply pull is optional; if you keep it, retry `tenant_not_linked` with a short backoff.
+20. **Duplicate provision without an org id.** In `server/hub-webhook.ts`, a seen delivery whose stored row has no `externalTenantId` answers `{"status":"duplicate"}` with no `external_tenant_id`. Hub treats that as "not done" and retries for about 15 hours. Either look up the org by `hub_subscription_id` or `hub_org_id` and reply with its id, or answer 5xx while it's genuinely unknown.

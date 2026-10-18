@@ -336,6 +336,13 @@ async function applyProvisionResponse(
         error: `link conflict (${linked.reason}) for external_tenant_id ${external}`,
       };
     }
+    // A Hub-first tenant's activation went out before the partner knew it
+    // (no external_tenant_id, so the partner ignored it). Now that the link
+    // exists, send the current state again — carrying the id — so the
+    // partner's mirror converges without racing a pull against this write.
+    if (linked.changed && row.subscriptionId) {
+      await emitSubscriptionLifecycle(row.subscriptionId, "subscription.updated");
+    }
   }
   if (portalUrl && row.subscriptionId) await setPortalUrl(row.subscriptionId, portalUrl);
   return { ok: true };
