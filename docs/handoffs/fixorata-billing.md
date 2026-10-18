@@ -1,6 +1,6 @@
 # Plaidware Hub billing for Fixorata — integration brief
 
-**Status: DRAFT v0.97 (2026-10-18).** The Partner API is implemented in Hub
+**Status: DRAFT v0.98 (2026-10-18).** The Partner API is implemented in Hub
 and passes its smoke tests locally; it becomes **v1 (frozen)** once it is live
 on hub-staging. Source of truth for the contract: Plaidware Hub
 `docs/PARTNER-API.md`.
@@ -9,6 +9,8 @@ on hub-staging. Source of truth for the contract: Plaidware Hub
 item by item. Where this brief and the review's §A or §E disagree on
 Fixorata's internals, **the review wins**: it was written against `develop`,
 and this brief's first draft was not. §4 now follows the review's build plan.
+
+Changes in v0.98: the answers to review items B.14–B.18 (§7), and re-exported fixtures. Every response file is now `{status, body}`, there's a real `past_due` shop, and the first invoices page has `next_offset`. A closed subscription's `items` now lists the plan as it was, the same way for canceled and expired.
 
 Changes in v0.97 (Hub side, all implemented and tested):
 - **A trial that ends without a card now expires.** No invoice and no dunning: Hub sends `subscription.expired` and `billing_status` becomes `expired`. This replaces the v0.96 rule.
@@ -116,7 +118,7 @@ Handle all of them in the UI with friendly messages.
 | Method & path | Body → response |
 |---|---|
 | `GET /tenants/:ext/billing` | → `BillingSummary` (below) |
-| `GET /tenants/:ext/invoices?limit=50&offset=0` | → `{ invoices: Invoice[], next_offset? }` |
+| `GET /tenants/:ext/invoices?limit=50&offset=0` | → `{ invoices: Invoice[], next_offset? }`. `next_offset` is **omitted**, never `null`, on the last page. |
 | `POST /tenants` | `{ external_tenant_id, name, owner: { email, name }, product_slug?, success_url, cancel_url? }` → 201 `{ hub_org_id, billing_status, payment_url }`. `product_slug` defaults to `fixorata`. Idempotent on `external_tenant_id` as well as the `Idempotency-Key`. If the org is already linked and nothing is owed, `payment_url` is `null`. |
 | `POST /tenants/:ext/checkout` | `{ success_url, cancel_url?, product_slug? }` → `{ hub_org_id, billing_status, payment_url }`. Mints a fresh pay link for an unpaid start. After `canceled` or `expired` it starts a new subscription (reactivation). Returns `payment_url: null` when nothing is owed. |
 | `PATCH /tenants/:ext` | `{ name?, billing_email?, billing_name? }` → `BillingSummary`. Keeps Hub's copy of the shop name and billing contact current. It updates the Hub workspace name, the Stripe customer, and where Hub's billing emails go; Hub logins are never changed. Call it when the owner renames the shop or changes the billing email. |
@@ -146,7 +148,7 @@ Handle all of them in the UI with friendly messages.
     "trial_ends_at": "ISO|null", "current_period_end": "ISO|null",
     "cancel_at_period_end": false, "canceled_at": "ISO|null",
     "suspension": null | { "source": "dunning|manual", "since": "ISO", "note": "…|null" },
-    "monthly_total_cents": 3500,
+    "monthly_total_cents": 3500,              // 0 when the subscription is closed: render the state, not "$0 / month"
     "items": [{ "id": "…", "component_id": "…", "name": "Subscription",
                 "role": "base|addon", "kind": "one_time|recurring",
                 "interval": "month|year|null", "interval_count": 1,
@@ -155,7 +157,7 @@ Handle all of them in the UI with friendly messages.
     "addon_options": []   // none today; shape: { component_id, name, kind, interval, unit_amount_cents, current_quantity }
   },
   "payment_method": null | { "brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2028 },
-  "collection_method": "charge_automatically|send_invoice",
+  "collection_method": "charge_automatically|send_invoice|null",   // null when nothing is live (canceled/expired)
   "next_charge": null | { "date": "ISO", "amount_cents": 3500 },
   "invoices": [ /* latest 20 Invoice */ ]
 }
@@ -273,3 +275,13 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
 - **iFixIT:** a fresh 30-day trial through `POST /tenants`.
 - **Test Repair Shop:** `billing_exempt` and never linked. Staging test orgs are exempt too.
 - **Order:** deploy with enforcement off → link the shops → check the admin table → turn enforcement on.
+
+**B.14–B.18 (from step 2):**
+
+14. **`collection_method` is nullable.** It's `null` whenever nothing is live (canceled or expired). The brief now says so.
+15. **Fixture wrapping.** Fixed: every response fixture is `{ status, body }`.
+16. **`next_offset`.** It is omitted, never `null`, on the last page. The re-export has both cases (`invoices--page.json` has it, `invoices--last-page.json` doesn't).
+17. **`/checkout` on a suspended or past-due shop.** Never a 409; it depends on why the shop is held:
+    - **`past_due`, or `suspended` by dunning:** Hub returns a `payment_url` to its pay page for the **open invoice**. Paying there returns the owner to your `success_url` and clears dunning. Prefer it over `hosted_invoice_url` for "Pay now", since Stripe's hosted invoice page has no way back. Recorded in `post-checkout--past-due-pay.json`.
+    - **`suspended` by an ops manual hold:** `payment_url: null`. Only Plaidware lifts it, so show "Contact Plaidware" (`post-checkout--suspended-manual-hold.json`). The summary's `subscription.suspension.source` (`dunning` | `manual`) tells the two apart.
+18. **Closed subscriptions.** `items` now lists the plan as it was for both canceled and expired, and `monthly_total_cents` is `0`. Render the state (and what reactivating costs, from `items`), never "$0 / month". `trial_ends_at` stays as history.
