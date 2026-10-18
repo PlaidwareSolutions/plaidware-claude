@@ -151,7 +151,7 @@ async function validateApp(input: PartnerAppInput, selfId: string | null): Promi
   return { ...input, productPrefixes: prefixes, allowedReturnOrigins: origins };
 }
 
-export async function createPartnerApp(input: PartnerAppInput, actorUserId: string): Promise<string> {
+export async function createPartnerApp(input: PartnerAppInput, actorUserId: string | null): Promise<string> {
   const v = await validateApp(input, null);
   const taken = await db.query.partnerApps.findFirst({ where: eq(partnerApps.name, v.name) });
   if (taken) throw new Error(`A partner app named "${v.name}" already exists`);
@@ -160,7 +160,7 @@ export async function createPartnerApp(input: PartnerAppInput, actorUserId: stri
   return row.id;
 }
 
-export async function updatePartnerApp(id: string, input: Omit<PartnerAppInput, "name">, actorUserId: string) {
+export async function updatePartnerApp(id: string, input: Omit<PartnerAppInput, "name">, actorUserId: string | null) {
   const app = await db.query.partnerApps.findFirst({ where: eq(partnerApps.id, id) });
   if (!app) throw new Error("Partner app not found");
   const v = await validateApp({ ...input, name: app.name }, id);
@@ -189,7 +189,7 @@ export async function setPartnerAppStatus(id: string, status: "active" | "disabl
 }
 
 /** New HMAC secret; returned once for the partner's env, stored sealed. */
-export async function rotatePartnerWebhookSecret(id: string, actorUserId: string): Promise<string> {
+export async function rotatePartnerWebhookSecret(id: string, actorUserId: string | null): Promise<string> {
   const secret = `pws_${randomBytes(32).toString("hex")}`;
   const [row] = await db
     .update(partnerApps)
@@ -202,7 +202,7 @@ export async function rotatePartnerWebhookSecret(id: string, actorUserId: string
 }
 
 /** API key for the app (scoped to its prefixes); the raw key is returned once. */
-export async function mintPartnerAppKey(id: string, label: string, actorUserId: string) {
+export async function mintPartnerAppKey(id: string, label: string, actorUserId: string | null) {
   const app = await db.query.partnerApps.findFirst({ where: eq(partnerApps.id, id) });
   if (!app) throw new Error("Partner app not found");
   const minted = await mintPartnerKey(label.trim() || `${app.name}-${new Date().toISOString().slice(0, 10)}`, app.productPrefixes, app.id);

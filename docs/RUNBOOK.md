@@ -65,6 +65,10 @@ Contract and semantics: docs/PARTNER-API.md. To connect an app (per environment)
    (`https://<fixorata host>/api/webhooks/plaidware-hub`), the billing page URL
    (`https://<fixorata host>/billing`, which Hub's billing emails link to for
    Fixorata shops) and the return origins (the Fixorata host).
+   (Or from the command line: `scripts/setup-partner-app.ts` creates or
+   updates the app, generates the secret and mints a key into a mode-600
+   env file instead of printing them. Staging was set up this way on
+   2026-10-18.)
 2. **Generate secret.** Hand it to the partner as `HUB_WEBHOOK_SECRET`.
    **Mint key.** Hand it over as `HUB_PARTNER_KEY`. Both are shown once and
    go straight into the partner's Railway variables, never chat or git.
