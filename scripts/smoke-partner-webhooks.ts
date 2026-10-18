@@ -127,6 +127,7 @@ async function main() {
   assert(lp.external_tenant_id === "fx-org-1" && lp.billing_status === "active", "lifecycle payload is extended");
   assert(lp.plan_key === "standard" && lp.cancel_at_period_end === false && "trial_ends_at" in lp, "plan and banner fields present");
   assert(typeof lp.occurred_at === "string" && !Number.isNaN(Date.parse(lp.occurred_at as string)), "occurred_at for ordering");
+  assert(lp.card_on_file === false && lp.suspension_source === null && lp.canceled_at === null, "card_on_file / suspension_source / canceled_at present");
   assert((prov.payload as Record<string, unknown>).external_tenant_id === "fx-org-1", "handshake names the linked tenant");
   const roster = await db.query.webhookDeliveries.findMany({
     where: sql`${webhookDeliveries.event} = 'membership.changed' and ${webhookDeliveries.payload}->>'hub_org_id' = ${orgLinked.id}`,

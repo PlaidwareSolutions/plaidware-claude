@@ -1,6 +1,6 @@
 # Plaidware Hub billing for Fixorata — integration brief
 
-**Status: DRAFT v0.99 (2026-10-18).** The Partner API is implemented in Hub
+**Status: DRAFT v1.0-rc (2026-10-18).** Hub's side is live in production but switched off (no Fixorata partner app there yet). The Partner API is implemented in Hub
 and passes its smoke tests locally; it becomes **v1 (frozen)** once it is live
 on hub-staging. Source of truth for the contract: Plaidware Hub
 `docs/PARTNER-API.md`.
@@ -9,6 +9,8 @@ on hub-staging. Source of truth for the contract: Plaidware Hub
 item by item. Where this brief and the review's §A or §E disagree on
 Fixorata's internals, **the review wins**: it was written against `develop`,
 and this brief's first draft was not. §4 now follows the review's build plan.
+
+Changes in v1.0-rc: lifecycle `data` adds `card_on_file`, `suspension_source` and `canceled_at`, so the whole display mirror is webhook-driven (answers deviations 19 and 21 from step 4). Fixtures re-exported.
 
 Changes in v0.99: once Hub records a link from a provision reply, it re-sends the current state as `subscription.updated` (B.19). A duplicate provision reply must still include `external_tenant_id` (B.20).
 
@@ -199,7 +201,8 @@ Handle all of them in the UI with friendly messages.
   - Generate your own org slug; never use Hub's `org_slug` (A.11).
   - Any non-2xx response, or a 2xx without `external_tenant_id`, is retried.
 - Lifecycle events: `subscription.activated|updated|past_due|suspended|canceled|expired`.
-  - Body: `{ "event": "...", "data": { hub_subscription_id, hub_org_id, external_tenant_id, product_slug, status, billing_status, plan_key, current_period_end, trial_ends_at, cancel_at_period_end, occurred_at, addon_components: [{ name, quantity }] } }`.
+  - Body: `{ "event": "...", "data": { hub_subscription_id, hub_org_id, external_tenant_id, product_slug, status, billing_status, plan_key, current_period_end, trial_ends_at, cancel_at_period_end, canceled_at, suspension_source, card_on_file, occurred_at, addon_components: [{ name, quantity }] } }`.
+  - `suspension_source` is `"dunning"`, `"manual"` or `null` (not suspended). `card_on_file` is a boolean; `null` means Hub couldn't ask Stripe, so keep your prior value. `canceled_at` is the actual end time of a canceled subscription.
   - Upsert `billing_status`, `billing_plan` (from `plan_key`) and `billing_status_at` (from `occurred_at`) on the org. **Ignore any event whose `occurred_at` is older than the stored `billing_status_at`.**
   - `subscription.updated` fires often: renewals, period-end cancel and resume, Hub workspace holds. Delivery is at-least-once and can arrive out of order; `occurred_at` makes that safe.
 - `organization.updated`: `{ hub_org_id, name, slug }`. Optional; you may ignore it.
@@ -227,7 +230,7 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
 - **Mock (A.24):** `server/hub-mock.ts` refuses to load when `NODE_ENV === "production"`.
 
 ## §5. Rules
-- Never store prices, invoices or cards locally. Fetch them live. Only `billing_status`, `billing_plan`, `billing_status_at` and `hub_org_id` are mirrored, and `/access` reads only the mirror (A.15).
+- Never store prices, invoices or cards locally. Fetch them live. The mirror holds only access and display state, all from lifecycle `data`: `billing_status`, `billing_plan`, `billing_status_at`, `hub_org_id`, `trial_ends_at`, `current_period_end`, `cancel_at_period_end`, `canceled_at`, `card_on_file` (a boolean, never the card) and `suspension_source`. `/access` reads only the mirror (A.15).
 - Never compute money in Fixorata. Display the cents Hub returns, formatted as USD.
 - The partner key and webhook secret are server-only, live in Railway variables, and must never be committed.
 - Use staging Hub with staging Fixorata and prod with prod. Stripe on Hub staging is in test mode (card 4242 4242 4242 4242). The staging `APP_URL` must be the staging origin (A.20).
@@ -294,3 +297,11 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
 
 19. **Hub-first activation race.** Fixed on Hub's side. When a provision reply creates the link, Hub immediately queues `subscription.updated` with `external_tenant_id` and the current `billing_status`, `plan_key` and `occurred_at`. The receiver needs nothing new: it mirrors that event like any other. A post-reply pull is optional; if you keep it, retry `tenant_not_linked` with a short backoff.
 20. **Duplicate provision without an org id.** In `server/hub-webhook.ts`, a seen delivery whose stored row has no `externalTenantId` answers `{"status":"duplicate"}` with no `external_tenant_id`. Hub treats that as "not done" and retries for about 15 hours. Either look up the org by `hub_subscription_id` or `hub_org_id` and reply with its id, or answer 5xx while it's genuinely unknown.
+
+**From step 4's review (your deviations 19–21, v1.0-rc):**
+
+- **19, the display mirror:** accepted. It holds no price, invoice or card detail. Hub now sends `card_on_file` and `suspension_source` in **every** lifecycle event, so they no longer depend on a `GET` sync. Update them from events. `card_on_file: null` means "unknown", so keep the old value. Clear `suspension_source` whenever the event's value is `null`. Keep the `GET` sync as a refresh.
+  - **Card events:** adding a card mid-trial reaches you as `subscription.updated` (`card_on_file: true`), sent when Stripe attaches it to the subscription.
+  - **Portal limitation:** changing the card only at the customer level in the Billing Portal doesn't emit an event. That case still relies on your `GET` refresh after the portal returns.
+- **20, transitional adapter:** fine. Make sure step 8 removes it.
+- **21, end dates:** right that `trialing` never expires by the clock, since Hub owns the transition. For "ended on", Hub now sends `canceled_at`. Use it. Fall back to `current_period_end` and then `occurred_at` only when it's `null`.

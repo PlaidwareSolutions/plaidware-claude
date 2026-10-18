@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { db } from "../../db";
 import { env } from "../../env";
+import { getStripe, stripeConfigured } from "../../lib/stripe";
 import { member, organization, user } from "../auth/schema";
 import { subscriptionItems, subscriptions } from "../billing/schema";
 import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
@@ -62,6 +63,22 @@ export async function orgPartnerTargets(orgId: string): Promise<PartnerTarget[]>
   return targets.filter((t) => rows.some((r) => t.prefixes.some((p) => r.slug.startsWith(p))));
 }
 
+/** A usable card for the subscription (its own default, else the customer's), or null if Stripe can't say. */
+async function cardOnFile(sub: SubscriptionRow): Promise<boolean | null> {
+  if (!stripeConfigured() || !sub.stripeSubscriptionId) return sub.stripeSubscriptionId ? null : false;
+  try {
+    const stripe = getStripe();
+    const ss = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    if (ss.default_payment_method) return true;
+    const customerId = typeof ss.customer === "string" ? ss.customer : ss.customer.id;
+    const customer = await stripe.customers.retrieve(customerId);
+    return !("deleted" in customer && customer.deleted) && Boolean((customer as { invoice_settings?: { default_payment_method?: unknown } }).invoice_settings?.default_payment_method);
+  } catch (e) {
+    console.error(`[webhooks_out] card lookup sub=${sub.id} failed:`, e);
+    return null;
+  }
+}
+
 async function buildSubscriptionPayload(
   sub: SubscriptionRow,
   productSlug: string,
@@ -106,6 +123,11 @@ async function buildSubscriptionPayload(
     payload.plan_key = await partnerPlanKey(sub.tenantId, sub.productId);
     payload.trial_ends_at = sub.trialEndsAt?.toISOString() ?? null;
     payload.cancel_at_period_end = sub.cancelAtPeriodEnd;
+    payload.canceled_at = sub.canceledAt?.toISOString() ?? null;
+    payload.suspension_source = sub.status === "suspended" ? (sub.suspensionSource ?? "dunning") : null;
+    // Partners show "add a card" from their mirror without calling Hub. Null
+    // = couldn't tell (Stripe unreachable); partners keep their prior value.
+    payload.card_on_file = await cardOnFile(sub);
     // Event time (retries re-sign with a fresh header timestamp): partners
     // drop anything older than the last state they applied.
     payload.occurred_at = new Date().toISOString();

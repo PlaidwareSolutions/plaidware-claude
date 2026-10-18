@@ -185,7 +185,11 @@ These are the same outbox, signing and retry rules as MHub (`webhooks_out`):
   - Body: `{event, data}`, where `data` is `{ hub_subscription_id, hub_org_id,
     product_slug, status, current_period_end, addon_components[{name,quantity}],
     external_tenant_id | null, billing_status, plan_key, trial_ends_at,
-    cancel_at_period_end, occurred_at }`.
+    cancel_at_period_end, canceled_at, suspension_source: dunning|manual|null,
+    card_on_file: boolean|null, occurred_at }`.
+  - `card_on_file` is read from Stripe at emit time (the subscription's
+    default, else the customer's); `null` means Stripe couldn't be reached,
+    and the partner keeps its prior value.
   - MHub's payload lacks everything after `addon_components`.
   - `occurred_at` is the emit time. The header timestamp and signature are
     fresh on every attempt, so partners order events by `occurred_at`.
