@@ -1,6 +1,6 @@
 # Plaidware Hub billing for Fixorata — integration brief
 
-**Status: DRAFT v1.0-rc (2026-10-18).** Hub's side is live in production but switched off (no Fixorata partner app there yet). The Partner API is implemented in Hub
+**Status: DRAFT v1.0-rc2 (2026-10-18).** Hub's side is live in production but switched off (no Fixorata partner app there yet). The Partner API is implemented in Hub
 and passes its smoke tests locally; it becomes **v1 (frozen)** once it is live
 on hub-staging. Source of truth for the contract: Plaidware Hub
 `docs/PARTNER-API.md`.
@@ -305,3 +305,10 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
   - **Portal limitation:** changing the card only at the customer level in the Billing Portal doesn't emit an event. That case still relies on your `GET` refresh after the portal returns.
 - **20, transitional adapter:** fine. Make sure step 8 removes it.
 - **21, end dates:** right that `trialing` never expires by the clock, since Hub owns the transition. For "ended on", Hub now sends `canceled_at`. Use it. Fall back to `current_period_end` and then `occurred_at` only when it's `null`.
+
+**From step 5's review (your B.22, v1.0-rc2):**
+
+- **Deep link.** Hub's per-client console is `{HUB_BASE_URL}/ops/clients/<hub_org_id>` (staging: `https://hub-staging.plaidware.com/...`). This is a stable route. Tabs append `/billing`, `/provisioning` or `/activity`; link the Billing tab from the admin table. Viewers must be Plaidware ops signed in to Hub.
+- **(a) Actor role.** Hub records any `role` string up to 50 characters, for audit only. `platform_admin` is fine, and so is any other real role.
+- **(b) Idempotency across routes.** Hub keys the ledger on (app, key) and compares method, path and body, so reusing one key on a different route is a 409 by design. Scope the key per route when forwarding (for example `<clientKey>:tenants` and `<clientKey>:checkout`). The same button retry then replays correctly whichever route it reaches.
+- **Rollout guard (new, step 6).** An org still resolved through its legacy row (your deviation 20 adapter, i.e. EZ Wireless and The Fix until ops link them) must **not** show "Start subscription". Show "Plaidware is moving your billing to the new system" instead. If the owner clicked Start first, Hub would create a fresh $35 trial tenant, and ops could no longer link the shop at its agreed terms (§7 C). Once ops link and start it in Hub, the webhook fills the mirror and the normal UI takes over.
