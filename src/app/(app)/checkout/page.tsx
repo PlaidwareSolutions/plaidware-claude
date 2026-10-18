@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getTenantContext } from "@/policy";
+import { getTenantContext, impersonationOf, viewAsMessage } from "@/policy";
 import { getProductBySlug } from "@/modules/catalog/queries";
 import { getTenantOverrides } from "@/modules/billing/service";
 import { CheckoutFlow } from "@/modules/billing/components/checkout-flow";
@@ -17,10 +17,20 @@ export default async function CheckoutPage({
   const { product: slug } = await searchParams;
   if (!slug) redirect(MARKETING.products);
   // A user with no workspace yet must still get here: the first purchase creates one.
-  const { active, caps } = await getTenantContext({ returnTo: TENANT.checkoutFor(slug) });
+  const { session, active, caps } = await getTenantContext({ returnTo: TENANT.checkoutFor(slug) });
 
   const product = await getProductBySlug(slug);
   if (!product) redirect(MARKETING.products);
+
+  if (impersonationOf(session)) {
+    return (
+      <EmptyState
+        className="mx-auto mt-16 max-w-md"
+        title="No purchases while viewing as someone"
+        description={viewAsMessage(session.user.name)}
+      />
+    );
+  }
 
   if (active && caps?.readOnlyReason) redirect(TENANT.billing); // suspended: pay, don't buy
   if (active && caps && !caps.roleCan("write")) {

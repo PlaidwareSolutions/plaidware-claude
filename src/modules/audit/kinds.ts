@@ -34,6 +34,14 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   subscription_reactivated: { label: "Subscription reactivated", group: "billing" },
   subscription_items_changed: { label: "Add-ons changed", group: "billing" },
   subscription_started_by_ops: { label: "Subscription started by ops", group: "billing" },
+  subscription_canceled: { label: "Subscription canceled", group: "billing" },
+  subscription_cancel_scheduled: { label: "Cancellation scheduled", group: "billing" },
+  subscription_cancel_unscheduled: { label: "Scheduled cancellation undone", group: "billing" },
+  partner_tenant_created: { label: "Workspace created by partner app", group: "setup" },
+  partner_tenant_updated: { label: "Workspace details updated by partner app", group: "workspace" },
+  partner_checkout_started: { label: "Payment link created by partner app", group: "billing" },
+  partner_link_set: { label: "Linked to partner app", group: "provisioning" },
+  partner_link_removed: { label: "Partner app link removed", group: "provisioning" },
   offline_payment_recorded: { label: "Offline payment recorded", group: "billing" },
   domain_changed: { label: "Domain changed", group: "provisioning" },
   dns_config_changed: { label: "DNS verification configured", group: "provisioning" },
@@ -60,6 +68,14 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   account_enabled: { label: "Account re-enabled", group: "platform" },
   sessions_revoked: { label: "Sessions revoked by ops", group: "platform" },
   email_change_requested: { label: "Email change requested", group: "platform" },
+  impersonation_started: { label: "Viewed as user", group: "platform" },
+  impersonation_ended: { label: "Stopped viewing as user", group: "platform" },
+  partner_app_created: { label: "Partner app created", group: "platform" },
+  partner_app_updated: { label: "Partner app updated", group: "platform" },
+  partner_app_status_changed: { label: "Partner app enabled/disabled", group: "platform" },
+  partner_secret_rotated: { label: "Partner webhook secret rotated", group: "platform" },
+  partner_key_minted: { label: "Partner API key minted", group: "platform" },
+  partner_key_revoked: { label: "Partner API key revoked", group: "platform" },
   workspace_status_changed: { label: "Workspace status changed", group: "workspace" },
   incident_acknowledged: { label: "Incident acknowledged", group: "monitoring" },
 };
@@ -128,6 +144,45 @@ export function describeAudit(
         .filter(Boolean)
         .join(" · ") || null;
     }
+    case "subscription_items_changed":
+      return [
+        num(payload.added) ? `${payload.added} added` : null,
+        num(payload.removed) ? `${payload.removed} removed` : null,
+        num(payload.updated) ? `${payload.updated} quantity changed` : null,
+        str(payload.via),
+      ]
+        .filter(Boolean)
+        .join(" · ") || null;
+    case "subscription_cancel_scheduled":
+      return [str(payload.cancelAt) ? `ends ${String(payload.cancelAt).slice(0, 10)}` : null, str(payload.via)]
+        .filter(Boolean)
+        .join(" · ") || null;
+    case "subscription_canceled":
+      return [str(payload.via), str(payload.reason) ? `— ${payload.reason}` : null].filter(Boolean).join(" ") || null;
+    case "partner_tenant_updated": {
+      const n = payload.name as { after?: unknown } | undefined;
+      const b = payload.billingContact as { after?: unknown } | undefined;
+      return [n ? `name → ${str(n.after) ?? "?"}` : null, b ? `billing email → ${str(b.after) ?? "cleared"}` : null, str(payload.via)]
+        .filter(Boolean)
+        .join(" · ") || null;
+    }
+    case "subscription_cancel_unscheduled":
+    case "partner_checkout_started":
+    case "partner_tenant_created":
+      return str(payload.via);
+    case "partner_app_created":
+    case "partner_app_updated":
+    case "partner_secret_rotated":
+      return str(payload.app);
+    case "partner_app_status_changed":
+      return `${str(payload.app) ?? "?"} → ${str(payload.after) ?? "?"}`;
+    case "partner_key_minted":
+      return [str(payload.app), str(payload.prefix)].filter(Boolean).join(" · ") || null;
+    case "partner_key_revoked":
+      return [str(payload.name), str(payload.prefix)].filter(Boolean).join(" · ") || null;
+    case "partner_link_set":
+    case "partner_link_removed":
+      return [str(payload.app), str(payload.externalTenantId), str(payload.via)].filter(Boolean).join(" · ") || null;
     case "workspace_status_changed":
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}${str(payload.note) ? ` — ${payload.note}` : ""}`;
     case "member_invited":
@@ -170,6 +225,18 @@ export function describeAudit(
     }
     case "email_change_requested":
       return `${str(payload.from) ?? "?"} → ${str(payload.to) ?? "?"}`;
+    case "impersonation_started":
+      return `${str(payload.targetEmail) ?? "?"}${str(payload.reason) ? ` — ${payload.reason}` : ""}`;
+    case "impersonation_ended": {
+      const secs = num(payload.durationSeconds);
+      return [
+        str(payload.targetEmail) ?? "?",
+        secs != null ? `· ${Math.max(1, Math.round(secs / 60))} min` : null,
+        payload.restored === false ? "· admin session had ended" : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
     case "platform_account_created":
       return str(payload.targetEmail) ? `${payload.targetEmail} · ${str(payload.role) ?? "developer"}` : null;
     case "client_setup_created":

@@ -14,7 +14,8 @@ import {
  * CHECK, the extra indexes and the relations below are NOT emitted by the
  * generator and must be re-applied after regenerating this file. The
  * additional user columns (platform_role, disabled_at, disabled_reason) are
- * declared in src/lib/auth.ts and survive regeneration.
+ * declared in src/lib/auth.ts, the session column impersonated_by in
+ * src/lib/impersonation-plugin.ts; both survive regeneration.
  */
 
 export const user = pgTable("user", {
@@ -57,6 +58,8 @@ export const session = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     activeOrganizationId: text("active_organization_id"),
+    /** A view-as session (src/lib/impersonation-plugin.ts): the ops admin really at the keyboard. */
+    impersonatedBy: text("impersonated_by"),
   },
   (table) => [index("session_userId_idx").on(table.userId)],
 );

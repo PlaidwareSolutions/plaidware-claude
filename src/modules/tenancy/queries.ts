@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { invitation, member, organization, session, user } from "../auth/schema";
 import { roleRequests } from "./schema";
@@ -6,7 +6,7 @@ import { TENANT_ROLES, isTenantRole, type TenantRole } from "@/lib/roles";
 import { subscriptions } from "../billing/schema";
 import { products } from "../catalog/schema";
 import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
-import { isMarketingSlug } from "../webhooks_out/logic";
+import { loadPartnerDirectory } from "../partners/targets";
 
 export type TenantSummary = {
   id: string;
@@ -71,7 +71,8 @@ export async function listMembers(tenantId: string): Promise<MemberRow[]> {
       lastSeenAt: sql<Date>`max(${session.updatedAt})`,
     })
     .from(session)
-    .where(inArray(session.userId, rows.map((r) => r.userId)))
+    // View-as sessions belong to the ops admin at the keyboard, not to the member.
+    .where(and(inArray(session.userId, rows.map((r) => r.userId)), isNull(session.impersonatedBy)))
     .groupBy(session.userId);
   const lastSeen = new Map(seen.map((s) => [s.userId, s.lastSeenAt]));
 
@@ -184,14 +185,14 @@ export type ClientHeader = {
   ownerEmail: string | null;
   memberCount: number;
   stripeCustomerId: string | null;
-  /** Holds a live marketing-* subscription → MHub owns part of this client. */
-  hasMarketing: boolean;
+  /** Partner apps (MHub, Fixorata…) this client holds a live subscription to. */
+  partnerNames: string[];
 };
 
 export async function getClientHeader(tenantId: string): Promise<ClientHeader | null> {
   const org = await db.query.organization.findFirst({ where: eq(organization.id, tenantId) });
   if (!org) return null;
-  const [members, marketing] = await Promise.all([
+  const [members, live, partnerOf] = await Promise.all([
     db
       .select({ role: member.role, name: user.name, email: user.email })
       .from(member)
@@ -203,6 +204,7 @@ export async function getClientHeader(tenantId: string): Promise<ClientHeader | 
       .from(subscriptions)
       .innerJoin(products, eq(subscriptions.productId, products.id))
       .where(and(eq(subscriptions.tenantId, tenantId), inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES))),
+    loadPartnerDirectory(),
   ]);
   const owner = members.find((m) => m.role === "owner") ?? members[0] ?? null;
   return {
@@ -215,7 +217,7 @@ export async function getClientHeader(tenantId: string): Promise<ClientHeader | 
     ownerEmail: owner?.email ?? null,
     memberCount: members.length,
     stripeCustomerId: org.stripeCustomerId,
-    hasMarketing: marketing.some((m) => isMarketingSlug(m.slug)),
+    partnerNames: [...new Set(live.flatMap((s) => partnerOf(s.slug)?.displayName ?? []))],
   };
 }
 

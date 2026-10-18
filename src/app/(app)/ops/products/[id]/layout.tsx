@@ -36,7 +36,7 @@ export default async function ProductLayout({
         badge={
           <>
             <StatusBadge kind="product" status={p.isActive ? "active" : "hidden"} />
-            {p.isMarketing && <Badge variant="outline" title="Billed here, run by the Marketing Ops Hub">MHub</Badge>}
+            {p.managedBy && <Badge variant="outline" title={`Billed here, run by ${p.managedBy}`}>{p.managedBy}</Badge>}
           </>
         }
         meta={
@@ -63,7 +63,7 @@ export default async function ProductLayout({
       >
         <ProductTabs
           id={p.id}
-          isMarketing={p.isMarketing}
+          managedByPartner={Boolean(p.managedBy)}
           counts={{
             components: data.components.filter((c) => c.isActive).length,
             kpis: data.metricDefinitions.length,

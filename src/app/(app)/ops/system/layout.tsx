@@ -16,6 +16,7 @@ export default async function SystemLayout({ children }: { children: React.React
             { href: OPS.access, label: "Access" },
             { href: OPS.roles, label: "Roles" },
             { href: OPS.webhooks, label: "Webhooks", count: dead },
+            { href: OPS.partners, label: "Partners" },
             { href: OPS.costs, label: "Costs" },
             ...(env.PROMOS_ENABLED === "true" ? [{ href: OPS.promos, label: "Promos" }] : []),
           ]}

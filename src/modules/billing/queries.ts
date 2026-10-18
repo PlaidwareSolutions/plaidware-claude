@@ -9,6 +9,7 @@ import { subscriptionProvisioning } from "../provisioning/schema";
 import { dunningStates, payments } from "./ar-schema";
 import { invoices, subscriptionItems, subscriptions, tenantPriceOverrides, type InvoiceLineItem } from "./schema";
 import { intervalLabel, isRecurringKind, itemMrrCents, LIVE_SUBSCRIPTION_STATUSES, MRR_STATUSES } from "./mappers";
+import { loadPartnerDirectory } from "../partners/targets";
 
 export type SubscriptionItemDto = {
   id: string;
@@ -34,6 +35,8 @@ export type SubscriptionDto = {
   subscribedAt: string;
   monthlyCents: number;
   domainUrl: string | null;
+  /** Partner app that runs this product (its portal URL, not a customer domain), e.g. "MHub". */
+  managedBy: string | null;
   items: SubscriptionItemDto[];
   stripeSubscriptionId: string | null;
   /** Standalone monthly hosting fee (null = none); first billed month as YYYY-MM. */
@@ -73,13 +76,14 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
     .orderBy(desc(subscriptions.subscribedAt));
   if (subs.length === 0) return [];
 
-  const [items, provRows] = await Promise.all([
+  const [items, provRows, partnerOf] = await Promise.all([
     db.query.subscriptionItems.findMany({
       where: inArray(subscriptionItems.subscriptionId, subs.map((s) => s.id)),
     }),
     db.query.subscriptionProvisioning.findMany({
       where: inArray(subscriptionProvisioning.subscriptionId, subs.map((s) => s.id)),
     }),
+    loadPartnerDirectory(),
   ]);
 
   return subs.map((s) => {
@@ -87,6 +91,7 @@ export async function listTenantSubscriptions(tenantId: string): Promise<Subscri
     return {
       ...s,
       domainUrl: provRows.find((p) => p.subscriptionId === s.id)?.domainUrl ?? null,
+      managedBy: partnerOf(s.productSlug)?.displayName ?? null,
       trialEndsAt: s.trialEndsAt?.toISOString() ?? null,
       currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
       subscribedAt: s.subscribedAt.toISOString(),

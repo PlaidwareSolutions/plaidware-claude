@@ -1,4 +1,4 @@
-import { requireOpsPage } from "@/policy";
+import { impersonationOf, requireOpsPage, viewAsMessage } from "@/policy";
 import { getThreadWithMessages, listThreads } from "@/modules/messaging/service";
 import { getTenant } from "@/modules/tenancy/queries";
 import { InboxView } from "@/modules/messaging/components/inbox-view";
@@ -11,14 +11,16 @@ export default async function OpsInboxPage({
 }: {
   searchParams: Promise<{ thread?: string; tenant?: string }>;
 }) {
-  await requireOpsPage("support");
+  const session = await requireOpsPage("support");
+  // An ops admin viewing as an ops-support account: no read receipts, no replies.
+  const viewAs = impersonationOf(session);
 
   const { thread: threadId, tenant: tenantId } = await searchParams;
   const [threads, scopedTenant] = await Promise.all([
     listThreads("ops", tenantId || undefined),
     tenantId ? getTenant(tenantId) : Promise.resolve(null),
   ]);
-  const detail = threadId ? await getThreadWithMessages(threadId, "ops") : null;
+  const detail = threadId ? await getThreadWithMessages(threadId, "ops", { markRead: !viewAs }) : null;
 
   return (
     <InboxView
@@ -28,6 +30,7 @@ export default async function OpsInboxPage({
       threads={threads}
       activeThread={threads.find((t) => t.id === threadId) ?? null}
       activeMessages={detail?.messages ?? []}
+      readOnlyReason={viewAs ? viewAsMessage(session.user.name) : null}
     />
   );
 }

@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { requireOps } from "../../policy";
-import { isMarketingSlug } from "../webhooks_out/logic";
+import { loadPartnerDirectory } from "../partners/targets";
 import { isProductIcon } from "./icons";
 import { productComponents, products } from "./schema";
 
@@ -89,9 +89,11 @@ export async function updateProductAction(
     const current = await db.query.products.findFirst({ where: eq(products.id, p.id) });
     if (!current) throw new Error("Product not found");
     if (p.slug !== current.slug) {
-      // marketing-* is the MHub contract: partner feed scope, lifecycle webhooks, handshake.
-      if (isMarketingSlug(current.slug) || isMarketingSlug(p.slug)) {
-        throw new Error("marketing-* slugs are part of the MHub contract and can't be renamed here");
+      // A partner app's slugs are its contract: feed scope, lifecycle webhooks, handshake.
+      const partnerOf = await loadPartnerDirectory();
+      const owner = partnerOf(current.slug) ?? partnerOf(p.slug);
+      if (owner) {
+        throw new Error(`This slug is part of the ${owner.displayName} integration contract and can't be renamed here`);
       }
       const taken = await db.query.products.findFirst({ where: eq(products.slug, p.slug), columns: { id: true } });
       if (taken) throw new Error(`The slug "${p.slug}" is already used by another product`);

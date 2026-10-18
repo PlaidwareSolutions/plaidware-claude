@@ -49,6 +49,14 @@ Hub picked a behavior MHub should be aware of.
    Better Auth's organization endpoints (hooked), and the plumbing is ready
    for a rename feature.
 
+8. **View-as sessions reach MHub.** An ops admin can view the Hub as a
+   customer (read-only, one hour). That is a real session of the customer
+   under the shared `.plaidware.com` cookie, so MHub's session introspection
+   sees the customer; the payload carries `session.impersonatedBy` (the ops
+   admin's Hub user id) whenever that is the case. The Hub refuses every
+   change on its side. MHub follow-up: show a banner and refuse writes when
+   `impersonatedBy` is set.
+
 ## Resolutions (contract, confirmed by both sides)
 
 - **`portal_url` is generic and permanently stable** (resolved 2026-08-26,

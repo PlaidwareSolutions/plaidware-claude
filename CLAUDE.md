@@ -20,7 +20,8 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   contracts.ts (zod), jobs.ts (pg-boss), components/.
 - **No internal REST.** UI uses server actions + RSC queries. Only external
   contracts get route handlers: `/api/auth/[...all]`, `/api/system/health`,
-  (later) `/api/metrics/ingest`, `/api/webhooks/stripe`.
+  `/api/metrics/ingest`, `/api/webhooks/stripe`, `/api/partners/*` (MHub
+  feed + Partner API v1).
 - **Authorization**: everything goes through `src/policy/` (requireUser,
   requireOps(min), requireMembership, getTenantContext/requireTenantPage for
   client pages). Never inline role checks. Pure decision logic lives in
@@ -96,6 +97,42 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   checkout the new product; the provisioning handshake hits the existing
   MHub tenant and MHub reactivates/relevels it.
 
+## Partner apps — Fixorata billing (2026-10)
+
+- Hub bills tenants of external product apps (**partner apps**, `partner_apps`;
+  Fixorata first). Contract: docs/PARTNER-API.md; Fixorata's build brief:
+  docs/handoffs/fixorata-billing.md (copied into fixorata-claude
+  docs/integrations/plaidware-hub-billing.md — keep both in sync).
+- `src/modules/partners`: `targets.ts` resolves a product slug → webhook
+  target (MHub stays env-configured as the built-in target with frozen
+  payloads; apps get `external_tenant_id` + `billing_status`) and
+  `loadPartnerDirectory()` (the "managed by X" badges / locked slugs / no-DNS
+  provisioning that used to be `isMarketingSlug`). `partner_tenant_links` maps
+  Hub tenant ↔ the app's tenant id (set by `POST /tenants`, the provision
+  reply, or ops on Client → Provisioning).
+- Partner API v1 (`/api/partners/v1/tenants/...`, `api-http.ts` glue: key →
+  app, `X-Partner-Actor` into audit as `partner:<app>/<email>`,
+  `Idempotency-Key` ledger; `api-queries.ts` BillingSummary scoped to the
+  app's prefixes; `api-service.ts` reuses createCheckout /
+  changeSubscriptionItems (+`setQuantities`) / setCancelAtPeriodEnd /
+  createBillingPortalSession). Card entry is the no-login pay page
+  `/pay/[token]` (`partner_pay_links`, 23h) → partner `success_url`.
+  Trials start with no card (`POST /tenants` → trialing, no pay link);
+  `/checkout` during a trial gives a save-card link; no second trial on
+  reactivation; a trial ending without a card is cancelled by Stripe
+  (`trial_settings` missing_payment_method cancel) → local `expired` via
+  `isTrialLapse`, no invoice/dunning (scripts/spike-trial-no-card.ts).
+  `PATCH /tenants/:ext` sets name + a partner billing contact that overrides
+  billing-email recipients (`billingContactOverride`); `plan_key`
+  standard|custom = base-charge price override; workspace holds fold into
+  `billing_status` suspended. Hub billing emails link to the app's
+  `billingUrl` for partner-only clients (`billingPageUrlFor`). Fixorata
+  pricing = 30-day trial + $35/mo (seed; existing DBs:
+  scripts/align-fixorata-pricing.ts).
+- Ops: `/ops/system/partners` (apps, secret rotation, keys — shown once).
+  Smokes: scripts/smoke-partner-billing.ts, smoke-partner-webhooks.ts
+  (+ smoke-webhooks.ts for MHub regressions).
+
 ## UI page system (redesign, 2026-09)
 
 - Ops IA is client-centric: `/ops/clients/[id]` (layout + tabs
@@ -118,6 +155,19 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   a cross-workspace audit timeline. `/ops/system/roles` is the read-only roles &
   permissions reference (`src/lib/role-matrices.ts` derived from the role tables;
   `src/lib/permissions-reference.ts` hand-kept — update it when a guard changes).
+- View as (2026-09-26): `/ops/users/[id]` → account menu → View as… gives an ops admin a
+  one-hour, read-only session of a customer/developer/ops-support account (never an ops
+  admin; reason required). Mechanism: custom Better Auth plugin
+  `src/lib/impersonation-plugin.ts` (NOT the bundled admin plugin): `session.impersonated_by`,
+  the admin's token stashed in `<prefix>.impersonator_session`, both endpoints in
+  `disabledPaths` (server actions only). Read-only is enforced three ways:
+  `policy.requireUser()` refuses view-as sessions (`setActiveTenantAction` is the lone
+  `allowImpersonated`), `capabilitiesFor(..., lock)` locks the tenant UI, and the plugin's
+  before-hook refuses every auth route not in `src/lib/impersonation-surface.ts`. Banner +
+  Stop live in `AppShell`; audit kinds `impersonation_started/ended`; pure rules in
+  `src/policy/impersonation.ts` and `access/rules.ts canImpersonate`. MHub sees the session
+  (`impersonatedBy` in get-session) — docs/INTEGRATION-DEVIATIONS.md §8. Smoke:
+  scripts/smoke-impersonation.ts (local DB, no dev server).
 - Semantics: workspace status gates members via `policy.requireMembership`
   (suspended = read + billing; inactive = read); subscription holds carry
   `suspension_source` ('dunning' lifts on payment, 'manual' only by ops) and

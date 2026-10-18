@@ -92,12 +92,12 @@ export function ProductDetailsForm({ product }: { product: ProductOps["product"]
             <Input
               id="p-slug"
               value={form.slug}
-              disabled={product.isMarketing}
+              disabled={Boolean(product.managedBy)}
               onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase() })}
               className="font-mono"
             />
             <p className="text-xs text-muted-foreground">
-              {product.isMarketing ? "marketing-* slugs are the MHub contract — locked." : "Public URL and reporting key; must stay unique."}
+              {product.managedBy ? `Part of the ${product.managedBy} integration contract — locked.` : "Public URL and reporting key; must stay unique."}
             </p>
           </div>
           <div className="grid gap-2">

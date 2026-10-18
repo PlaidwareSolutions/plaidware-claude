@@ -34,6 +34,24 @@ describe("audit kinds", () => {
     expect(auditGroup("ownership_transferred")).toBe("people");
     expect(describeAudit("ownership_transferred", { fromEmail: "a@x.co", toEmail: "b@x.co" }, fmt)).toBe("a@x.co → b@x.co");
   });
+  it("files view-as sessions under the platform group and describes them", () => {
+    expect(auditGroup("impersonation_started")).toBe("platform");
+    expect(auditLabel("impersonation_started")).toBe("Viewed as user");
+    expect(auditGroup("impersonation_ended")).toBe("platform");
+    expect(describeAudit("impersonation_started", { targetEmail: "a@x.co", reason: "blank billing page" }, fmt)).toBe("a@x.co — blank billing page");
+    expect(describeAudit("impersonation_ended", { targetEmail: "a@x.co", durationSeconds: 754, restored: true }, fmt)).toBe("a@x.co · 13 min");
+    expect(describeAudit("impersonation_ended", { targetEmail: "a@x.co", durationSeconds: 10, restored: false }, fmt)).toBe(
+      "a@x.co · 1 min · admin session had ended",
+    );
+  });
+  it("describes partner-originated billing changes with their actor", () => {
+    const via = "partner:fixorata/owner@shop.com";
+    expect(auditGroup("partner_link_set")).toBe("provisioning");
+    expect(describeAudit("partner_link_set", { app: "Fixorata", externalTenantId: "fx-1", via: "ops" }, fmt)).toBe("Fixorata · fx-1 · ops");
+    expect(describeAudit("subscription_items_changed", { added: 0, removed: 0, updated: 1, via }, fmt)).toBe(`1 quantity changed · ${via}`);
+    expect(describeAudit("subscription_cancel_scheduled", { cancelAt: "2026-11-30T00:00:00.000Z", via }, fmt)).toBe(`ends 2026-11-30 · ${via}`);
+    expect(describeAudit("partner_checkout_started", { via }, fmt)).toBe(via);
+  });
   it("still humanises unknown kinds", () => {
     expect(auditLabel("something_new")).toBe("Something new");
     expect(auditGroup("something_new")).toBe("workspace");

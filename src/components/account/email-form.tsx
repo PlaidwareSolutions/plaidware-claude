@@ -9,7 +9,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 /** Current email with a change flow: one confirmation link goes to the new address. */
-export function EmailForm({ email, emailVerified }: { email: string; emailVerified: boolean }) {
+export function EmailForm({
+  email,
+  emailVerified,
+  disabled = false,
+}: {
+  email: string;
+  emailVerified: boolean;
+  /** Read-only (an ops admin viewing as this person): no change flow. */
+  disabled?: boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -31,7 +40,7 @@ export function EmailForm({ email, emailVerified }: { email: string; emailVerifi
       <div className="flex flex-wrap items-center gap-2 text-heading">
         {email}
         <StatusBadge kind="verification" status={emailVerified ? "verified" : "pending"} className="text-[10px]" />
-        {!editing && !sentTo && (
+        {!editing && !sentTo && !disabled && (
           <Button variant="outline" size="sm" className="ml-auto" onClick={() => setEditing(true)}>
             Change email
           </Button>

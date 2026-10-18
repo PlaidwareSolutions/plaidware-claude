@@ -17,25 +17,34 @@ export type TenantCapabilities = {
   /** Platform ops: every capability, never gated by workspace status. */
   ops: boolean;
   isOwner: boolean;
+  /** An ops admin is viewing as this user: nothing but reading is live, whatever the role says. */
+  locked: boolean;
   /** The role alone allows this — decides which surfaces are shown at all. */
   roleCan(cap: TenantCapability): boolean;
   /** Role and workspace status allow it right now — decides which controls are live. */
   can(cap: TenantCapability): boolean;
-  /** Why changes are blocked (a status sentence), or null when they aren't. */
+  /** Why changes are blocked (a status sentence, or the view-as notice), or null when they aren't. */
   readOnlyReason: string | null;
 };
 
+/**
+ * `lock`: a sentence saying why nothing may change right now (a view-as
+ * session). It beats the role and the status: `can()` is false for every
+ * capability but read, and `readOnlyReason` is that sentence.
+ */
 export function capabilitiesFor(
   role: string,
   status: string | null | undefined,
   ops: boolean,
+  lock: string | null = null,
 ): TenantCapabilities {
   return {
     role,
     ops,
     isOwner: ops || role === "owner",
+    locked: lock !== null,
     roleCan: (cap) => ops || roleHasCapability(role, cap),
-    can: (cap) => ops || (roleHasCapability(role, cap) && tenantStatusAllows(status, cap)),
-    readOnlyReason: ops || tenantStatusAllows(status, "write") ? null : tenantStatusMessage(status),
+    can: (cap) => (cap === "read" || lock === null) && (ops || (roleHasCapability(role, cap) && tenantStatusAllows(status, cap))),
+    readOnlyReason: lock ?? (ops || tenantStatusAllows(status, "write") ? null : tenantStatusMessage(status)),
   };
 }

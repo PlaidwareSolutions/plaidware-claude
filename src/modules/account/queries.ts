@@ -1,4 +1,4 @@
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../../db";
 import { session } from "../auth/schema";
 import { describeUserAgent } from "@/lib/user-agent";
@@ -18,6 +18,8 @@ export type SessionRow = {
  * The signed-in user's live sessions, current device first. Read directly:
  * Better Auth's list-sessions route sits behind a freshness check that
  * rejects any session older than a day, and revoke-session wants raw tokens.
+ * View-as sessions (an ops admin looking at the Hub as this user) are not
+ * this person's devices and are left out; the ops Sessions tab shows them.
  */
 export async function listOwnSessions(userId: string, currentSessionId: string): Promise<SessionRow[]> {
   const rows = await db
@@ -30,7 +32,7 @@ export async function listOwnSessions(userId: string, currentSessionId: string):
       expiresAt: session.expiresAt,
     })
     .from(session)
-    .where(and(eq(session.userId, userId), gt(session.expiresAt, new Date())))
+    .where(and(eq(session.userId, userId), gt(session.expiresAt, new Date()), isNull(session.impersonatedBy)))
     .orderBy(desc(session.updatedAt));
   return rows
     .map((r) => ({

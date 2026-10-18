@@ -16,6 +16,6 @@ export default async function ProductDefaultsPage({ params }: { params: Promise<
   const { id } = await params;
   const data = await loadProduct(id);
   if (!data) notFound();
-  if (data.product.isMarketing) redirect(OPS.product(id)); // MHub owns provisioning for marketing-*
+  if (data.product.managedBy) redirect(OPS.product(id)); // the partner app owns provisioning
   return <ProductDefaultsForm product={data.product} platform={resolveDnsDefaults(null)} />;
 }

@@ -4,6 +4,9 @@ import { listTenantSubscriptions } from "@/modules/billing/queries";
 import { listTenantProvisioning } from "@/modules/provisioning/queries";
 import { tenantDeliveryHealth } from "@/modules/webhooks_out/queries";
 import { OpsProvisioning } from "@/modules/provisioning/components/ops-provisioning";
+import { listTenantPartnerLinks } from "@/modules/partners/queries";
+import { PartnerLinkCard } from "@/modules/partners/components/partner-link-card";
+import { hasOpsLevel } from "@/lib/roles";
 import { loadClient, clientMetadata } from "../load";
 
 export const dynamic = "force-dynamic";
@@ -13,16 +16,22 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function ClientProvisioningPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireOpsPage("support");
+  const session = await requireOpsPage("support");
   const { id } = await params;
   const client = await loadClient(id);
   if (!client) notFound();
 
   const subscriptions = await listTenantSubscriptions(id);
-  const [items, deliveries] = await Promise.all([
+  const [items, deliveries, links] = await Promise.all([
     listTenantProvisioning(subscriptions),
-    client.hasMarketing ? tenantDeliveryHealth(subscriptions.map((s) => s.id), id, 20) : Promise.resolve(null),
+    client.partnerNames.length > 0 ? tenantDeliveryHealth(subscriptions.map((s) => s.id), id, 20) : Promise.resolve(null),
+    listTenantPartnerLinks(id),
   ]);
 
-  return <OpsProvisioning tenantId={id} items={items} deliveries={deliveries} />;
+  return (
+    <div className="flex flex-col gap-6">
+      <PartnerLinkCard tenantId={id} links={links} canEdit={hasOpsLevel(session.user.platformRole, "admin")} />
+      <OpsProvisioning tenantId={id} items={items} deliveries={deliveries} />
+    </div>
+  );
 }

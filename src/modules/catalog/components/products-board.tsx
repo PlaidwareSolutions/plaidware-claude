@@ -46,7 +46,7 @@ export function ProductsBoard({ rows }: { rows: ProductBoardRow[] }) {
                   {p.slug}
                   <Badge variant="secondary" className="text-[9px]">{p.category}</Badge>
                   {!p.isActive && <StatusBadge kind="product" status="hidden" className="text-[9px]" />}
-                  {p.isMarketing && <Badge variant="outline" className="text-[9px]">MHub</Badge>}
+                  {p.managedBy && <Badge variant="outline" className="text-[9px]">{p.managedBy}</Badge>}
                 </div>
               </TableCell>
               <TableCell>
@@ -65,8 +65,8 @@ export function ProductsBoard({ rows }: { rows: ProductBoardRow[] }) {
                 <Link href={OPS.productTab(p.id, "kpis")} className="hover:text-primary">
                   {p.kpiCount > 0 ? (
                     <span className="tabular-nums">{p.kpiCount}</span>
-                  ) : p.isMarketing ? (
-                    <span className="text-xs text-muted-foreground">MHub-side</span>
+                  ) : p.managedBy ? (
+                    <span className="text-xs text-muted-foreground">{p.managedBy}-side</span>
                   ) : (
                     <Badge variant="warning" className="text-[10px]">none</Badge>
                   )}

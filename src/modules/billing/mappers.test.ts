@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isTrialLapse,
   intervalLabel,
   itemMrrCents,
   LIVE_SUBSCRIPTION_STATUSES,
@@ -65,5 +66,18 @@ describe("live statuses", () => {
     expect(LIVE_SUBSCRIPTION_STATUSES).not.toContain("expired");
     expect(LIVE_SUBSCRIPTION_STATUSES).toContain("trialing");
     expect(LIVE_SUBSCRIPTION_STATUSES).toContain("incomplete");
+  });
+});
+
+describe("isTrialLapse", () => {
+  const base = { stripeStatus: "canceled", trialEnd: 1_000_000, endedAt: 1_000_030, paidInvoices: 0 };
+  it("is a canceled, never-paid subscription that ended at its trial end", () => {
+    expect(isTrialLapse(base)).toBe(true);
+  });
+  it("is not a cancellation mid-trial, after payment, or a live subscription", () => {
+    expect(isTrialLapse({ ...base, endedAt: 900_000 })).toBe(false);
+    expect(isTrialLapse({ ...base, paidInvoices: 1 })).toBe(false);
+    expect(isTrialLapse({ ...base, stripeStatus: "active" })).toBe(false);
+    expect(isTrialLapse({ ...base, trialEnd: null })).toBe(false);
   });
 });

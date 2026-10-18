@@ -28,7 +28,7 @@ export default async function ClientActivityPage({ params }: { params: Promise<{
   return (
     <div className="flex flex-col gap-8">
       <ActivityFeed entries={timeline} />
-      {(client.hasMarketing || deliveries.total > 0) && (
+      {(client.partnerNames.length > 0 || deliveries.total > 0) && (
         <DeliveryList deliveries={deliveries.recent} dead={deliveries.dead} />
       )}
     </div>

@@ -36,6 +36,7 @@ export function UserSessions({
   const confirm = useConfirm();
   const { canMutate } = useOpsAccess();
   const active = sessions.filter((s) => !s.expired).length;
+  const viewAs = sessions.filter((s) => !s.expired && s.impersonatedBy).length;
 
   async function revoke(s: UserSessionRow) {
     const ok = await confirm({
@@ -49,7 +50,9 @@ export function UserSessions({
   }
 
   return (
-    <DataTableShell footer={`${active} active session${active === 1 ? "" : "s"}${sessions.length > active ? ` · ${sessions.length - active} expired` : ""}.`}>
+    <DataTableShell
+      footer={`${active} active session${active === 1 ? "" : "s"}${viewAs ? ` (${viewAs} ops view-as)` : ""}${sessions.length > active ? ` · ${sessions.length - active} expired` : ""}.`}
+    >
       <Table>
         <TableHeader>
           <TableRow>
@@ -72,7 +75,13 @@ export function UserSessions({
                   <div className="flex items-center gap-2 font-medium text-heading" title={s.userAgent ?? undefined}>
                     {describeUserAgent(s.userAgent).label}
                     {current && <StatusBadge kind="session" status="current" className="text-[10px]" />}
+                    {s.impersonatedBy && <StatusBadge kind="session" status="support" className="text-[10px]" />}
                   </div>
+                  {s.impersonatedBy && (
+                    <div className="text-xs text-muted-foreground" title={s.impersonatedBy.email}>
+                      by {s.impersonatedBy.name}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="hidden font-mono text-xs text-muted-foreground sm:table-cell">{s.ipAddress ?? "—"}</TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground md:table-cell">{s.activeTenant?.name ?? "—"}</TableCell>

@@ -134,11 +134,11 @@ export function ClientHeader({
         badge={
           <>
             <StatusBadge kind="tenant" status={client.status} />
-            {client.hasMarketing && (
-              <Badge variant="outline" title="Holds a live Marketing Ops Hub subscription">
-                MHub
+            {client.partnerNames.map((name) => (
+              <Badge key={name} variant="outline" title={`Holds a live ${name} subscription`}>
+                {name}
               </Badge>
-            )}
+            ))}
           </>
         }
         meta={

@@ -10,7 +10,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 
 /** Where you're signed in, with per-device and everywhere-else sign-out. */
-export function SessionsPanel({ sessions }: { sessions: SessionRow[] }) {
+export function SessionsPanel({ sessions, readOnly = false }: { sessions: SessionRow[]; /** An ops admin viewing as this person: no sign-outs. */ readOnly?: boolean }) {
   const { run, isPending } = useAction();
   const confirm = useConfirm();
   const others = sessions.filter((s) => !s.current).length;
@@ -45,7 +45,7 @@ export function SessionsPanel({ sessions }: { sessions: SessionRow[] }) {
             <span className="text-xs text-muted-foreground">
               {s.ipAddress ? `${s.ipAddress} · ` : ""}signed in {formatDate(s.createdAt)} · last active {formatRelative(s.lastActiveAt)}
             </span>
-            {!s.current && (
+            {!s.current && !readOnly && (
               <Button variant="ghost" size="sm" className="ml-auto" disabled={isPending(`sess:${s.id}`)} onClick={() => void signOutDevice(s)}>
                 Sign out
               </Button>
@@ -53,11 +53,13 @@ export function SessionsPanel({ sessions }: { sessions: SessionRow[] }) {
           </li>
         ))}
       </ul>
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" className="gap-2" disabled={others === 0 || isPending("sess:others")} onClick={() => void signOutOthers()}>
-          <LogOut className="size-4" /> Sign out all other devices
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" className="gap-2" disabled={others === 0 || isPending("sess:others")} onClick={() => void signOutOthers()}>
+            <LogOut className="size-4" /> Sign out all other devices
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

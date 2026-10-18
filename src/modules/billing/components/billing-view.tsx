@@ -49,9 +49,9 @@ function DomainEditor({ tenantId, sub }: { tenantId: string; sub: SubscriptionDt
   const { run, isPending } = useAction();
   const [value, setValue] = useState(sub.domainUrl ?? "");
 
-  // marketing-* products: the URL is MHub's portal, written by the
+  // Partner-app products: the URL is the partner's portal, written by the
   // provisioning handshake — not customer-editable.
-  if (sub.productSlug.startsWith("marketing-")) {
+  if (sub.managedBy) {
     return sub.domainUrl ? (
       <a href={sub.domainUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
         Open portal
@@ -90,6 +90,7 @@ export function BillingView({
   tenantId,
   canWrite,
   readOnlyReason = null,
+  locked = false,
   subscriptions,
   invoices,
   addonOptions = {},
@@ -98,6 +99,8 @@ export function BillingView({
   canWrite: boolean;
   /** Set when the workspace status blocks changes (suspended/inactive). */
   readOnlyReason?: string | null;
+  /** An ops admin is viewing as this user: even the Stripe portal (open to suspended tenants) stays closed. */
+  locked?: boolean;
   subscriptions: SubscriptionDto[];
   invoices: InvoiceDto[];
   addonOptions?: Record<string, AddonOption[]>;
@@ -137,7 +140,7 @@ export function BillingView({
           (totalMonthly > 0 ? `Current recurring total: ${formatCents(totalMonthly)}/mo` : "Subscriptions and invoices for this workspace.")
         }
         actions={
-          <Button variant="outline" onClick={openPortal} disabled={portalBusy} className="gap-1.5">
+          <Button variant="outline" onClick={openPortal} disabled={portalBusy || locked} className="gap-1.5">
             <CreditCard className="size-4" /> {portalBusy ? "Opening…" : "Payment methods"}
           </Button>
         }
@@ -218,7 +221,7 @@ export function BillingView({
                         </Button>
                       </div>
                     )}
-                    {!canWrite && open && sub.domainUrl && !sub.productSlug.startsWith("marketing-") && (
+                    {!canWrite && open && sub.domainUrl && !sub.managedBy && (
                       <p className="text-xs text-muted-foreground">Live URL: {sub.domainUrl}</p>
                     )}
                   </CardContent>

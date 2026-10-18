@@ -55,8 +55,8 @@ const STATE_HINT: Record<ProvisioningView["state"], string> = {
   configured: "Records are ready to send to the client — run Verify DNS once they've added them.",
   verified: "DNS proves ownership and routes to us.",
   failing: "The last check failed — see the detail below and re-run after the client updates DNS.",
-  handshake_pending: "MHub hasn't returned a portal URL yet; the handshake retries automatically.",
-  provisioned: "MHub owns this domain — nothing to verify here.",
+  handshake_pending: "The partner app hasn't answered the provisioning handshake yet; it retries automatically.",
+  provisioned: "The partner app owns this URL — nothing to verify here.",
 };
 
 export function OpsProvisioning({
@@ -184,14 +184,14 @@ export function OpsProvisioning({
 
       {partnerItems.length > 0 && deliveries && (
         <Section
-          title="MHub handshake"
+          title="Partner handshake"
           icon={Webhook}
           count={deliveries.total}
           description={deliveries.dead ? `${deliveries.dead} dead-lettered` : deliveries.pending ? `${deliveries.pending} pending` : "all delivered"}
           actions={<Link href={OPS.clientTab(tenantId, "activity")} className="text-sm text-primary hover:underline">All deliveries →</Link>}
         >
           {deliveries.recent.length === 0 ? (
-            <EmptyState icon={Webhook} title="No MHub deliveries yet" description="The provisioning handshake is queued when a marketing subscription activates." />
+            <EmptyState icon={Webhook} title="No partner deliveries yet" description="The provisioning handshake is queued when a partner-app subscription activates." />
           ) : (
             <div className="flex flex-col gap-2">
               {deliveries.recent.slice(0, 5).map((d) => (
@@ -321,7 +321,7 @@ function ProvisioningCard({
         <CardTitle className="flex items-center gap-2 text-base">
           <Globe className="size-4 text-primary" />
           <Link href={OPS.product(item.productId)} className="hover:text-primary">{item.productName}</Link>
-          <StatusBadge kind="dns" status={item.state} label={item.state === "provisioned" ? "provisioned by MHub" : undefined} />
+          <StatusBadge kind="dns" status={item.state} label={item.state === "provisioned" && item.partnerName ? `provisioned by ${item.partnerName}` : undefined} />
         </CardTitle>
         {!item.managedByPartner && item.dnsLastVerifiedAt && (
           <span className="text-xs text-muted-foreground">last checked {formatDate(item.dnsLastVerifiedAt)}</span>

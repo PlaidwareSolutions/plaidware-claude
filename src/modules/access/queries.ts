@@ -1,4 +1,5 @@
 import { and, desc, eq, gt, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db";
 import { account, member, organization, session, user } from "../auth/schema";
 import { PLATFORM_ROLES, isPlatformRole, normalizePlatformRole, type PlatformRole } from "@/lib/roles";
@@ -53,7 +54,7 @@ export async function listPlatformUsers(
     db
       .select({ userId: session.userId, lastSeenAt: sql<Date>`max(${session.updatedAt})` })
       .from(session)
-      .where(inArray(session.userId, ids))
+      .where(and(inArray(session.userId, ids), isNull(session.impersonatedBy)))
       .groupBy(session.userId),
   ]);
   const byUser = new Map<string, { id: string; name: string }[]>();
@@ -127,11 +128,15 @@ export async function getPlatformUser(id: string): Promise<PlatformUserDetail | 
       where: and(eq(account.userId, id), eq(account.providerId, "credential")),
       columns: { password: true },
     }),
-    db.select({ last: sql<Date | null>`max(${session.updatedAt})` }).from(session).where(eq(session.userId, id)),
+    // Last seen and device count are the person's own sessions; a view-as row is the ops admin's.
+    db
+      .select({ last: sql<Date | null>`max(${session.updatedAt})` })
+      .from(session)
+      .where(and(eq(session.userId, id), isNull(session.impersonatedBy))),
     db
       .select({ n: sql<number>`count(*)` })
       .from(session)
-      .where(and(eq(session.userId, id), gt(session.expiresAt, now))),
+      .where(and(eq(session.userId, id), gt(session.expiresAt, now), isNull(session.impersonatedBy))),
     db.select({ n: sql<number>`count(*)` }).from(member).where(eq(member.userId, id)),
   ]);
   return {
@@ -163,11 +168,14 @@ export type UserSessionRow = {
   expiresAt: Date;
   expired: boolean;
   activeTenant: { id: string; name: string } | null;
+  /** Set on a view-as session: the ops admin who is (or was) looking at the Hub as this person. */
+  impersonatedBy: { id: string; name: string; email: string } | null;
 };
 
-/** A person's sessions, newest activity first; never the token. */
+/** A person's sessions, newest activity first; never the token. View-as rows are included and labelled. */
 export async function listUserSessions(userId: string, limit = 50): Promise<UserSessionRow[]> {
   const now = new Date();
+  const impersonator = alias(user, "impersonator");
   const rows = await db
     .select({
       id: session.id,
@@ -178,19 +186,33 @@ export async function listUserSessions(userId: string, limit = 50): Promise<User
       expiresAt: session.expiresAt,
       tenantId: organization.id,
       tenantName: organization.name,
+      impersonatorId: impersonator.id,
+      impersonatorName: impersonator.name,
+      impersonatorEmail: impersonator.email,
     })
     .from(session)
     .leftJoin(organization, eq(session.activeOrganizationId, organization.id))
+    .leftJoin(impersonator, eq(session.impersonatedBy, impersonator.id))
     .where(eq(session.userId, userId))
     .orderBy(desc(session.updatedAt))
     .limit(limit);
-  return rows.map(({ tenantId, tenantName, ...r }) => ({
+  return rows.map(({ tenantId, tenantName, impersonatorId, impersonatorName, impersonatorEmail, ...r }) => ({
     ...r,
     ipAddress: r.ipAddress || null,
     userAgent: r.userAgent || null,
     expired: r.expiresAt <= now,
     activeTenant: tenantId && tenantName ? { id: tenantId, name: tenantName } : null,
+    impersonatedBy:
+      impersonatorId && impersonatorName && impersonatorEmail
+        ? { id: impersonatorId, name: impersonatorName, email: impersonatorEmail }
+        : null,
   }));
+}
+
+/** Name and email of one account, for the view-as banner. */
+export async function getUserIdentity(id: string): Promise<{ id: string; name: string; email: string } | null> {
+  const u = await db.query.user.findFirst({ where: eq(user.id, id), columns: { id: true, name: true, email: true } });
+  return u ?? null;
 }
 
 /** How many accounts hold each platform role (null rows count as customers). */

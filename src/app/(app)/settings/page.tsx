@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession, isDeveloper } from "@/policy";
+import { getSession, impersonationOf, isDeveloper, viewAsMessage } from "@/policy";
 import { AUTH } from "@/lib/routes";
 import { isPlaceholderPhone } from "@/lib/phone";
 import { formatDate } from "@/lib/dates";
@@ -28,6 +28,8 @@ export default async function SettingsPage({
   if (!session) redirect(AUTH.login);
   const u = session.user;
   const dev = isDeveloper(session);
+  // An ops admin viewing as this person sees the page, changes nothing (the actions refuse too).
+  const readOnly = !!impersonationOf(session);
   // A developer's memberships are listed too (their Work → Clients context), but never as an active workspace.
   const [sessions, tenants] = await Promise.all([listOwnSessions(u.id, session.session.id), getUserTenants(u.id)]);
   const activeTenantId = dev ? null : (pickActiveTenant(tenants, session.session.activeOrganizationId)?.id ?? null);
@@ -37,23 +39,24 @@ export default async function SettingsPage({
       <PageHeader title="Settings" description="Your account." />
       <SettingsNotices email={notices.email} error={notices.error} />
 
-      <Section title="Profile" description={`Member since ${formatDate(u.createdAt)}.`} card>
+      <Section title="Profile" description={readOnly ? viewAsMessage(u.name) : `Member since ${formatDate(u.createdAt)}.`} card>
         <ProfileForm
           initial={{ firstName: u.firstName, lastName: u.lastName, phone: u.phone }}
           phoneIsPlaceholder={isPlaceholderPhone(u.phone)}
+          disabled={readOnly}
         />
       </Section>
 
       <Section title="Email" description="Changing it sends a confirmation link to the new address." card>
-        <EmailForm email={u.email} emailVerified={u.emailVerified} />
+        <EmailForm email={u.email} emailVerified={u.emailVerified} disabled={readOnly} />
       </Section>
 
       <Section title="Password" description="Changing it signs out your other sessions." card>
-        <ChangePasswordForm />
+        <ChangePasswordForm disabled={readOnly} />
       </Section>
 
-      <Section title="Sessions" description="Where you're signed in right now.">
-        <SessionsPanel sessions={sessions} />
+      <Section title="Sessions" description={readOnly ? `Where ${u.name} is signed in right now.` : "Where you're signed in right now."}>
+        <SessionsPanel sessions={sessions} readOnly={readOnly} />
       </Section>
 
       <Section title="Your access">

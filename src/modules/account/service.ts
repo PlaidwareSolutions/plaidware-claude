@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { db } from "../../db";
 import { auth } from "../../lib/auth";
 import { session } from "../auth/schema";
@@ -37,10 +37,11 @@ export async function revokeOwnSession(opts: { userId: string; sessionId: string
   if (rows.length === 0) throw new Error("That session is already gone.");
 }
 
+/** Every other device of this person — never a view-as session, which the list above doesn't show either. */
 export async function revokeOtherOwnSessions(opts: { userId: string; currentSessionId: string }): Promise<{ revoked: number }> {
   const rows = await db
     .delete(session)
-    .where(and(eq(session.userId, opts.userId), ne(session.id, opts.currentSessionId)))
+    .where(and(eq(session.userId, opts.userId), ne(session.id, opts.currentSessionId), isNull(session.impersonatedBy)))
     .returning({ id: session.id });
   return { revoked: rows.length };
 }

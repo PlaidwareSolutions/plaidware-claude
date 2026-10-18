@@ -250,6 +250,7 @@ export function PaymentForm({
   subscriptionId,
   returnUrl,
   onSuccess,
+  submitLabel,
 }: {
   mode: "payment" | "setup";
   subscriptionId?: string;
@@ -257,6 +258,7 @@ export function PaymentForm({
   returnUrl?: string;
   /** Called instead of the default redirect when confirmation succeeds in-page. */
   onSuccess?: () => void;
+  submitLabel?: string;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -287,7 +289,7 @@ export function PaymentForm({
     <form onSubmit={submit} className="flex flex-col gap-4">
       <PaymentElement />
       <Button type="submit" disabled={busy || !stripe}>
-        {busy ? "Processing…" : mode === "setup" ? "Start free trial" : "Pay now"}
+        {busy ? "Processing…" : (submitLabel ?? (mode === "setup" ? "Start free trial" : "Pay now"))}
       </Button>
     </form>
   );

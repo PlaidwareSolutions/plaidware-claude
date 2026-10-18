@@ -305,7 +305,8 @@ export async function opsDeleteTenantAction(tenantId: string, confirmSlug: strin
 
 export async function setActiveTenantAction(tenantId: string): Promise<ActionResult> {
   try {
-    await requireMembership(tenantId, "read");
+    // Switching workspace is a read, so it stays open while an ops admin is viewing as this user.
+    await requireMembership(tenantId, "read", { allowImpersonated: true });
     await auth.api.setActiveOrganization({
       headers: await headers(),
       body: { organizationId: tenantId },

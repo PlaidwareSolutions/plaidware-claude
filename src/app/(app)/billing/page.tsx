@@ -57,6 +57,7 @@ export default async function BillingPage() {
       tenantId={active.id}
       canWrite={caps.can("write")}
       readOnlyReason={caps.readOnlyReason}
+      locked={caps.locked}
       subscriptions={subscriptions}
       invoices={invoices}
       addonOptions={addonOptions}

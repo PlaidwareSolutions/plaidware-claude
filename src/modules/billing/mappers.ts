@@ -31,6 +31,22 @@ export function mapStripeSubscriptionStatus(s: string): LocalSubscriptionStatus 
   }
 }
 
+/**
+ * A trial that Stripe ended because no card was ever added
+ * (`trial_settings.end_behavior.missing_payment_method: "cancel"`): canceled
+ * at the trial end, never paid. Locally that's `expired` — it lapsed, nobody
+ * cancelled it — so partners can tell "trial ran out" from "owner cancelled".
+ */
+export function isTrialLapse(s: {
+  stripeStatus: string;
+  trialEnd: number | null | undefined;
+  endedAt: number | null | undefined;
+  paidInvoices: number;
+}): boolean {
+  if (s.stripeStatus !== "canceled" || !s.trialEnd || !s.endedAt || s.paidInvoices > 0) return false;
+  return Math.abs(s.endedAt - s.trialEnd) <= 3600;
+}
+
 export type LocalInvoiceStatus = "draft" | "open" | "paid" | "failed" | "void";
 
 export function mapStripeInvoiceStatus(

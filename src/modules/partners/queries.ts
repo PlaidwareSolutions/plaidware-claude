@@ -1,7 +1,8 @@
-import { asc, eq, inArray, like } from "drizzle-orm";
+import { asc, count, desc, eq, inArray, like } from "drizzle-orm";
 import { db } from "../../db";
 import { subscriptionItems, subscriptions } from "../billing/schema";
 import { productComponents, products } from "../catalog/schema";
+import { partnerApps, partnerKeys, partnerTenantLinks } from "./schema";
 
 /** Contract §D: the subscription webhook payload fields plus updated_at. */
 export type PartnerSubscriptionDto = {
@@ -79,4 +80,81 @@ export async function listPartnerSubscriptions(
     })),
     hasMore: rows.length > opts.limit,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Ops → System → Partners, and the client provisioning tab's link card
+// ---------------------------------------------------------------------------
+
+export type PartnerAppOpsDto = {
+  id: string;
+  name: string;
+  displayName: string;
+  productPrefixes: string[];
+  webhookUrl: string | null;
+  provisionUrl: string | null;
+  billingUrl: string | null;
+  allowedReturnOrigins: string[];
+  hasSecret: boolean;
+  status: "active" | "disabled";
+  linkedClients: number;
+  keys: { id: string; name: string; prefix: string; createdAt: string; revokedAt: string | null }[];
+};
+
+export async function listPartnerAppsOps(): Promise<PartnerAppOpsDto[]> {
+  const [apps, keys, links] = await Promise.all([
+    db.query.partnerApps.findMany({ orderBy: [asc(partnerApps.displayName)] }),
+    db.query.partnerKeys.findMany({ orderBy: [desc(partnerKeys.createdAt)] }),
+    db.select({ appId: partnerTenantLinks.partnerAppId, n: count() }).from(partnerTenantLinks).groupBy(partnerTenantLinks.partnerAppId),
+  ]);
+  return apps.map((a) => ({
+    id: a.id,
+    name: a.name,
+    displayName: a.displayName,
+    productPrefixes: a.productPrefixes,
+    webhookUrl: a.webhookUrl,
+    provisionUrl: a.provisionUrl,
+    billingUrl: a.billingUrl,
+    allowedReturnOrigins: a.allowedReturnOrigins,
+    hasSecret: Boolean(a.webhookSecretEnc),
+    status: a.status,
+    linkedClients: links.find((l) => l.appId === a.id)?.n ?? 0,
+    keys: keys
+      .filter((k) => k.partnerAppId === a.id)
+      .map((k) => ({
+        id: k.id,
+        name: k.name,
+        prefix: k.prefix,
+        createdAt: k.createdAt.toISOString(),
+        revokedAt: k.revokedAt?.toISOString() ?? null,
+      })),
+  }));
+}
+
+export type TenantPartnerLinkDto = {
+  appId: string;
+  displayName: string;
+  status: "active" | "disabled";
+  externalTenantId: string | null;
+  linkedBy: string | null;
+  linkedAt: string | null;
+};
+
+/** One row per partner app: this client's link (or none). */
+export async function listTenantPartnerLinks(tenantId: string): Promise<TenantPartnerLinkDto[]> {
+  const [apps, links] = await Promise.all([
+    db.query.partnerApps.findMany({ orderBy: [asc(partnerApps.displayName)] }),
+    db.query.partnerTenantLinks.findMany({ where: eq(partnerTenantLinks.tenantId, tenantId) }),
+  ]);
+  return apps.map((a) => {
+    const l = links.find((x) => x.partnerAppId === a.id);
+    return {
+      appId: a.id,
+      displayName: a.displayName,
+      status: a.status,
+      externalTenantId: l?.externalTenantId ?? null,
+      linkedBy: l ? (l.linkedBy.startsWith("ops:") ? "ops" : l.linkedBy) : null,
+      linkedAt: l?.createdAt.toISOString() ?? null,
+    };
+  });
 }

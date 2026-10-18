@@ -10,6 +10,7 @@ import { writeAudit } from "../modules/audit/service";
 import { sendAccountVerificationEmail } from "./account-email";
 import { ac, orgRoles } from "./org-roles";
 import { disabledOrgPaths } from "./org-http-surface";
+import { impersonationPlugin } from "./impersonation-plugin";
 import { ACCOUNT_DISABLED_CODE, ACCOUNT_DISABLED_MESSAGE } from "./account-status";
 import { AUTH, withQuery } from "./routes";
 import { orgMutationBlockReason } from "../policy/org-guards";
@@ -151,8 +152,14 @@ export const auth = betterAuth({
   // auth.api.* calls skip the router, so server actions are unaffected.
   // Profile and email changes go through src/modules/account (server-side
   // phone normalisation, a notice to the old address, an audit row), so the
-  // raw routes are closed too.
-  disabledPaths: [...disabledOrgPaths(Object.values(orgPlugin.endpoints).map((e) => e.path)), "/update-user", "/change-email"],
+  // raw routes are closed too. View-as (src/lib/impersonation-plugin.ts) starts
+  // and stops from server actions only, behind requireOps("admin").
+  disabledPaths: [
+    ...disabledOrgPaths(Object.values(orgPlugin.endpoints).map((e) => e.path)),
+    ...Object.values(impersonationPlugin.endpoints).map((e) => e.path),
+    "/update-user",
+    "/change-email",
+  ],
 
   advanced: {
     // Session shared with sibling apps (marketing.plaidware.com) via
@@ -264,6 +271,7 @@ export const auth = betterAuth({
       },
     }),
     orgPlugin,
+    impersonationPlugin,
   ],
 });
 

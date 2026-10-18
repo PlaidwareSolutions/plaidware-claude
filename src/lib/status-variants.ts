@@ -20,6 +20,7 @@ export type StatusKind =
   | "collection"
   | "product"
   | "promo"
+  | "partnerApp"
   | "tenantRole"
   | "platformRole"
   | "verification"
@@ -108,6 +109,10 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
     active: { variant: "success" },
     hidden: { variant: "warning" },
   },
+  partnerApp: {
+    active: { variant: "success" },
+    disabled: { variant: "secondary" },
+  },
   promo: {
     active: { variant: "success" },
     archived: { variant: "outline" },
@@ -146,6 +151,7 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
   },
   session: {
     current: { variant: "success", label: "this device" },
+    support: { variant: "warning", label: "ops view-as" },
   },
   workItem: {
     backlog: { variant: "outline" },

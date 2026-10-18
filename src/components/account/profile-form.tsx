@@ -10,7 +10,16 @@ import { Label } from "@/components/ui/label";
 type Values = { firstName: string; lastName: string; phone: string };
 
 /** Name and phone, editable by the person themselves. */
-export function ProfileForm({ initial, phoneIsPlaceholder }: { initial: Values; phoneIsPlaceholder: boolean }) {
+export function ProfileForm({
+  initial,
+  phoneIsPlaceholder,
+  disabled = false,
+}: {
+  initial: Values;
+  phoneIsPlaceholder: boolean;
+  /** Read-only (an ops admin viewing as this person). */
+  disabled?: boolean;
+}) {
   const start = { ...initial, phone: phoneIsPlaceholder ? "" : initial.phone };
   const [form, setForm] = useState<Values>(start);
   const [saved, setSaved] = useState<Values>(start);
@@ -25,6 +34,7 @@ export function ProfileForm({ initial, phoneIsPlaceholder }: { initial: Values; 
 
   return (
     <form onSubmit={submit} className="grid gap-4">
+      <fieldset disabled={disabled} className="contents">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label htmlFor="profile-first">First name</Label>
@@ -49,10 +59,11 @@ export function ProfileForm({ initial, phoneIsPlaceholder }: { initial: Values; 
         )}
       </div>
       <div className="flex justify-end">
-        <Button type="submit" disabled={!dirty || isPending("profile")}>
+        <Button type="submit" disabled={disabled || !dirty || isPending("profile")}>
           {isPending("profile") ? "Saving…" : "Save changes"}
         </Button>
       </div>
+      </fieldset>
     </form>
   );
 }

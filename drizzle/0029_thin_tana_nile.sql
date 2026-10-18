@@ -1,0 +1,1 @@
+ALTER TABLE "partner_apps" ADD COLUMN "billing_url" text;

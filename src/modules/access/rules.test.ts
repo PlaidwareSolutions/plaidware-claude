@@ -4,6 +4,7 @@ import {
   STAFF_ROLES,
   accountDisableConfirm,
   canChangePlatformRole,
+  canImpersonate,
   canRevokeAllSessions,
   canRevokeSession,
   canSendPasswordSetup,
@@ -162,5 +163,38 @@ describe("session revocation", () => {
   it("refuses revoke-all on yourself", () => {
     expect(canRevokeAllSessions({ actorUserId: "a", targetUserId: "a" })).toMatchObject({ ok: false });
     expect(canRevokeAllSessions({ actorUserId: "a", targetUserId: "b" })).toEqual({ ok: true });
+  });
+});
+
+describe("canImpersonate", () => {
+  const start = {
+    actorUserId: "admin",
+    actorRole: "ops_admin" as const,
+    actorImpersonating: false,
+    targetUserId: "target",
+    targetRole: "customer" as const,
+    targetDisabled: false,
+  };
+  it("lets an ops admin view as a customer, a developer or ops support", () => {
+    expect(canImpersonate(start)).toEqual({ ok: true });
+    expect(canImpersonate({ ...start, targetRole: "developer" })).toEqual({ ok: true });
+    expect(canImpersonate({ ...start, targetRole: "ops_support" })).toEqual({ ok: true });
+  });
+  it("is for ops admins only", () => {
+    for (const actorRole of ["customer", "developer", "ops_support"] as const) {
+      expect(canImpersonate({ ...start, actorRole })).toMatchObject({ ok: false, reason: expect.stringMatching(/ops admins/i) });
+    }
+  });
+  it("never nests", () => {
+    expect(canImpersonate({ ...start, actorImpersonating: true })).toMatchObject({ reason: expect.stringMatching(/stop viewing/i) });
+  });
+  it("never yourself", () => {
+    expect(canImpersonate({ ...start, targetUserId: "admin" })).toMatchObject({ reason: expect.stringMatching(/yourself/) });
+  });
+  it("never another ops admin", () => {
+    expect(canImpersonate({ ...start, targetRole: "ops_admin" })).toMatchObject({ reason: expect.stringMatching(/ops admins can't/i) });
+  });
+  it("never a disabled account", () => {
+    expect(canImpersonate({ ...start, targetDisabled: true })).toMatchObject({ reason: expect.stringMatching(/disabled/) });
   });
 });

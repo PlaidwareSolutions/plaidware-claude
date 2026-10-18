@@ -49,6 +49,7 @@ export type SeedProduct = {
     expectedCname?: string;
     expectedAIps?: string;
     monthlyHostingCents?: number;
+    trialDays?: number;
   };
 };
 
@@ -101,11 +102,15 @@ const CATALOG: SeedProduct[] = [
       "Ticketing, point-of-sale integration, and customer notifications for repair shops. Works with your existing Clover or Square terminals.",
     features: ["Repair ticketing", "Clover/Square integration", "Customer SMS updates", "Parts tracking", "Multi-terminal support"],
     color: "#34d399",
+    // As advertised on fixorata.com: 30-day free trial (no card to start),
+    // then $35/month per store, unlimited staff logins. Multi-store shops get
+    // a negotiated price (tenant price override). Billed via the Partner API
+    // (docs/PARTNER-API.md); scripts/align-fixorata-pricing.ts brings
+    // existing databases in line, since the seed never reprices.
     components: [
-      { kind: "one_time", name: "Onboarding + POS Integration", amountCents: 150000, isRequired: true },
-      { kind: "recurring", interval: "month", role: "base", name: "Subscription", amountCents: 14900, isRequired: true },
-      { kind: "recurring", interval: "month", name: "Extra Terminal", amountCents: 3900 },
+      { kind: "recurring", interval: "month", role: "base", name: "Subscription", amountCents: 3500, isRequired: true },
     ],
+    defaults: { trialDays: 30 },
   },
   {
     slug: "drivorata",
@@ -236,6 +241,7 @@ export async function upsertSeedProducts(
               defaultExpectedCname: p.defaults?.expectedCname ?? null,
               defaultExpectedAIps: p.defaults?.expectedAIps ?? null,
               defaultMonthlyHostingCents: p.defaults?.monthlyHostingCents ?? null,
+              trialDays: p.defaults?.trialDays ?? null,
             })
             .returning({ id: products.id })
         )[0].id;

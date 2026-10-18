@@ -26,7 +26,7 @@ export default async function TeamPage({
     caps.roleCan("team") ? listPendingRoleRequests(active.id) : Promise.resolve([]),
     ops ? Promise.resolve(null) : getOpenRoleRequestForUser(active.id, session.user.id),
   ]);
-  const canRequest = !ops && canRequestRoleChange({ role: caps.role, tenantStatus: active.status }).ok;
+  const canRequest = !ops && !caps.locked && canRequestRoleChange({ role: caps.role, tenantStatus: active.status }).ok;
   // ?request=billing (from the billing explainer) opens the dialog pre-filled.
   const initialRequestRole = canRequest && isAssignableTenantRole(request) && request !== caps.role ? request : undefined;
 

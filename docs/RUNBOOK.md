@@ -56,6 +56,52 @@ Login page offers "Email me a sign-in link" (Better Auth magic-link plugin,
 5-minute single-use links, sign-in only — signup still requires the form since
 it collects name/phone). Verifying a link marks the email verified.
 
+## Partner apps (Fixorata billing)
+
+Contract and semantics: docs/PARTNER-API.md. To connect an app (per environment):
+
+1. **Ops → System → Partners → New partner app.** Fill in the name
+   (`fixorata`), the display name, the prefix (`fixorata`), the webhook URL
+   (`https://<fixorata host>/api/webhooks/plaidware-hub`), the billing page URL
+   (`https://<fixorata host>/billing`, which Hub's billing emails link to for
+   Fixorata shops) and the return origins (the Fixorata host).
+2. **Generate secret.** Hand it to the partner as `HUB_WEBHOOK_SECRET`.
+   **Mint key.** Hand it over as `HUB_PARTNER_KEY`. Both are shown once and
+   go straight into the partner's Railway variables, never chat or git.
+   `CREDENTIALS_ENCRYPTION_KEY` must be set in Hub, because the secret is
+   stored sealed with it.
+3. Make sure the catalog product matches fixorata.com: 30-day trial, $35/month,
+   no onboarding fee and no add-ons. The seed only sets this on a fresh
+   database, so run
+   `node --env-file=<env> --import tsx scripts/align-fixorata-pricing.ts`
+   (a dry run) and then add `--apply`. Existing subscriptions keep their sold
+   prices; the script lists them.
+4. **Multi-store shop with a custom price:** set the negotiated price on
+   **Client → Billing → custom pricing** before the shop's subscription
+   starts. Checkout applies tenant price overrides, but an already-running
+   subscription keeps its snapshot price.
+
+Day to day:
+
+- **Shop signs up on Fixorata.** Fixorata calls `POST /tenants`. Hub creates
+  the workspace and owner with no password and no Hub emails beyond billing
+  ones, links it, and returns a pay link. The client shows a "Fixorata" badge.
+- **Ops onboard a shop that already exists in Fixorata.** Start the
+  subscription as usual, then on **Client → Provisioning → Partner links**
+  paste Fixorata's org id. Link *before* activation, so the handshake links
+  instead of creating a second org.
+- **Ops onboard a brand-new shop.** Start the subscription as usual. The
+  activation handshake makes Fixorata create the org, and the reply records
+  the link.
+- **"link conflict" dead letter.** Fixorata answered with an org id that is
+  already linked to another client. Fix the links on the Provisioning tab,
+  then requeue from Ops → System → Webhooks.
+- **Deliveries stuck pending.** The app has no webhook URL or secret, or it
+  is disabled. Rows queue without burning retries and drain once configured.
+- **Rotate a secret.** Deliveries are signed with the new secret immediately,
+  and Fixorata rejects them until its env is updated. They retry for about 15h.
+- **Revoke a key.** Calls with it get a 401 at once. Mint the replacement first.
+
 ## Platform roles (ops access)
 
 Every account has a platform role (`src/lib/roles.ts`): `customer`
@@ -100,6 +146,33 @@ field is stripped server-side for them) — with one deliberate exception:
 - **CLI** — `node --env-file=.env --import tsx scripts/set-platform-role.ts
   dev@plaidware.com developer` (Railway invocation in the script header).
   Works for any role; creates the account if needed.
+
+### View as (read-only impersonation)
+
+An ops admin can look at the Hub exactly as another account sees it: `/ops/users/<id>`
+→ account menu → **View as …**, with a required reason. The browser gets a real
+Better Auth session of that person for **one hour** (never extended by use) and
+every change is refused meanwhile — server actions through `requireUser()`, the
+auth routes through the plugin's before-hook (`src/lib/impersonation-plugin.ts`,
+allowlist in `src/lib/impersonation-surface.ts`). Only switching the active
+workspace stays live. Targets: customer, developer, ops support; never another
+ops admin, a disabled account or yourself.
+
+- Cookies: the session cookie is swapped for the view-as one; the admin's own token
+  waits in `<prefix>.impersonator_session` (signed, HttpOnly, one hour). **Stop
+  viewing** (banner or account menu) restores it. A `/sign-out` while viewing also
+  ends the admin's own session.
+- If the view-as session disappears first (the person revoked their sessions or
+  changed their password, the account was disabled, the hour ran out) the admin
+  lands on the login page: sign in again; the stale stash cookie is inert and
+  expires within the hour. If the admin's own session was revoked meanwhile,
+  Stop viewing sends them to login as well.
+- Audit: `impersonation_started` (with the reason) and `impersonation_ended` land
+  on /ops/system/access and on both accounts' Activity tabs. The ops Sessions tab
+  labels the row "ops view-as · by <admin>"; the person's own /settings device
+  list never shows it and their last-seen ignores it.
+- MHub sees the view-as session too (shared cookie): `GET /api/auth/get-session`
+  returns `session.impersonatedBy`; see docs/INTEGRATION-DEVIATIONS.md.
 
 ## Self-service account (/settings)
 

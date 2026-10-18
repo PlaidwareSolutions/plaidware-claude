@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { auth } from "../../lib/auth";
+import { applyAuthCookies } from "../../lib/auth-cookies";
 import { emailButton, emailShell, sendEmail } from "../../lib/email";
 import { PLACEHOLDER_PHONE } from "../../lib/phone";
 import { AUTH } from "../../lib/routes";
@@ -11,6 +12,7 @@ import { PLATFORM_ROLE_META, isDowngrade, normalizePlatformRole, type PlatformRo
 import { countActiveOpsAdmins, countOpsAdmins } from "./queries";
 import {
   canChangePlatformRole,
+  canImpersonate,
   canRevokeAllSessions,
   canRevokeSession,
   canSendPasswordSetup,
@@ -222,4 +224,86 @@ export async function sendPasswordSetup(opts: { userId: string }): Promise<{ ema
   await auth.api.requestPasswordReset({ body: { email: target.email, redirectTo: AUTH.resetPassword } });
   console.log(`[access] set-password link sent to ${target.email} (${PLATFORM_ROLE_META[normalizePlatformRole(target.platformRole)].label})`);
   return { email: target.email };
+}
+
+// ---------------------------------------------------------------------------
+// View as (read-only impersonation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Swap the ops admin's browser session for a one-hour, read-only session of
+ * `userId` (src/lib/impersonation-plugin.ts does the cookie work and
+ * re-checks the rule). The reason is what the audit trail keeps; the row
+ * lands on /ops/system/access and on both people's activity tabs.
+ */
+export async function startImpersonation(opts: {
+  userId: string;
+  reason: string;
+  actor: { id: string; platformRole: string | null | undefined; impersonating: boolean };
+  headers: Headers;
+}): Promise<{ expiresAt: Date }> {
+  const target = await db.query.user.findFirst({
+    where: eq(user.id, opts.userId),
+    columns: { id: true, email: true, platformRole: true, disabledAt: true },
+  });
+  if (!target) throw new Error("User not found");
+  const verdict = canImpersonate({
+    actorUserId: opts.actor.id,
+    actorRole: normalizePlatformRole(opts.actor.platformRole),
+    actorImpersonating: opts.actor.impersonating,
+    targetUserId: target.id,
+    targetRole: normalizePlatformRole(target.platformRole),
+    targetDisabled: !!target.disabledAt,
+  });
+  if (!verdict.ok) throw new Error(verdict.reason);
+
+  const { headers: h, response } = await auth.api.startImpersonation({
+    headers: opts.headers,
+    body: { userId: target.id },
+    returnHeaders: true,
+  });
+  await applyAuthCookies(h);
+  const expiresAt = new Date(response.session.expiresAt);
+  await writeAudit({
+    tenantId: null,
+    actorUserId: opts.actor.id,
+    kind: "impersonation_started",
+    payload: {
+      targetUserId: target.id,
+      targetEmail: target.email,
+      reason: opts.reason,
+      sessionId: response.session.id,
+      expiresAt: expiresAt.toISOString(),
+    },
+  });
+  return { expiresAt };
+}
+
+/**
+ * Back to the admin's own session. `session` is the view-as session being
+ * ended; the audit row is written under the admin it names. `restored` is
+ * false when the admin's own session ended meanwhile (they sign in again).
+ */
+export async function stopImpersonation(opts: {
+  session: {
+    user: { id: string; email: string };
+    session: { id: string; createdAt: Date | string; impersonatedBy?: string | null };
+  };
+  headers: Headers;
+}): Promise<{ restored: boolean }> {
+  const { headers: h, response } = await auth.api.stopImpersonation({ headers: opts.headers, returnHeaders: true });
+  await applyAuthCookies(h);
+  await writeAudit({
+    tenantId: null,
+    actorUserId: opts.session.session.impersonatedBy ?? null,
+    kind: "impersonation_ended",
+    payload: {
+      targetUserId: opts.session.user.id,
+      targetEmail: opts.session.user.email,
+      sessionId: opts.session.session.id,
+      durationSeconds: Math.max(0, Math.round((Date.now() - new Date(opts.session.session.createdAt).getTime()) / 1000)),
+      restored: response.restored,
+    },
+  });
+  return { restored: response.restored };
 }

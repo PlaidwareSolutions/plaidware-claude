@@ -19,7 +19,7 @@ import { invoices, subscriptions } from "../billing/schema";
 import { LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
 import { onboardingInvites } from "../onboarding/schema";
 import { writeAudit } from "../audit/service";
-import { emitMembershipChanged, emitOrganizationUpdated } from "../webhooks_out/service";
+import { emitMembershipChanged, emitOrganizationUpdated, emitWorkspaceStatusToPartners } from "../webhooks_out/service";
 import { isAssignableTenantRole, type AssignableTenantRole } from "@/lib/roles";
 import { canAddMembership } from "./membership-rules";
 
@@ -100,6 +100,7 @@ export async function setTenantStatus(
       payload: { before: before.status ?? "active", after: status, note: opts.note ?? null },
     });
     await emitOrganizationUpdated(tenantId);
+    await emitWorkspaceStatusToPartners(tenantId);
   }
   return row;
 }

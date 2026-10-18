@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../../db";
 import { getStripe } from "../../lib/stripe";
@@ -17,6 +17,7 @@ import {
   tenantPriceOverrides,
 } from "./schema";
 import {
+  isTrialLapse,
   itemMrrCents,
   isRecurringKind,
   LIVE_SUBSCRIPTION_STATUSES,
@@ -44,6 +45,7 @@ import { writeAudit } from "../audit/service";
 import { emitSubscriptionLifecycle } from "../webhooks_out/service";
 import { subscriptionEventForStatusChange } from "../webhooks_out/logic";
 import { TENANT } from "@/lib/routes";
+import { billingContactOverride, billingPageUrlFor } from "../partners/service";
 
 // ---------------------------------------------------------------------------
 // Stripe object provisioning
@@ -251,6 +253,10 @@ export async function createCheckout(opts: {
   /** Bill calendar months from the past: Stripe starts at `startAt`, bills
    *  from `anchorAt`, and the Hub invoices the elapsed months now. */
   backdate?: CheckoutBackdate;
+  /** Partner API trials start without a card: when one never arrives, end
+   *  the subscription at the trial end (→ local `expired`) instead of
+   *  Stripe's default of invoicing it into dunning. */
+  trialEndWithoutCard?: "cancel";
 }): Promise<CheckoutResult> {
   const stripe = getStripe();
 
@@ -381,6 +387,9 @@ export async function createCheckout(opts: {
           ...(opts.offSession ? { default_payment_method: opts.offSession.paymentMethodId } : {}),
         }),
         ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
+        ...(trialDays > 0 && opts.trialEndWithoutCard === "cancel"
+          ? { trial_settings: { end_behavior: { missing_payment_method: "cancel" as const } } }
+          : {}),
         ...(opts.backdate
           ? {
               // Stripe records the true start and bills from the anchor; the
@@ -817,8 +826,12 @@ export async function changeSubscriptionItems(opts: {
   /** Ops: add with a quantity; an add-on already on the subscription grows by it (prorated). */
   addItems?: { componentId: string; quantity?: number }[];
   removeItemIds?: string[];
-  actorUserId: string;
-}): Promise<{ added: number; removed: number }> {
+  /** Set a live recurring add-on to an exact quantity (prorated); 0 removes it. */
+  setQuantities?: { itemId: string; quantity: number }[];
+  /** Null for partner-originated changes; the actor rides in auditPayload. */
+  actorUserId: string | null;
+  auditPayload?: Record<string, unknown>;
+}): Promise<{ added: number; removed: number; updated: number }> {
   const stripe = getStripe();
   const sub = await db.query.subscriptions.findFirst({
     where: eq(subscriptions.id, opts.subscriptionId),
@@ -835,9 +848,37 @@ export async function changeSubscriptionItems(opts: {
   });
   let added = 0;
   let removed = 0;
+  let updated = 0;
+
+  // ---- exact quantities (0 = remove) -----------------------------------------
+  const removeIds = [...(opts.removeItemIds ?? [])];
+  for (const { itemId, quantity } of opts.setQuantities ?? []) {
+    const item = existingItems.find((i) => i.id === itemId);
+    if (!item || item.status !== "active") throw new Error("That add-on isn't active on this subscription");
+    if (!isRecurringKind(item.kind) || !item.stripeSubscriptionItemId) {
+      throw new Error("Only recurring add-ons have a quantity");
+    }
+    const next = Math.floor(quantity);
+    if (next < 0) throw new Error("Quantity can't be negative");
+    if (next === 0) {
+      removeIds.push(item.id);
+      continue;
+    }
+    if (next === item.quantity) continue;
+    const component = item.componentId
+      ? await db.query.productComponents.findFirst({ where: eq(productComponents.id, item.componentId) })
+      : null;
+    if (component?.role === "base") throw new Error("The base charge's quantity is set by ops");
+    await stripe.subscriptionItems.update(item.stripeSubscriptionItemId, {
+      quantity: next,
+      proration_behavior: "create_prorations",
+    });
+    await db.update(subscriptionItems).set({ quantity: next }).where(eq(subscriptionItems.id, item.id));
+    updated++;
+  }
 
   // ---- removals: optional recurring add-ons only, prorated credit ----------
-  for (const itemId of opts.removeItemIds ?? []) {
+  for (const itemId of removeIds) {
     const item = existingItems.find((i) => i.id === itemId);
     if (!item || item.status !== "active") continue;
     const component = item.componentId
@@ -984,12 +1025,53 @@ export async function changeSubscriptionItems(opts: {
     subscriptionId: sub.id,
     actorUserId: opts.actorUserId,
     kind: "subscription_items_changed",
-    payload: { added, removed },
+    payload: { added, removed, ...(updated ? { updated } : {}), ...opts.auditPayload },
   });
-  if (added || removed) {
+  if (added || removed || updated) {
     await emitSubscriptionLifecycle(sub.id, "subscription.updated");
   }
-  return { added, removed };
+  return { added, removed, updated };
+}
+
+/**
+ * Schedule (or undo) cancellation at the end of the paid period. Stripe
+ * keeps billing nothing further and deletes the subscription at period end;
+ * customer.subscription.deleted then closes the local row. Live, Stripe-billed
+ * subscriptions only — anything else is cancelled outright by ops.
+ */
+export async function setCancelAtPeriodEnd(opts: {
+  subscriptionId: string;
+  cancel: boolean;
+  actorUserId: string | null;
+  auditPayload?: Record<string, unknown>;
+}): Promise<void> {
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.id, opts.subscriptionId),
+  });
+  if (!sub) throw new Error("Subscription not found");
+  if (!LIVE_SUBSCRIPTION_STATUSES.includes(sub.status) || sub.status === "incomplete") {
+    throw new Error("Only a live subscription can be scheduled to cancel");
+  }
+  if (!sub.stripeSubscriptionId) throw new Error("This subscription isn't billed through Stripe");
+  if (sub.cancelAtPeriodEnd === opts.cancel) return;
+  const stripeSub = await getStripe().subscriptions.update(sub.stripeSubscriptionId, {
+    cancel_at_period_end: opts.cancel,
+  });
+  await db
+    .update(subscriptions)
+    .set({ cancelAtPeriodEnd: opts.cancel })
+    .where(eq(subscriptions.id, sub.id));
+  await writeAudit({
+    tenantId: sub.tenantId,
+    subscriptionId: sub.id,
+    actorUserId: opts.actorUserId,
+    kind: opts.cancel ? "subscription_cancel_scheduled" : "subscription_cancel_unscheduled",
+    payload: {
+      ...(opts.cancel && stripeSub.cancel_at ? { cancelAt: new Date(stripeSub.cancel_at * 1000).toISOString() } : {}),
+      ...opts.auditPayload,
+    },
+  });
+  await emitSubscriptionLifecycle(sub.id, "subscription.updated");
 }
 
 export async function createBillingPortalSession(
@@ -1242,7 +1324,24 @@ export async function applySubscriptionEvent(
     .map((i) => i.current_period_start)
     .filter(Boolean);
   const prevStatus = localSub.status;
-  const stripeStatus = mapStripeSubscriptionStatus(stripeSub.status);
+  const paidInvoices =
+    stripeSub.status === "canceled"
+      ? (
+          await db
+            .select({ id: invoices.id })
+            .from(invoices)
+            .where(and(eq(invoices.subscriptionId, localSub.id), eq(invoices.status, "paid"), gt(invoices.amountPaidCents, 0)))
+            .limit(1)
+        ).length
+      : 0;
+  const stripeStatus = isTrialLapse({
+    stripeStatus: stripeSub.status,
+    trialEnd: stripeSub.trial_end,
+    endedAt: stripeSub.ended_at,
+    paidInvoices,
+  })
+    ? "expired"
+    : mapStripeSubscriptionStatus(stripeSub.status);
   // A Hub-side hold (dunning or manual) is not Stripe's to lift: while Stripe
   // still reports the subscription live, the local status stays suspended —
   // payment resolution or an ops reactivation clears it. Terminal states win.
@@ -1265,6 +1364,7 @@ export async function applySubscriptionEvent(
         : null,
       trialEndsAt: stripeSub.trial_end ? new Date(stripeSub.trial_end * 1000) : null,
       canceledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
+      cancelAtPeriodEnd: !closed && (stripeSub.cancel_at_period_end || stripeSub.cancel_at != null),
     })
     .where(eq(subscriptions.id, localSub.id));
 
@@ -1323,18 +1423,19 @@ export async function sendUpcomingRenewalReminder(invoice: Stripe.Invoice): Prom
       .where(and(eq(member.organizationId, localSub.tenantId), inArray(member.role, ["owner", "admin", "billing"])))
       .limit(1),
   ]);
-  if (!owner[0]) return;
+  const to = (await billingContactOverride(localSub.tenantId)) ?? owner[0]?.email;
+  if (!to) return;
   const lines = (invoice.lines?.data ?? [])
     .map((l) => `<li>${l.description ?? "Line item"} — ${formatCents(l.amount)}</li>`)
     .join("");
   const dueTs = invoice.next_payment_attempt ?? invoice.due_date ?? invoice.period_end;
   await sendEmail({
-    to: owner[0].email,
+    to,
     subject: `Upcoming ${product?.name ?? "subscription"} renewal — ${formatCents(invoice.amount_due)}`,
     html: emailShell(
       "Your renewal is coming up",
       `<p>Your ${product?.name ?? "Plaidware"} subscription renews${dueTs ? ` on ${formatDate(dueTs * 1000)}` : " soon"}. Your card on file will be charged automatically — nothing to do.</p><ul>${lines}</ul><p><strong>Total: ${formatCents(invoice.amount_due)}</strong></p>` +
-        emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "View billing"),
+        emailButton(await billingPageUrlFor(localSub.tenantId, `${env.APP_BASE_URL}${TENANT.billing}`), "View billing"),
     ),
   });
 }
@@ -1356,20 +1457,33 @@ export async function sendTrialEndingReminder(stripeSub: Stripe.Subscription) {
       )
       .limit(1),
   ]);
-  if (!owner[0] || !product) return;
+  const trialTo = (await billingContactOverride(localSub.tenantId)) ?? owner[0]?.email;
+  if (!trialTo || !product) return;
   const items = await db.query.subscriptionItems.findMany({
     where: eq(subscriptionItems.subscriptionId, localSub.id),
   });
   const monthly = items
     .filter((i) => isRecurringKind(i.kind) && i.status === "active")
     .reduce((s, i) => s + itemMrrCents(i, i.amountCents * i.quantity), 0);
+  // Trials can start without a card (Partner API); then the first invoice
+  // would fail at trial end and go to dunning — ask for a card instead.
+  let hasCard = Boolean(stripeSub.default_payment_method);
+  if (!hasCard && typeof stripeSub.customer === "string") {
+    const customer = await getStripe().customers.retrieve(stripeSub.customer).catch(() => null);
+    hasCard = Boolean(customer && !("deleted" in customer && customer.deleted) && (customer as Stripe.Customer).invoice_settings?.default_payment_method);
+  }
+  const price = monthly ? ` ${formatCents(monthly)}/month` : "";
+  const billingUrl = await billingPageUrlFor(localSub.tenantId, `${env.APP_BASE_URL}${TENANT.billing}`);
   await sendEmail({
-    to: owner[0].email,
-    subject: `Your ${product.name} trial ends in 3 days`,
+    to: trialTo,
+    subject: hasCard ? `Your ${product.name} trial ends in 3 days` : `Add a card to keep ${product.name} — trial ends in 3 days`,
     html: emailShell(
       "Trial ending soon",
-      `<p>Your free trial of ${product.name} ends in 3 days. Your saved payment method will then be charged${monthly ? ` ${formatCents(monthly)}/month` : ""} automatically. Nothing to do if you'd like to continue.</p>` +
-        emailButton(`${env.APP_BASE_URL}${TENANT.billing}`, "Manage billing"),
+      hasCard
+        ? `<p>Your free trial of ${product.name} ends in 3 days. Your saved payment method will then be charged${price} automatically. Nothing to do if you'd like to continue.</p>` +
+            emailButton(billingUrl, "Manage billing")
+        : `<p>Your free trial of ${product.name} ends in 3 days, and there's no card on file yet. Add one now to keep going without interruption — it will be charged${price} when the trial ends. Without a card, the subscription ends with the trial.</p>` +
+            emailButton(billingUrl, "Add a card"),
     ),
   });
 }

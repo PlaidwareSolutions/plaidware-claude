@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { LogOut, Mail, MoreHorizontal, ShieldBan, ShieldCheck } from "lucide-react";
+import { Eye, LogOut, Mail, MoreHorizontal, ShieldBan, ShieldCheck } from "lucide-react";
 import type { PlatformUserDetail } from "../queries";
 import { revokeAllSessionsAction, sendPasswordSetupAction, setAccountDisabledAction } from "../actions";
-import { accountDisableConfirm } from "../rules";
+import { accountDisableConfirm, type RuleVerdict } from "../rules";
 import { OPS } from "@/lib/routes";
 import { formatDate, formatRelative } from "@/lib/dates";
 import { normalizePlatformRole } from "@/lib/roles";
@@ -24,12 +24,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { UserTabs } from "./user-tabs";
 import { DisableAccountDialog } from "./disable-account-dialog";
+import { ImpersonateDialog } from "./impersonate-dialog";
 
-export function UserHeader({ user, selfUserId }: { user: PlatformUserDetail; selfUserId: string }) {
+export function UserHeader({
+  user,
+  selfUserId,
+  viewAs,
+}: {
+  user: PlatformUserDetail;
+  selfUserId: string;
+  /** Whether the viewer may view the Hub as this account (src/modules/access/rules.ts canImpersonate). */
+  viewAs: RuleVerdict;
+}) {
   const { run, pending } = useAction();
   const confirm = useConfirm();
   const { canMutate } = useOpsAccess();
   const [disableOpen, setDisableOpen] = useState(false);
+  const [viewAsOpen, setViewAsOpen] = useState(false);
   const self = user.id === selfUserId;
   const disabled = !!user.disabledAt;
   const role = normalizePlatformRole(user.platformRole);
@@ -86,6 +97,11 @@ export function UserHeader({ user, selfUserId }: { user: PlatformUserDetail; sel
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Account</DropdownMenuLabel>
+                {viewAs.ok && (
+                  <DropdownMenuItem onSelect={() => setViewAsOpen(true)}>
+                    <Eye className="size-4" /> View as {user.firstName}…
+                  </DropdownMenuItem>
+                )}
                 {!disabled && (
                   <DropdownMenuItem
                     onSelect={() =>
@@ -122,6 +138,7 @@ export function UserHeader({ user, selfUserId }: { user: PlatformUserDetail; sel
         <UserTabs id={user.id} counts={{ workspaces: user.membershipCount, sessions: user.activeSessionCount }} />
       </PageHeader>
       <DisableAccountDialog user={user} open={disableOpen} onOpenChange={setDisableOpen} />
+      <ImpersonateDialog user={user} open={viewAsOpen} onOpenChange={setViewAsOpen} />
     </>
   );
 }

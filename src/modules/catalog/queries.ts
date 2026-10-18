@@ -6,7 +6,7 @@ import { itemMrrCents, LIVE_SUBSCRIPTION_STATUSES, MRR_STATUSES } from "../billi
 import { productMetricDefinitions } from "../monitoring/schema";
 import { getActiveIncidents } from "../monitoring/service";
 import { currentMonth, marginByProduct } from "../costs/service";
-import { isMarketingSlug } from "../webhooks_out/logic";
+import { loadPartnerDirectory } from "../partners/targets";
 import { baseChargeLabel, monthlyFromCents } from "./pricing";
 import { productComponents, products } from "./schema";
 
@@ -194,7 +194,8 @@ export type ProductBoardRow = {
   category: string;
   color: string | null;
   isActive: boolean;
-  isMarketing: boolean;
+  /** Partner app that runs this product (slug locked, no Hub-side DNS), e.g. "MHub". */
+  managedBy: string | null;
   sortOrder: number;
   /** "$79.00/mo" style headline from the base charge. */
   baseCharge: string | null;
@@ -211,7 +212,7 @@ export type ProductBoardRow = {
 };
 
 export async function listProductsBoardOps(): Promise<ProductBoardRow[]> {
-  const [rows, comps, defs, subs, incidents, margins] = await Promise.all([
+  const [rows, comps, defs, subs, incidents, margins, partnerOf] = await Promise.all([
     db.query.products.findMany({ orderBy: [asc(products.sortOrder), asc(products.name)] }),
     db.query.productComponents.findMany({ orderBy: [asc(productComponents.sortOrder)] }),
     db.query.productMetricDefinitions.findMany({ columns: { productId: true } }),
@@ -221,6 +222,7 @@ export async function listProductsBoardOps(): Promise<ProductBoardRow[]> {
     }),
     getActiveIncidents(),
     marginByProduct(currentMonth()).catch(() => [] as Awaited<ReturnType<typeof marginByProduct>>),
+    loadPartnerDirectory(),
   ]);
   const liveIds = subs.map((s) => s.id);
   const items = liveIds.length
@@ -250,7 +252,7 @@ export async function listProductsBoardOps(): Promise<ProductBoardRow[]> {
       category: p.category,
       color: p.color,
       isActive: p.isActive,
-      isMarketing: isMarketingSlug(p.slug),
+      managedBy: partnerOf(p.slug)?.displayName ?? null,
       sortOrder: p.sortOrder,
       baseCharge: baseChargeLabel(active, formatCents),
       monthlyFromCents: monthlyFromCents(active),
@@ -272,7 +274,7 @@ export type ProductOps = {
     icon: string | null;
     sortOrder: number;
     reporterQuietAfterMinutes: number | null;
-    isMarketing: boolean;
+    managedBy: string | null;
     defaultExpectedCname: string | null;
     defaultExpectedAIps: string | null;
     defaultMonthlyHostingCents: number | null;
@@ -301,7 +303,7 @@ export type MetricDefinitionDto = {
 export async function getProductOps(id: string): Promise<ProductOps | null> {
   const editor = await getProductForEditor(id);
   if (!editor) return null;
-  const [p, defs, subs] = await Promise.all([
+  const [p, defs, subs, partnerOf] = await Promise.all([
     db.query.products.findFirst({ where: eq(products.id, id) }),
     db.query.productMetricDefinitions.findMany({
       where: eq(productMetricDefinitions.productId, id),
@@ -310,7 +312,7 @@ export async function getProductOps(id: string): Promise<ProductOps | null> {
     db.query.subscriptions.findMany({
       where: and(eq(subscriptions.productId, id), inArray(subscriptions.status, LIVE_SUBSCRIPTION_STATUSES)),
       columns: { id: true, status: true },
-    }),
+    }),    loadPartnerDirectory(),
   ]);
   if (!p) return null;
   const liveIds = subs.filter((s) => (MRR_STATUSES as string[]).includes(s.status)).map((s) => s.id);
@@ -325,7 +327,7 @@ export async function getProductOps(id: string): Promise<ProductOps | null> {
       icon: p.icon,
       sortOrder: p.sortOrder,
       reporterQuietAfterMinutes: p.reporterQuietAfterMinutes,
-      isMarketing: isMarketingSlug(p.slug),
+      managedBy: partnerOf(p.slug)?.displayName ?? null,
       defaultExpectedCname: p.defaultExpectedCname,
       defaultExpectedAIps: p.defaultExpectedAIps,
       defaultMonthlyHostingCents: p.defaultMonthlyHostingCents,

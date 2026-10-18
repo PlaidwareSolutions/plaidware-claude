@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-/** Better Auth password change; signs out other sessions on success. */
-export function ChangePasswordForm() {
+/** Better Auth password change; signs out other sessions on success. `disabled`: read-only (an ops admin viewing as this person; the auth route refuses too). */
+export function ChangePasswordForm({ disabled = false }: { disabled?: boolean } = {}) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,6 +37,7 @@ export function ChangePasswordForm() {
 
   return (
     <form onSubmit={submit} className="grid max-w-sm gap-4">
+      <fieldset disabled={disabled} className="contents">
       <div className="grid gap-2">
         <Label htmlFor="current">Current password</Label>
         <Input id="current" type="password" autoComplete="current-password" required value={current} onChange={(e) => setCurrent(e.target.value)} />
@@ -45,9 +46,10 @@ export function ChangePasswordForm() {
         <Label htmlFor="next">New password (8+ characters)</Label>
         <Input id="next" type="password" autoComplete="new-password" required minLength={8} value={next} onChange={(e) => setNext(e.target.value)} />
       </div>
-      <Button type="submit" disabled={busy || !current || next.length < 8} className="w-fit">
+      <Button type="submit" disabled={disabled || busy || !current || next.length < 8} className="w-fit">
         {busy ? "Saving…" : "Update password"}
       </Button>
+      </fieldset>
     </form>
   );
 }

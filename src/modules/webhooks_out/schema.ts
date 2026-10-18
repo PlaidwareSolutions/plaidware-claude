@@ -9,6 +9,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { subscriptions } from "../billing/schema";
+import { partnerApps } from "../partners/schema";
 
 export const webhookDeliveryStatus = pgEnum("webhook_delivery_status", [
   "pending", // queued or awaiting retry (see nextAttemptAt)
@@ -18,9 +19,10 @@ export const webhookDeliveryStatus = pgEnum("webhook_delivery_status", [
 ]);
 
 /**
- * Outbox for Hub → MHub calls (integration contract §B/§C). Rows are written
- * synchronously at the emitting transition and drained by the worker's
- * per-minute sweep, so the web process never blocks on MHub being reachable.
+ * Outbox for Hub → partner-app calls (MHub via env, others via partner_apps;
+ * contract §B/§C). Rows are written at the emitting transition and drained
+ * by the worker's per-minute sweep, so the web process never blocks on a
+ * partner being reachable.
  */
 export const webhookDeliveries = pgTable(
   "webhook_deliveries",
@@ -33,6 +35,8 @@ export const webhookDeliveries = pgTable(
     target: text("target").notNull().default(""),
     /** X-Plaidware-Delivery — stable across every retry of this delivery. */
     deliveryId: uuid("delivery_id").notNull().defaultRandom(),
+    /** Null = the env-configured MHub target; otherwise the partner app it goes to. */
+    partnerAppId: uuid("partner_app_id").references(() => partnerApps.id, { onDelete: "cascade" }),
     /** Set for subscription-scoped events; also dedupes the provision handshake. */
     subscriptionId: uuid("subscription_id").references(() => subscriptions.id, {
       onDelete: "cascade",

@@ -31,6 +31,8 @@ export const OPS = {
   webhooks: "/ops/system/webhooks",
   costs: "/ops/system/costs",
   promos: "/ops/system/promos",
+  partners: "/ops/system/partners",
+  partner: (id: string) => `/ops/system/partners/${id}`,
 } as const;
 
 export const TENANT = {
@@ -78,6 +80,9 @@ export const AUTH = {
   resetPassword: "/reset-password",
   invite: (id: string) => `/invite/${id}`,
   welcome: (token: string) => `/welcome/${token}`,
+  /** No-login partner-app payment page (Partner API pay links). */
+  pay: (token: string) => `/pay/${token}`,
+  payDone: (token: string) => `/pay/${token}/done`,
 } as const;
 
 /**

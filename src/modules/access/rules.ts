@@ -1,4 +1,5 @@
 import { PLATFORM_ROLE_META, isDowngrade, type PlatformRole } from "@/lib/roles";
+import { isImpersonatableRole } from "@/policy/impersonation";
 
 /**
  * Who may change whose platform role, and how the change is confirmed.
@@ -145,4 +146,28 @@ export function canSendPasswordSetup(i: { targetDisabled: boolean }): RuleVerdic
 
 export function typedEmailMatches(value: string | undefined, email: string): boolean {
   return (value ?? "").trim().toLowerCase() === email.trim().toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
+// View as (read-only impersonation)
+// ---------------------------------------------------------------------------
+
+export type ImpersonationStart = {
+  actorUserId: string;
+  actorRole: PlatformRole;
+  /** The actor's own session is already a view-as session. */
+  actorImpersonating: boolean;
+  targetUserId: string;
+  targetRole: PlatformRole;
+  targetDisabled: boolean;
+};
+
+/** Who may view the Hub as whom: an ops admin, looking at anyone below ops admin. */
+export function canImpersonate(i: ImpersonationStart): RuleVerdict {
+  if (i.actorRole !== "ops_admin") return { ok: false, reason: "Only ops admins can view as another user." };
+  if (i.actorImpersonating) return { ok: false, reason: "Stop viewing as the current user first." };
+  if (i.actorUserId === i.targetUserId) return { ok: false, reason: "You can't view as yourself." };
+  if (!isImpersonatableRole(i.targetRole)) return { ok: false, reason: "Ops admins can't be viewed as." };
+  if (i.targetDisabled) return { ok: false, reason: "This account is disabled." };
+  return { ok: true };
 }

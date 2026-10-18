@@ -88,22 +88,28 @@ export async function getThreadTenantId(threadId: string): Promise<string | null
   return row?.tenantId ?? null;
 }
 
-export async function getThreadWithMessages(threadId: string, viewer: Viewer) {
+/**
+ * One thread with its messages. Opening marks the viewer's side read (PRD
+ * §4.10) — unless `markRead` is false: an ops admin viewing the Hub as this
+ * person must not leave read receipts on their behalf.
+ */
+export async function getThreadWithMessages(threadId: string, viewer: Viewer, opts: { markRead?: boolean } = {}) {
   const thread = await db.query.messageThreads.findFirst({
     where: eq(messageThreads.id, threadId),
   });
   if (!thread) return null;
-  // Opening marks the viewer's side read (PRD §4.10).
-  await db
-    .update(messages)
-    .set(viewer === "tenant" ? { readByTenantAt: new Date() } : { readByOpsAt: new Date() })
-    .where(
-      and(
-        eq(messages.threadId, threadId),
-        eq(messages.senderRole, viewer === "tenant" ? "ops" : "tenant"),
-        viewer === "tenant" ? isNull(messages.readByTenantAt) : isNull(messages.readByOpsAt),
-      ),
-    );
+  if (opts.markRead !== false) {
+    await db
+      .update(messages)
+      .set(viewer === "tenant" ? { readByTenantAt: new Date() } : { readByOpsAt: new Date() })
+      .where(
+        and(
+          eq(messages.threadId, threadId),
+          eq(messages.senderRole, viewer === "tenant" ? "ops" : "tenant"),
+          viewer === "tenant" ? isNull(messages.readByTenantAt) : isNull(messages.readByOpsAt),
+        ),
+      );
+  }
   const rows = await db
     .select({
       id: messages.id,

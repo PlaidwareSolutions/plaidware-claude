@@ -37,6 +37,7 @@ export const PERMISSIONS_REFERENCE: readonly PermissionEntry[] = [
   { area: "ops", surface: "Clients", action: "Invite or add an existing account, change role, remove a member; fix a phone; decide role requests", requires: ops("admin"), note: "Ops admins bypass workspace membership and status. Adding from an account's Workspaces tab skips the invitation." },
   { area: "ops", surface: "Accounts (Access)", action: "Change a platform role, add staff, send a set-password link", requires: ops("admin") },
   { area: "ops", surface: "Accounts (Access)", action: "Disable or re-enable an account, revoke sessions", requires: ops("admin") },
+  { area: "ops", surface: "Accounts (Access)", action: "View as a customer, developer or ops-support account (read-only, one hour, reason required)", requires: ops("admin"), note: "Never an ops admin, a disabled account or yourself; every change is refused while viewing; both ends are audited." },
   { area: "ops", surface: "Billing", action: "Start subscriptions (incl. backdated), manual invoices, offline payments, hosting fees, dunning, billing policy, price overrides, subscription holds", requires: ops("admin") },
   { area: "ops", surface: "Products", action: "Create or edit products, components, defaults, metric definitions", requires: ops("admin") },
   { area: "ops", surface: "Provisioning", action: "Configure and run DNS verification, manage or reveal credentials", requires: ops("admin") },
@@ -45,6 +46,8 @@ export const PERMISSIONS_REFERENCE: readonly PermissionEntry[] = [
   { area: "ops", surface: "Inbox", action: "Mark a lead contacted or archived", requires: ops("support") },
   { area: "ops", surface: "Onboarding", action: "Create, resend, regenerate or revoke a setup link", requires: ops("admin") },
   { area: "ops", surface: "System", action: "Requeue webhook deliveries, hosting costs, promos", requires: ops("admin") },
+  { area: "ops", surface: "System", action: "Create or edit partner apps, rotate webhook secrets, mint or revoke partner API keys", requires: ops("admin"), note: "Secrets and keys are shown once at creation; support sees configuration only." },
+  { area: "ops", surface: "Clients", action: "Link or unlink a client to a partner-app tenant (Provisioning tab)", requires: ops("admin") },
   // ---- tenant workspace
   { area: "tenant", surface: "Team", action: "Invite, cancel an invite, change a role, remove a member, decide role requests", requires: tenant("team") },
   { area: "tenant", surface: "Team", action: "Transfer ownership", requires: tenant("team"), note: "Owner only." },

@@ -29,6 +29,7 @@ export function InboxView({
   threads,
   activeThread,
   activeMessages,
+  readOnlyReason = null,
 }: {
   scope: "tenant" | "ops";
   tenantId: string | null;
@@ -37,7 +38,10 @@ export function InboxView({
   threads: ThreadRow[];
   activeThread: ThreadRow | null;
   activeMessages: MessageDto[];
+  /** Set while an ops admin views as this person: no new threads, replies or closing — the sentence says why. */
+  readOnlyReason?: string | null;
 }) {
+  const readOnly = readOnlyReason !== null;
   const router = useRouter();
   const base = scope === "ops" ? OPS.inbox : TENANT.inbox;
   const threadHref = (id: string) => withQuery(base, { thread: id, tenant: filter?.tenantId });
@@ -73,7 +77,7 @@ export function InboxView({
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-[320px_1fr]">
       <div className="flex flex-col gap-2">
-        {scope === "tenant" && tenantId && (
+        {scope === "tenant" && tenantId && !readOnly && (
           <div className="flex justify-end">
             <Button size="sm" className="gap-1" onClick={() => setNewOpen(true)}>
               <Plus className="size-4" /> New
@@ -143,7 +147,7 @@ export function InboxView({
                   <StatusBadge kind="thread" status={activeThread.status} className="text-[10px]" />
                 </div>
               </div>
-              {scope === "ops" && activeThread.status === "open" && (
+              {scope === "ops" && activeThread.status === "open" && !readOnly && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -171,6 +175,9 @@ export function InboxView({
                 );
               })}
             </div>
+            {readOnly ? (
+              <div className="border-t p-3 text-xs text-muted-foreground">{readOnlyReason}</div>
+            ) : (
             <div className="flex gap-2 border-t p-3">
               <Input
                 placeholder="Write a reply…"
@@ -182,6 +189,7 @@ export function InboxView({
                 <Send className="size-4" /> Send
               </Button>
             </div>
+            )}
           </>
         )}
       </div>

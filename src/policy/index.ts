@@ -5,11 +5,12 @@ import { AUTH, OPS, TENANT, WORK, withQuery } from "../lib/routes";
 import { hasOpsLevel, normalizePlatformRole, opsLevelOf, roleHasWorkAccess, type OpsLevel } from "../lib/roles";
 import { auth } from "../lib/auth";
 import { db } from "../db";
-import { member, organization } from "../modules/auth/schema";
+import { member, organization, user } from "../modules/auth/schema";
 import { getUserTenants, type TenantSummary } from "../modules/tenancy/queries";
 import { pickActiveTenant } from "../modules/tenancy/active-tenant";
 import { capabilitiesFor, roleHasCapability, type TenantCapabilities } from "./capabilities";
 import { tenantStatusAllows, tenantStatusMessage, type TenantCapability } from "./tenant-status";
+import { impersonationOf, viewAsMessage } from "./impersonation";
 
 export {
   normalizeTenantStatus,
@@ -19,6 +20,7 @@ export {
   type TenantStatus,
 } from "./tenant-status";
 export { capabilitiesFor, roleHasCapability, type TenantCapabilities } from "./capabilities";
+export { impersonationOf, viewAsMessage, type ImpersonationInfo } from "./impersonation";
 
 /**
  * The single authorization layer (PRD § 2). Every server action, RSC query,
@@ -40,14 +42,34 @@ export class PolicyError extends Error {
 export async function getSession() {
   const s = await auth.api.getSession({ headers: await headers() });
   // Disabling revokes every session; this refuses any straggler as well.
-  return s && s.user.disabledAt ? null : s;
+  if (!s || s.user.disabledAt) return null;
+  const viewAs = impersonationOf(s);
+  if (viewAs) {
+    // A view-as session is only as good as the people on both ends: the target
+    // must still be below ops admin and the ops admin still active. A role
+    // change mid-view must never escalate what the viewer sees.
+    if (isOpsAdmin(s)) return null;
+    const actor = await db.query.user.findFirst({
+      where: eq(user.id, viewAs.actorUserId),
+      columns: { platformRole: true, disabledAt: true },
+    });
+    if (!actor || actor.disabledAt || !hasOpsLevel(actor.platformRole, "admin")) return null;
+  }
+  return s;
 }
 
 export type AppSession = NonNullable<Awaited<ReturnType<typeof getSession>>>;
 
-export async function requireUser() {
+/**
+ * Every server action starts here. A view-as session (an ops admin looking at
+ * the Hub as someone else — src/policy/impersonation.ts) is refused by
+ * default, which makes every guard built on this read-only; a caller admits
+ * it only for a harmless read (switching the active workspace).
+ */
+export async function requireUser(opts: { allowImpersonated?: boolean } = {}) {
   const session = await getSession();
   if (!session) throw new PolicyError(401, "Sign in required");
+  if (!opts.allowImpersonated && impersonationOf(session)) throw new PolicyError(403, viewAsMessage(session.user.name));
   return session;
 }
 
@@ -165,8 +187,12 @@ export async function requireOpsPage(min: OpsLevel = "admin") {
  * no bypass (they work through the ops pages). Returns the session plus the
  * resolved membership role ("ops" for platform admins).
  */
-export async function requireMembership(tenantId: string, cap: TenantCapability) {
-  const session = await requireUser();
+export async function requireMembership(
+  tenantId: string,
+  cap: TenantCapability,
+  opts: { allowImpersonated?: boolean } = {},
+) {
+  const session = await requireUser(opts);
   if (isOpsAdmin(session)) return { session, role: "ops" as const };
 
   const [m] = await db
@@ -212,12 +238,14 @@ export async function getTenantContext(opts: { returnTo?: string } = {}): Promis
   const tenants = await getUserTenants(session.user.id);
   if (isOps(session) && tenants.length === 0) redirect(OPS.home);
   const active = pickActiveTenant(tenants, session.session.activeOrganizationId);
+  // Viewing as this user: every surface stays visible, nothing but reading is live.
+  const lock = impersonationOf(session) ? viewAsMessage(session.user.name) : null;
   return {
     session,
     ops,
     tenants,
     active,
-    caps: active ? capabilitiesFor(active.role, active.status, ops) : null,
+    caps: active ? capabilitiesFor(active.role, active.status, ops, lock) : null,
   };
 }
 

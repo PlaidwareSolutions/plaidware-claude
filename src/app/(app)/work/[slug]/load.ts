@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { isOps, isOpsAdmin, requireWorkPage, workViewer } from "@/policy";
+import { impersonationOf, isOps, isOpsAdmin, requireWorkPage, workViewer } from "@/policy";
 import { getBoardBySlug } from "@/modules/work/queries";
 
 /**
@@ -14,7 +14,7 @@ export const loadBoard = cache(async (slug: string) => {
     session,
     viewer,
     isOps: isOps(session),
-    canManage: isOpsAdmin(session),
+    canManage: isOpsAdmin(session) && !impersonationOf(session),
     board,
   };
 });

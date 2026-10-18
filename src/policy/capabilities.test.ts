@@ -58,3 +58,33 @@ describe("capabilitiesFor", () => {
     expect(capabilitiesFor("admin", null, false).isOwner).toBe(false);
   });
 });
+
+describe("capabilitiesFor with a view-as lock", () => {
+  const LOCK = "Read-only while viewing as Jane — stop viewing to make changes.";
+  it("keeps every surface visible but makes only reading live", () => {
+    const caps = capabilitiesFor("owner", "active", false, LOCK);
+    expect(caps.locked).toBe(true);
+    expect(caps.can("read")).toBe(true);
+    expect(caps.can("billing")).toBe(false);
+    expect(caps.can("write")).toBe(false);
+    expect(caps.can("team")).toBe(false);
+    for (const cap of CAPS) expect(caps.roleCan(cap)).toBe(true);
+    expect(caps.isOwner).toBe(true);
+    expect(caps.readOnlyReason).toBe(LOCK);
+  });
+  it("wins over the workspace status message", () => {
+    expect(capabilitiesFor("admin", "suspended", false, LOCK).readOnlyReason).toBe(LOCK);
+    expect(capabilitiesFor("admin", "suspended", false, LOCK).can("billing")).toBe(false);
+  });
+  it("still refuses what the role never allowed", () => {
+    const caps = capabilitiesFor("member", "active", false, LOCK);
+    expect(caps.roleCan("billing")).toBe(false);
+    expect(caps.can("read")).toBe(true);
+  });
+  it("is off by default", () => {
+    const caps = capabilitiesFor("owner", "active", false);
+    expect(caps.locked).toBe(false);
+    expect(caps.can("team")).toBe(true);
+    expect(caps.readOnlyReason).toBeNull();
+  });
+});

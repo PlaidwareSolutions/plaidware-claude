@@ -4,7 +4,7 @@ import { db } from "../../db";
 import { encryptSecret, decryptSecret } from "../../lib/crypto";
 import { writeAudit } from "../audit/service";
 import { products } from "../catalog/schema";
-import { isMarketingSlug } from "../webhooks_out/logic";
+import { loadPartnerDirectory } from "../partners/targets";
 import { resolveDnsDefaults } from "./defaults";
 import { subscriptions } from "../billing/schema";
 import { provisioningCredentials, subscriptionProvisioning } from "./schema";
@@ -86,7 +86,7 @@ export async function setDomain(
   });
   if (domainUrl && !prov.verifyToken) {
     const slug = await subscriptionProductSlug(subscriptionId);
-    if (slug && !isMarketingSlug(slug)) {
+    if (slug && !(await loadPartnerDirectory())(slug)) {
       await configureVerification(subscriptionId, actorUserId, { auto: true });
     }
   }
@@ -125,9 +125,9 @@ export async function configureVerification(
 }
 
 /**
- * MHub provisioning handshake result (integration contract §C): the returned
- * portal URL is stored as the subscription's domainUrl. DNS-verification
- * fields stay null for marketing-* products — their domain is MHub's, never
+ * Partner provisioning handshake result (contract §C): the returned portal
+ * URL is stored as the subscription's domainUrl. DNS-verification fields
+ * stay null for partner-app products — their domain is the partner's, never
  * DNS-checked by Hub.
  */
 export async function setPortalUrl(subscriptionId: string, portalUrl: string): Promise<void> {

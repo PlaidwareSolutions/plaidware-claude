@@ -11,13 +11,14 @@ export default async function InboxPage({
 }: {
   searchParams: Promise<{ thread?: string }>;
 }) {
-  const { active } = await requireTenantPage();
+  const { active, caps } = await requireTenantPage();
 
   const { thread: threadId } = await searchParams;
   const threads = await listThreads("tenant", active.id);
+  // Messaging stays open while suspended or inactive; only a view-as session is read-only here.
   const detail =
     threadId && threads.some((t) => t.id === threadId)
-      ? await getThreadWithMessages(threadId, "tenant")
+      ? await getThreadWithMessages(threadId, "tenant", { markRead: !caps.locked })
       : null;
 
   return (
@@ -29,6 +30,7 @@ export default async function InboxPage({
         threads={threads}
         activeThread={threads.find((t) => t.id === threadId) ?? null}
         activeMessages={detail?.messages ?? []}
+        readOnlyReason={caps.locked ? caps.readOnlyReason : null}
       />
     </div>
   );

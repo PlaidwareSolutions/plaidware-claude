@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   integer,
   jsonb,
@@ -75,6 +76,8 @@ export const subscriptions = pgTable(
     suspensionNote: text("suspension_note"),
     subscribedAt: timestamp("subscribed_at").notNull().defaultNow(),
     canceledAt: timestamp("canceled_at"),
+    /** Stripe will end the subscription at the current period end (Partner API cancel). */
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at")
       .notNull()

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSession } from "@/policy";
+import { getSession, impersonationOf, viewAsMessage } from "@/policy";
 import { getInvitationPreview } from "@/modules/tenancy/queries";
 import { inviteState } from "@/modules/tenancy/invite-state";
 import { AcceptInvitationButton, SwitchAccountButton } from "@/modules/tenancy/components/invite-actions";
@@ -41,6 +41,16 @@ export default async function InvitePage({ params }: { params: Promise<{ id: str
       <strong className="text-heading">{preview.organizationName}</strong> as {roleLabel(preview.role)}.
     </p>
   );
+
+  if (session && impersonationOf(session)) {
+    return (
+      <div className="flex flex-col gap-4 text-center">
+        <h1 className="text-xl font-semibold text-heading">Invitations can&apos;t be accepted while viewing as {session.user.name}</h1>
+        {intro}
+        <p className="text-sm text-muted-foreground">{viewAsMessage(session.user.name)}</p>
+      </div>
+    );
+  }
 
   switch (state) {
     case "handled":

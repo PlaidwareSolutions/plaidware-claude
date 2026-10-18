@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getSession, hasWorkAccess, isDeveloper, isOps, opsLevel } from "@/policy";
+import { getSession, hasWorkAccess, impersonationOf, isDeveloper, isOps, opsLevel } from "@/policy";
+import { getUserIdentity } from "@/modules/access/queries";
 import { countPendingRoleRequests, getUserTenants } from "@/modules/tenancy/queries";
 import { pickActiveTenant } from "@/modules/tenancy/active-tenant";
 import { roleHasCapability } from "@/policy/capabilities";
@@ -21,12 +22,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const activeTenantId = active?.id ?? null;
   const ops = isOps(session);
   const decidesRoles = !!active && roleHasCapability(active.role, "team");
-  const [tenantUnread, tenantTeam, opsCounts, workCounts, workBoards] = await Promise.all([
+  const viewAs = impersonationOf(session);
+  const [tenantUnread, tenantTeam, opsCounts, workCounts, workBoards, actor] = await Promise.all([
     activeTenantId ? unreadCount("tenant", activeTenantId) : Promise.resolve(0),
     activeTenantId && decidesRoles ? countPendingRoleRequests(activeTenantId) : Promise.resolve(0),
     ops ? getOpsNavCounts() : Promise.resolve(undefined),
     work ? getWorkNavCounts(session.user.id) : Promise.resolve(undefined),
     work ? listBoardsNav() : Promise.resolve(undefined),
+    viewAs ? getUserIdentity(viewAs.actorUserId) : Promise.resolve(null),
   ]);
 
   return (
@@ -42,6 +45,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       tenants={tenants}
       activeTenantId={activeTenantId}
       workBoards={workBoards}
+      viewingAs={
+        viewAs
+          ? {
+              targetId: session.user.id,
+              targetName: session.user.name,
+              targetEmail: session.user.email,
+              actorName: actor?.name ?? "An ops admin",
+              expiresAt: viewAs.expiresAt.toISOString(),
+            }
+          : null
+      }
     >
       {children}
     </AppShell>

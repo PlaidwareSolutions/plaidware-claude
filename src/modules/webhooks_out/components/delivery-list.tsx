@@ -22,7 +22,7 @@ export function DeliveryList({ deliveries, dead }: { deliveries: WebhookDelivery
       description={dead ? `${dead} dead-lettered — requeue restarts the backoff with the same delivery id` : undefined}
     >
       {deliveries.length === 0 ? (
-        <EmptyState icon={Webhook} title="No MHub deliveries" description="Only clients with a marketing-* subscription exchange lifecycle events with MHub." />
+        <EmptyState icon={Webhook} title="No partner deliveries" description="Only clients subscribed to a partner-app product (MHub, Fixorata…) exchange lifecycle events." />
       ) : (
         <div className="flex flex-col gap-2">
           {deliveries.map((d) => (

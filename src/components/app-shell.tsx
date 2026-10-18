@@ -9,6 +9,7 @@ import {
   Building2,
   Check,
   ChevronsUpDown,
+  EyeOff,
   Home,
   MessageSquare,
   LayoutDashboard,
@@ -41,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { TenantStatusBanner } from "@/components/tenant-status-banner";
+import { ViewAsBanner, useStopViewingAs, type ViewingAs } from "@/components/view-as-banner";
 
 const TENANT_NAV: NavItem[] = [
   { href: TENANT.dashboard, label: "Home", icon: Home, exact: true },
@@ -57,9 +59,12 @@ export function AppShell({
   activeTenantId,
   counts,
   workBoards,
+  viewingAs = null,
   children,
 }: {
   user: { name: string; email: string; isOps: boolean; isDeveloper: boolean; opsLevel?: OpsLevel | null };
+  /** Set while an ops admin is viewing the Hub as `user`: banner on every page, Sign out becomes Stop viewing. */
+  viewingAs?: ViewingAs | null;
   tenants: TenantSummary[];
   activeTenantId: string | null;
   counts?: { tenantUnread: number; tenantTeam?: number; ops?: OpsNavCounts; work?: WorkNavCounts };
@@ -72,6 +77,7 @@ export function AppShell({
   const { resolvedTheme, setTheme } = useTheme();
   const [pending, startTransition] = useTransition();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const stopViewing = useStopViewingAs();
 
   const inOps = isNavActive(OPS.home, pathname);
   const inWork = isNavActive(WORK.home, pathname);
@@ -270,12 +276,20 @@ export function AppShell({
                   <Settings className="size-4" /> Settings
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={logOut}>
-                <LogOut className="size-4" /> Sign out
-              </DropdownMenuItem>
+              {viewingAs ? (
+                <DropdownMenuItem onClick={() => void stopViewing.stop()} disabled={stopViewing.pending}>
+                  <EyeOff className="size-4" /> Stop viewing as {viewingAs.targetName.split(" ")[0]}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={logOut}>
+                  <LogOut className="size-4" /> Sign out
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
+
+        {viewingAs && <ViewAsBanner viewingAs={viewingAs} />}
 
         <main className="flex-1 p-4 sm:p-6">
           {tenantUi && active && <TenantStatusBanner status={active.status} />}
