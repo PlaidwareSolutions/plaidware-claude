@@ -173,12 +173,16 @@ async function loadStripeFacts(stripeCustomerId: string | null, sub: Subscriptio
     ]);
     const customerPm =
       "deleted" in customer && customer.deleted ? null : (customer as Stripe.Customer).invoice_settings?.default_payment_method;
+    const payment_method = cardOf(stripeSub?.default_payment_method) ?? cardOf(customerPm);
+    // A trial without a card ends (expires) instead of charging, so it has
+    // no next charge to show.
+    const noChargeComing = stripeSub?.cancel_at_period_end || (stripeSub?.status === "trialing" && !payment_method);
     const facts: StripeFacts = {
-      payment_method: cardOf(stripeSub?.default_payment_method) ?? cardOf(customerPm),
+      payment_method,
       collection_method: stripeSub?.collection_method ?? null,
       // The renewal invoice is drafted at the current period end.
       next_charge:
-        preview && sub?.currentPeriodEnd && !stripeSub?.cancel_at_period_end
+        preview && sub?.currentPeriodEnd && !noChargeComing
           ? { date: sub.currentPeriodEnd.toISOString(), amount_cents: preview.amount_due }
           : null,
     };
