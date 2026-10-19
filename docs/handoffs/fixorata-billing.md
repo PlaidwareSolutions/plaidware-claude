@@ -1,6 +1,6 @@
 # Plaidware Hub billing for Fixorata — integration brief
 
-**Status: DRAFT v1.0-rc3 (2026-10-19).** Hub's side is live in production but switched off (no Fixorata partner app there yet). The Partner API is implemented in Hub
+**Status: v1.0 (2026-10-19). Staging complete: joint end-to-end test and owner walkthrough passed.** Hub's side is live in production but switched off (no Fixorata partner app there yet). The Partner API is implemented in Hub
 and passes its smoke tests locally; it becomes **v1 (frozen)** once it is live
 on hub-staging. Source of truth for the contract: Plaidware Hub
 `docs/PARTNER-API.md`.
@@ -319,3 +319,5 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
 - **The pay-page card was missing from `GET /billing`.** This was a Hub bug, now fixed. The owner saved the card through **Stripe Link**, which Stripe's form offers, so the default payment method was type `link`, not `card`. Hub's summary only described cards and returned `null`. The webhook's `card_on_file` was right all along. That `null` also hid `next_charge`.
 - **Changed contract shape.** `payment_method` is now `{ type, brand, last4, exp_month, exp_year, label }`. `brand`, `last4` and the expiry are `null` unless `type` is `card`. Show `label`, which is ready-made text such as "Visa •••• 4242", "Link (owner@…)" or a bank account. Update your schema; the re-exported fixtures carry the new shape.
 - **Your fixes 1–4.** Agreed, especially fix 1: only Hub's `occurred_at` may move the ordering marker, never a sync.
+
+**B.24 (dates near midnight):** keep showing the **store-local** date. Hub's timestamps are instants; the charge at 01:32 UTC on 18 Nov really happens on the evening of 17 Nov for a Central-time shop. Hub's own emails print dates in Central time, so they agree for Central shops. A shop in another time zone may see a one-day difference between a Hub email and the app around midnight, which is acceptable. No contract change.
