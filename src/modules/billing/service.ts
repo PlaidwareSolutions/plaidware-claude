@@ -257,6 +257,11 @@ export async function createCheckout(opts: {
    *  the subscription at the trial end (→ local `expired`) instead of
    *  Stripe's default of invoicing it into dunning. */
   trialEndWithoutCard?: "cancel";
+  /** Start now with nothing due, first charge on this date and every period
+   *  after (calendar-aligned billing for an existing client, e.g. the 1st).
+   *  No trial, no proration for the stub; a card can be saved meanwhile
+   *  through the subscription's pending SetupIntent. */
+  firstChargeAt?: Date;
 }): Promise<CheckoutResult> {
   const stripe = getStripe();
 
@@ -301,6 +306,11 @@ export async function createCheckout(opts: {
   }
   if (opts.backdate && recurring.length === 0) throw new Error("Backdating needs a recurring item");
   if (opts.backdate && opts.promoCode) throw new Error("Promo codes can't combine with a backdated start");
+  if (opts.firstChargeAt) {
+    if (opts.backdate) throw new Error("A first-charge date can't combine with a backdated start");
+    if (recurring.length === 0) throw new Error("A first-charge date needs a recurring item");
+    if (opts.firstChargeAt.getTime() <= Date.now()) throw new Error("The first charge date must be in the future");
+  }
 
   // Per-tenant negotiated prices apply to this checkout (billing v2); an
   // explicit planned price beats them, and a waived one-time item is $0.
@@ -376,7 +386,7 @@ export async function createCheckout(opts: {
 
   try {
     if (recurring.length > 0) {
-      const trialDays = opts.skipTrial || opts.backdate ? 0 : (product.trialDays ?? 0);
+      const trialDays = opts.skipTrial || opts.backdate || opts.firstChargeAt ? 0 : (product.trialDays ?? 0);
       const sub = await stripe.subscriptions.create({
         customer: customerId,
         items: recurring.map((c) => ({ price: priceIds.get(c.id)!, quantity: qty(c) })),
@@ -390,7 +400,14 @@ export async function createCheckout(opts: {
         ...(trialDays > 0 && opts.trialEndWithoutCard === "cancel"
           ? { trial_settings: { end_behavior: { missing_payment_method: "cancel" as const } } }
           : {}),
-        ...(opts.backdate
+        ...(opts.firstChargeAt
+          ? {
+              billing_cycle_anchor: toUnix(opts.firstChargeAt),
+              proration_behavior: "none" as const,
+              // One-time components still ride the first ($0-recurring) invoice.
+              add_invoice_items: oneTimeStripe.map((c) => ({ price: priceIds.get(c.id)!, quantity: qty(c) })),
+            }
+          : opts.backdate
           ? {
               // Stripe records the true start and bills from the anchor; the
               // elapsed months (and one-time work) go on the catch-up invoice below.
