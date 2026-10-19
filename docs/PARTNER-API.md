@@ -140,7 +140,8 @@ subscription: null | {
   addon_options[]: { component_id, name, kind, interval, unit_amount_cents,
                      current_quantity }
 }
-payment_method: null | { brand, last4, exp_month, exp_year }
+payment_method: null | { type, brand|null, last4|null, exp_month|null, exp_year|null, label }
+                (any default Stripe holds — card, Link, bank…; card fields only for cards)
 collection_method: charge_automatically | send_invoice | null
 next_charge: null | { date, amount_cents }   (null while a period-end cancel is set)
 invoices[]: latest 20 Invoice

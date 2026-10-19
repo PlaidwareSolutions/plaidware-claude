@@ -7,7 +7,14 @@ import { organization } from "../auth/schema";
 import { itemMrrCents, LIVE_SUBSCRIPTION_STATUSES } from "../billing/mappers";
 import { invoices, subscriptionItems, subscriptions, tenantPriceOverrides } from "../billing/schema";
 import { productComponents, products } from "../catalog/schema";
-import { billingStatusFor, slugMatchesPrefixes, type PartnerBillingStatus, type PartnerPlanKey } from "./logic";
+import {
+  billingStatusFor,
+  describePaymentMethod,
+  slugMatchesPrefixes,
+  type PartnerBillingStatus,
+  type PartnerPaymentMethod,
+  type PartnerPlanKey,
+} from "./logic";
 import { partnerPlanKey } from "./service";
 import type { partnerApps } from "./schema";
 
@@ -73,7 +80,7 @@ export type PartnerBillingSummaryDto = {
       current_quantity: number;
     }[];
   };
-  payment_method: null | { brand: string; last4: string; exp_month: number; exp_year: number };
+  payment_method: PartnerPaymentMethod | null;
   collection_method: "charge_automatically" | "send_invoice" | null;
   next_charge: null | { date: string; amount_cents: number };
   invoices: PartnerInvoiceDto[];
@@ -150,10 +157,6 @@ const factsCache = new Map<string, { at: number; facts: StripeFacts }>();
 
 const NO_FACTS: StripeFacts = { payment_method: null, collection_method: null, next_charge: null };
 
-function cardOf(pm: string | Stripe.PaymentMethod | null | undefined): StripeFacts["payment_method"] {
-  if (!pm || typeof pm === "string" || !pm.card) return null;
-  return { brand: pm.card.brand, last4: pm.card.last4, exp_month: pm.card.exp_month, exp_year: pm.card.exp_year };
-}
 
 async function loadStripeFacts(stripeCustomerId: string | null, sub: SubscriptionRow | null): Promise<StripeFacts> {
   if (!stripeConfigured() || !stripeCustomerId) return NO_FACTS;
@@ -173,7 +176,9 @@ async function loadStripeFacts(stripeCustomerId: string | null, sub: Subscriptio
     ]);
     const customerPm =
       "deleted" in customer && customer.deleted ? null : (customer as Stripe.Customer).invoice_settings?.default_payment_method;
-    const payment_method = cardOf(stripeSub?.default_payment_method) ?? cardOf(customerPm);
+    const payment_method =
+      describePaymentMethod(stripeSub?.default_payment_method as Stripe.PaymentMethod | null | undefined) ??
+      describePaymentMethod(customerPm as Stripe.PaymentMethod | string | null | undefined);
     // A trial without a card ends (expires) instead of charging, so it has
     // no next charge to show.
     const noChargeComing = stripeSub?.cancel_at_period_end || (stripeSub?.status === "trialing" && !payment_method);

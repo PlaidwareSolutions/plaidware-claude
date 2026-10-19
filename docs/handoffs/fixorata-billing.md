@@ -1,6 +1,6 @@
 # Plaidware Hub billing for Fixorata — integration brief
 
-**Status: DRAFT v1.0-rc2 (2026-10-18).** Hub's side is live in production but switched off (no Fixorata partner app there yet). The Partner API is implemented in Hub
+**Status: DRAFT v1.0-rc3 (2026-10-19).** Hub's side is live in production but switched off (no Fixorata partner app there yet). The Partner API is implemented in Hub
 and passes its smoke tests locally; it becomes **v1 (frozen)** once it is live
 on hub-staging. Source of truth for the contract: Plaidware Hub
 `docs/PARTNER-API.md`.
@@ -160,7 +160,8 @@ Handle all of them in the UI with friendly messages.
                 "status": "pending|active|paid|canceled" }],
     "addon_options": []   // none today; shape: { component_id, name, kind, interval, unit_amount_cents, current_quantity }
   },
-  "payment_method": null | { "brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2028 },
+  "payment_method": null | { "type": "card|link|us_bank_account|…", "brand": "visa|null", "last4": "4242|null",
+                             "exp_month": 12, "exp_year": 2028, "label": "Visa •••• 4242" },   // card fields null unless type is card
   "collection_method": "charge_automatically|send_invoice|null",   // null when nothing is live (canceled/expired)
   "next_charge": null | { "date": "ISO", "amount_cents": 3500 },
   "invoices": [ /* latest 20 Invoice */ ]
@@ -312,3 +313,9 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
 - **(a) Actor role.** Hub records any `role` string up to 50 characters, for audit only. `platform_admin` is fine, and so is any other real role.
 - **(b) Idempotency across routes.** Hub keys the ledger on (app, key) and compares method, path and body, so reusing one key on a different route is a 409 by design. Scope the key per route when forwarding (for example `<clientKey>:tenants` and `<clientKey>:checkout`). The same button retry then replays correctly whichever route it reaches.
 - **Rollout guard (new, step 6).** An org still resolved through its legacy row (your deviation 20 adapter, i.e. EZ Wireless and The Fix until ops link them) must **not** show "Start subscription". Show "Plaidware is moving your billing to the new system" instead. If the owner clicked Start first, Hub would create a fresh $35 trial tenant, and ops could no longer link the shop at its agreed terms (§7 C). Once ops link and start it in Hub, the webhook fills the mirror and the normal UI takes over.
+
+**From the staging walkthrough (your B.23, v1.0-rc3):**
+
+- **The pay-page card was missing from `GET /billing`.** This was a Hub bug, now fixed. The owner saved the card through **Stripe Link**, which Stripe's form offers, so the default payment method was type `link`, not `card`. Hub's summary only described cards and returned `null`. The webhook's `card_on_file` was right all along. That `null` also hid `next_charge`.
+- **Changed contract shape.** `payment_method` is now `{ type, brand, last4, exp_month, exp_year, label }`. `brand`, `last4` and the expiry are `null` unless `type` is `card`. Show `label`, which is ready-made text such as "Visa •••• 4242", "Link (owner@…)" or a bank account. Update your schema; the re-exported fixtures carry the new shape.
+- **Your fixes 1–4.** Agreed, especially fix 1: only Hub's `occurred_at` may move the ordering marker, never a sync.

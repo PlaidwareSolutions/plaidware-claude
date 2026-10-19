@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   billingStatusFor,
+  describePaymentMethod,
   hashPartnerKey,
   isAllowedReturnUrl,
   normalizeOrigin,
@@ -201,5 +202,26 @@ describe("normalizeOrigin", () => {
     expect(normalizeOrigin("http://fixorata.com")).toBeNull();
     expect(normalizeOrigin("ftp://x")).toBeNull();
     expect(normalizeOrigin("nope")).toBeNull();
+  });
+});
+
+describe("describePaymentMethod", () => {
+  it("describes a card", () => {
+    expect(describePaymentMethod({ type: "card", card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 } })).toEqual({
+      type: "card", brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030, label: "Visa •••• 4242",
+    });
+  });
+
+  it("describes Link and other wallets without card details", () => {
+    expect(describePaymentMethod({ type: "link", link: { email: "a@b.co" } })).toEqual({
+      type: "link", brand: null, last4: null, exp_month: null, exp_year: null, label: "Link (a@b.co)",
+    });
+    expect(describePaymentMethod({ type: "us_bank_account", us_bank_account: { bank_name: "STRIPE TEST BANK", last4: "6789" } })?.label).toBe("STRIPE TEST BANK •••• 6789");
+    expect(describePaymentMethod({ type: "cashapp" })?.label).toBe("Cashapp");
+  });
+
+  it("is null for nothing or an unexpanded id", () => {
+    expect(describePaymentMethod(null)).toBeNull();
+    expect(describePaymentMethod("pm_123")).toBeNull();
   });
 });

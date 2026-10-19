@@ -210,3 +210,57 @@ export function normalizeOrigin(raw: string): string | null {
     return null;
   }
 }
+
+/**
+ * BillingSummary.payment_method for whatever Stripe has as the default —
+ * a card, or a wallet such as Link (Stripe's PaymentElement offers it, so an
+ * owner can save one on the pay page). Card details only exist for cards.
+ */
+export type PartnerPaymentMethod = {
+  type: string;
+  brand: string | null;
+  last4: string | null;
+  exp_month: number | null;
+  exp_year: number | null;
+  /** Human label for the partner UI, e.g. "Visa •••• 4242" or "Link (a@b.co)". */
+  label: string;
+};
+
+export function describePaymentMethod(
+  pm:
+    | {
+        type?: string | null;
+        card?: { brand?: string | null; last4?: string | null; exp_month?: number | null; exp_year?: number | null } | null;
+        link?: { email?: string | null } | null;
+        us_bank_account?: { bank_name?: string | null; last4?: string | null } | null;
+      }
+    | string
+    | null
+    | undefined,
+): PartnerPaymentMethod | null {
+  if (!pm || typeof pm === "string" || !pm.type) return null;
+  if (pm.type === "card" && pm.card) {
+    const brand = pm.card.brand ?? null;
+    const last4 = pm.card.last4 ?? null;
+    const name = brand ? brand.charAt(0).toUpperCase() + brand.slice(1) : "Card";
+    return {
+      type: "card",
+      brand,
+      last4,
+      exp_month: pm.card.exp_month ?? null,
+      exp_year: pm.card.exp_year ?? null,
+      label: last4 ? `${name} •••• ${last4}` : name,
+    };
+  }
+  if (pm.type === "us_bank_account") {
+    const last4 = pm.us_bank_account?.last4 ?? null;
+    const bank = pm.us_bank_account?.bank_name ?? "Bank account";
+    return { type: pm.type, brand: null, last4, exp_month: null, exp_year: null, label: last4 ? `${bank} •••• ${last4}` : bank };
+  }
+  if (pm.type === "link") {
+    const email = pm.link?.email ?? null;
+    return { type: "link", brand: null, last4: null, exp_month: null, exp_year: null, label: email ? `Link (${email})` : "Link" };
+  }
+  const t = pm.type.replace(/_/g, " ");
+  return { type: pm.type, brand: null, last4: null, exp_month: null, exp_year: null, label: t.charAt(0).toUpperCase() + t.slice(1) };
+}
