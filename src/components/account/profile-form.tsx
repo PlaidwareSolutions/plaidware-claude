@@ -35,7 +35,7 @@ export function ProfileForm({
   return (
     <form onSubmit={submit} className="grid gap-4">
       <fieldset disabled={disabled} className="contents">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid items-start gap-4 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label htmlFor="profile-first">First name</Label>
           <Input id="profile-first" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />

@@ -59,7 +59,7 @@ export function BoardSettingsForm({
       </Section>
 
       <Section title="Way of working" card>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid items-start gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
             <Label>Mode</Label>
             <Select value={mode} onValueChange={(v) => setMode(v as WorkBoardMode)}>
@@ -87,7 +87,7 @@ export function BoardSettingsForm({
       </Section>
 
       <Section title="Work-in-progress limits" description="advisory: the column turns amber when exceeded" card>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid items-start gap-4 sm:grid-cols-3">
           {WIP_COLUMNS.map((c) => (
             <div key={c} className="grid gap-2">
               <Label htmlFor={`wip-${c}`}>{STATUS_LABELS[c]}</Label>
