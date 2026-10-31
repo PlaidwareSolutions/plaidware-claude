@@ -1,39 +1,95 @@
-import { History } from "lucide-react";
-import { formatDateTime, formatRelative } from "@/lib/dates";
-import { EmptyState } from "@/components/empty-state";
-import { Badge } from "@/components/ui/badge";
-import type { WorkEventDto } from "../../dto";
-import { describeWorkEvent, workEventGroup, workEventLabel } from "../../event-kinds";
+"use client";
 
-/** The item's history, newest first (same shape as the client Activity tab). */
-export function ItemActivity({ events }: { events: WorkEventDto[] }) {
+import { useState } from "react";
+import { formatDateTime, formatRelative } from "@/lib/dates";
+import { cn } from "@/lib/utils";
+import { UserAvatar } from "@/components/user-avatar";
+import type { WorkCommentDto, WorkEventDto, WorkUserRef } from "../../dto";
+import { describeWorkEvent, workEventLabel } from "../../event-kinds";
+import { CommentComposer, CommentItem, PendingComment, usePendingComments } from "./comments-section";
+
+type Tab = "all" | "comments" | "history";
+const TABS: { value: Tab; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "comments", label: "Comments" },
+  { value: "history", label: "History" },
+];
+
+/** Jira's Activity block: Show All | Comments | History, newest history first, comments oldest first. */
+export function ItemActivity({
+  itemId,
+  comments,
+  events,
+  viewer,
+}: {
+  itemId: string;
+  comments: WorkCommentDto[];
+  events: WorkEventDto[];
+  viewer: WorkUserRef | null;
+}) {
+  const [tab, setTab] = useState<Tab>("comments");
+  const [pending, addPending] = usePendingComments();
+
+  const all = [
+    ...comments.map((c) => ({ at: c.createdAt, node: <CommentItem key={`c-${c.id}`} comment={c} /> })),
+    ...events.map((e) => ({ at: e.createdAt, node: <HistoryRow key={`e-${e.id}`} event={e} /> })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        <History className="size-4" /> History
-        {events.length > 0 && <span className="text-xs font-normal">{events.length}</span>}
-      </h2>
-      {events.length === 0 ? (
-        <EmptyState compact icon={History} title="No history yet" />
-      ) : (
-        <ol className="flex flex-col divide-y rounded-lg border bg-card">
-          {events.map((e) => {
-            const detail = describeWorkEvent(e.kind, e.payload);
-            return (
-              <li key={e.id} className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-0.5 px-4 py-2 text-sm">
-                <Badge variant="outline" className="text-[10px]">{workEventGroup(e.kind)}</Badge>
-                <div className="min-w-0">
-                  <span className="text-heading">{workEventLabel(e.kind)}</span>
-                  {detail && <span className="text-muted-foreground"> — {detail}</span>}
-                  <div className="text-xs text-muted-foreground" title={formatDateTime(e.createdAt)}>
-                    {e.actor?.name ?? "System"} · {formatRelative(e.createdAt)}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      )}
+    <section className="flex flex-col gap-4">
+      <h2 className="text-base font-semibold text-foreground">Activity</h2>
+      <div className="flex items-center gap-1 text-sm" role="tablist" aria-label="Activity">
+        <span className="mr-1 text-muted-foreground">Show:</span>
+        {TABS.map((t) => (
+          <button
+            key={t.value}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.value}
+            onClick={() => setTab(t.value)}
+            className={cn(
+              "rounded-[3px] px-2 py-1 font-medium",
+              tab === t.value ? "bg-info/15 text-info" : "bg-muted text-foreground/80 hover:bg-accent",
+            )}
+          >
+            {t.label}
+            {t.value === "comments" && comments.length > 0 && <span className="ml-1 tabular-nums opacity-70">{comments.length}</span>}
+          </button>
+        ))}
+      </div>
+
+      {tab !== "history" && <CommentComposer itemId={itemId} viewer={viewer} onPosting={addPending} />}
+
+      <ol className="flex flex-col gap-5">
+        {tab !== "history" && pending.map((body, i) => <PendingComment key={`p-${i}`} body={body} viewer={viewer} />)}
+        {tab === "comments" && comments.map((c) => <CommentItem key={c.id} comment={c} />)}
+        {tab === "history" && events.map((e) => <HistoryRow key={e.id} event={e} />)}
+        {tab === "all" && all.map((x) => x.node)}
+        {tab === "comments" && comments.length === 0 && pending.length === 0 && (
+          <li className="text-sm text-muted-foreground">No comments yet. Decisions, questions and progress notes go here.</li>
+        )}
+        {tab === "history" && events.length === 0 && <li className="text-sm text-muted-foreground">No history yet.</li>}
+      </ol>
     </section>
+  );
+}
+
+function HistoryRow({ event }: { event: WorkEventDto }) {
+  const detail = describeWorkEvent(event.kind, event.payload);
+  const name = event.actor?.name ?? "System";
+  return (
+    <li className="flex gap-3 text-sm">
+      <UserAvatar name={name} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
+          <span className="font-semibold text-foreground">{name}</span>
+          <span className="text-foreground/80">{workEventLabel(event.kind).toLowerCase()}</span>
+          <span className="text-xs text-muted-foreground" title={formatDateTime(event.createdAt)}>
+            {formatRelative(event.createdAt)}
+          </span>
+        </div>
+        {detail && <div className="mt-0.5 text-muted-foreground">{detail}</div>}
+      </div>
+    </li>
   );
 }

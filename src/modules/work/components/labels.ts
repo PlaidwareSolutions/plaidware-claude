@@ -1,7 +1,7 @@
 import type { WorkItemPriority, WorkItemSource, WorkItemType } from "../contracts";
 
 /** Display labels and tiny formatters shared by server and client components (no "use client"). */
-export const TYPE_LABELS: Record<WorkItemType, string> = { feature: "Feature", enhancement: "Enhancement", bug: "Bug", task: "Task" };
+export const TYPE_LABELS: Record<WorkItemType, string> = { feature: "Feature", enhancement: "Enhancement", bug: "Bug", task: "Task", epic: "Epic" };
 export const PRIORITY_LABELS: Record<WorkItemPriority, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
 export const SOURCE_LABELS: Record<WorkItemSource, string> = { internal: "Internal", client_request: "Client request", incident: "Incident" };
 

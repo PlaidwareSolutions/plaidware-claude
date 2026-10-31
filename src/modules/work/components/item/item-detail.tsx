@@ -2,19 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2 } from "lucide-react";
 import { WORK } from "@/lib/routes";
 import { useAction } from "@/lib/use-action";
 import { useConfirm } from "@/components/confirm-dialog";
-import { StatusBadge } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { deleteItemAction, updateItemAction } from "../../actions";
+import { isRichTextEmpty } from "../../rich-text";
+import { RichEditor } from "../editor/rich-editor";
+import { RichTextView } from "../editor/rich-text-view";
 import type { WorkBoardMode } from "../../contracts";
-import type { WorkItemDetailDto } from "../../dto";
+import type { WorkItemDetailDto, WorkUserRef } from "../../dto";
 import { TypeIcon } from "../item-bits";
-import { CommentsSection } from "./comments-section";
+import { ChildIssues } from "./child-issues";
 import { ItemActivity } from "./item-activity";
 import { ItemSidebar } from "./item-sidebar";
 
@@ -26,6 +25,8 @@ export function ItemDetail({
   canManage,
   canLinkClient,
   tenants,
+  viewer,
+  onDeleted,
 }: {
   slug: string;
   mode: WorkBoardMode;
@@ -33,6 +34,10 @@ export function ItemDetail({
   canManage: boolean;
   canLinkClient: boolean;
   tenants: { id: string; name: string }[];
+  /** The signed-in user (comment avatar, "Assign to me"). */
+  viewer: WorkUserRef | null;
+  /** The quick view closes itself; the item page goes back to the board. */
+  onDeleted?: () => void;
 }) {
   const router = useRouter();
   const confirm = useConfirm();
@@ -47,32 +52,41 @@ export function ItemDetail({
     });
     if (!ok) return;
     const res = await run(() => deleteItemAction(item.id), { key: "delete", refresh: false, success: `${item.key} deleted` });
-    if (res?.ok) router.push(WORK.board(slug));
+    if (res?.ok) {
+      if (onDeleted) onDeleted();
+      else router.push(WORK.board(slug));
+    }
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)]">
       <div className="flex min-w-0 flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <TypeIcon type={item.type} />
-            <span className="font-mono">{item.key}</span>
-            <StatusBadge kind="workItem" status={item.status} />
-            <StatusBadge kind="workType" status={item.type} />
-            <StatusBadge kind="workPriority" status={item.priority} />
-            {canManage && (
-              <Button variant="ghost" size="xs" className="ml-auto text-destructive hover:text-destructive" disabled={isPending("delete")} onClick={remove}>
-                <Trash2 className="size-3" /> Delete
-              </Button>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            {item.epic && (
+              <>
+                <TypeIcon type="epic" />
+                <span className="font-medium" title={item.epic.title}>{item.epic.key}</span>
+                <span aria-hidden>/</span>
+              </>
             )}
+            <TypeIcon type={item.type} />
+            <span className="font-medium">{item.key}</span>
           </div>
           <EditableTitle itemId={item.id} title={item.title} />
         </div>
         <EditableDescription itemId={item.id} description={item.description} />
-        <CommentsSection itemId={item.id} comments={item.comments} />
-        <ItemActivity events={item.events} />
+        {item.type === "epic" && <ChildIssues epicId={item.id} slug={slug} items={item.children} />}
+        <ItemActivity itemId={item.id} comments={item.comments} events={item.events} viewer={viewer} />
       </div>
-      <ItemSidebar slug={slug} mode={mode} item={item} canLinkClient={canLinkClient} tenants={tenants} />
+      <ItemSidebar
+        mode={mode}
+        item={item}
+        canLinkClient={canLinkClient}
+        tenants={tenants}
+        viewer={viewer}
+        onDelete={canManage && !isPending("delete") ? () => void remove() : undefined}
+      />
     </div>
   );
 }
@@ -106,7 +120,7 @@ function EditableTitle({ itemId, title }: { itemId: string; title: string }) {
             setEditing(false);
           }
         }}
-        className="h-auto text-xl font-semibold"
+        className="-mx-2 h-auto rounded-[3px] border-2 border-info px-2 py-1 text-2xl font-medium shadow-none focus-visible:ring-0 md:text-2xl"
         aria-label="Title"
       />
     );
@@ -116,54 +130,56 @@ function EditableTitle({ itemId, title }: { itemId: string; title: string }) {
       type="button"
       onClick={() => setEditing(true)}
       disabled={isPending("title")}
-      className="group flex w-full items-start gap-2 text-left text-2xl font-semibold text-heading"
+      className="-mx-2 w-[calc(100%+1rem)] rounded-[3px] px-2 py-1 text-left text-2xl font-medium text-heading hover:bg-accent/60"
       title="Click to edit"
     >
-      <span className="min-w-0">{title}</span>
-      <Pencil className="mt-2 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      {title}
     </button>
   );
 }
 
+/** `description` is server-rendered, sanitised HTML (queries.renderRichText). */
 function EditableDescription({ itemId, description }: { itemId: string; description: string }) {
   const { run, isPending } = useAction();
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(description);
   const busy = isPending("description");
 
-  async function save() {
-    if (value === description) {
+  async function save(html: string) {
+    const next = isRichTextEmpty(html) ? "" : html;
+    if (next === description || (!next && !description)) {
       setEditing(false);
       return;
     }
-    const res = await run(() => updateItemAction({ itemId, patch: { description: value } }), { key: "description", refresh: false });
+    const res = await run(() => updateItemAction({ itemId, patch: { description: next } }), { key: "description", refresh: false });
     if (res?.ok) setEditing(false);
   }
 
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Description</h2>
-        {!editing && (
-          <Button variant="ghost" size="xs" onClick={() => setEditing(true)}>
-            <Pencil className="size-3" /> Edit
-          </Button>
-        )}
-      </div>
+      <h2 className="text-base font-semibold text-foreground">Description</h2>
       {editing ? (
-        <div className="flex flex-col gap-2">
-          <Textarea autoFocus rows={8} value={value} onChange={(e) => setValue(e.target.value)} placeholder="Context, acceptance criteria, links…" />
-          <div className="flex gap-2">
-            <Button size="sm" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
-            <Button size="sm" variant="ghost" onClick={() => { setValue(description); setEditing(false); }}>Cancel</Button>
-          </div>
-        </div>
-      ) : description ? (
-        <div className="whitespace-pre-wrap rounded-lg border bg-card p-4 text-sm leading-relaxed">{description}</div>
+        <RichEditor
+          initialHtml={description}
+          ariaLabel="Description"
+          placeholder="Context, steps to reproduce, acceptance criteria… paste screenshots straight in."
+          autoFocus
+          minHeight="min-h-40"
+          onSave={save}
+          onCancel={() => setEditing(false)}
+          saving={busy}
+        />
       ) : (
-        <button type="button" onClick={() => setEditing(true)} className="rounded-lg border border-dashed p-4 text-left text-sm text-muted-foreground hover:border-primary/50">
-          Add a description…
-        </button>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setEditing(true)}
+          onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && setEditing(true)}
+          className="-mx-2 cursor-text rounded-[3px] px-2 py-1.5 text-left hover:bg-accent/60 focus-visible:outline-2 focus-visible:outline-info"
+          title="Click to edit"
+          aria-label="Edit description"
+        >
+          {description ? <RichTextView html={description} /> : <span className="text-sm text-muted-foreground">Add a description…</span>}
+        </div>
       )}
     </section>
   );

@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
+      // Work item images go up through a server action (5 MB cap + multipart overhead).
+      bodySizeLimit: "6mb",
       // Staging is served via a Cloudflare Origin Rule that rewrites the Host
       // header to the Railway service domain, so the browser origin and the
       // origin-seen host differ; both must be allowed or server actions 403.

@@ -4,12 +4,14 @@ import { isoDay } from "../../lib/dates";
 import { roleHasWorkAccess } from "../../lib/roles";
 import { organization, user } from "../auth/schema";
 import { products } from "../catalog/schema";
-import type { BoardSettings, CarryOver, CreateItem, ItemPatch, WorkItemStatus } from "./contracts";
+import type { BoardSettings, CarryOver, CreateItem, ItemPatch, WorkItemStatus, WorkResolution } from "./contracts";
 import { defaultKeyPrefix, formatKey, uniqueKeyPrefix } from "./key-logic";
 import { RANK_REBALANCE_AT, rankBetween, rebalanceRanks } from "./rank-logic";
-import { workBoards, workComments, workItemEvents, workItems, workSprints } from "./schema";
+import { attachmentProblem, sniffImageType } from "./attachment-logic";
+import { normalizeRichText } from "./rich-text-sanitize";
+import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints } from "./schema";
 import { addDays, carryOverPatch, isClosedStatus, nextSprintWindow, sprintCommitment, sprintCompletion } from "./sprint-logic";
-import { applyTransition, canTransition, sprintForTransition, statusForSprintChange } from "./transitions";
+import { applyTransition, blockedReason, canTransition, sprintForTransition, statusForSprintChange } from "./transitions";
 
 /**
  * The only writer for the work module. Every mutation runs in one
@@ -170,6 +172,7 @@ export async function createItem(
     if (!sprint && sprintId) sprint = activeSprint;
 
     const assignee = o.assigneeUserId ? await assertAssignable(tx, o.assigneeUserId) : null;
+    const parent = o.parentId ? await assertEpicParent(tx, { parentId: o.parentId, boardId: o.boardId, childType: o.type }) : null;
     let requester: { id: string; name: string } | null = null;
     if (o.requesterTenantId) {
       const org = await tx.query.organization.findFirst({ where: eq(organization.id, o.requesterTenantId), columns: { id: true, name: true } });
@@ -186,7 +189,7 @@ export async function createItem(
         number,
         type: o.type,
         title: o.title,
-        description: o.description,
+        description: normalizeRichText(o.description),
         status,
         priority: o.priority,
         rank: await appendRank(tx, o.boardId, status),
@@ -198,6 +201,7 @@ export async function createItem(
         requesterTenantId: requester?.id ?? null,
         labels: o.labels,
         dueOn: o.dueOn ?? null,
+        parentId: parent?.id ?? null,
         ...stamps,
       })
       .returning({ id: workItems.id });
@@ -208,6 +212,7 @@ export async function createItem(
     if (sprint && sprintId) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "sprint_changed", payload: { before: null, after: sprintRef(sprint), reason: o.sprintId ? "sprint_assigned" : undefined } });
     // The requester is its own (ops-only) event so item_created never names a client.
     if (requester) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "requester_changed", payload: { before: null, after: requester } });
+    if (parent) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "parent_changed", payload: { before: null, after: epicRef(parent, board.keyPrefix) } });
 
     return { id: item.id, number, key: formatKey(board.keyPrefix, number), productSlug };
   });
@@ -223,12 +228,16 @@ export async function updateItem(o: { itemId: string; patch: ItemPatch; actorUse
       set.title = p.title;
       fields.title = { before: item.title, after: p.title };
     }
-    if (p.description !== undefined && p.description !== item.description) {
-      set.description = p.description;
+    const description = p.description === undefined ? undefined : normalizeRichText(p.description);
+    if (description !== undefined && description !== item.description) {
+      set.description = description;
       fields.description = { changed: true };
     }
     if (p.type !== undefined && p.type !== item.type) {
       set.type = p.type;
+      // An epic has no epic of its own; an item that stops being an epic releases its children.
+      if (p.type === "epic") set.parentId = null;
+      if (item.type === "epic") await tx.update(workItems).set({ parentId: null }).where(eq(workItems.parentId, item.id));
       fields.type = { before: item.type, after: p.type };
     }
     if (p.estimatePoints !== undefined && p.estimatePoints !== item.estimatePoints) {
@@ -270,11 +279,15 @@ export async function moveItem(o: {
   prevId?: string | null;
   nextId?: string | null;
   actorUserId: string;
+  /** Moving to Done: how it was resolved (defaults to "done"). */
+  resolution?: WorkResolution;
+  /** Placement at creation (inline create into any column) isn't a transition: skip the workflow check. */
+  placement?: boolean;
 }): Promise<{ rank: string; status: WorkItemStatus; sprintId: string | null; productSlug: string; number: number }> {
   return db.transaction(async (tx) => {
     const { item, board, productSlug, activeSprint } = await itemContext(tx, o.itemId, true);
     const statusChanged = item.status !== o.status;
-    if (statusChanged && !canTransition(item.status, o.status)) throw new Error("That move isn't allowed");
+    if (statusChanged && !o.placement && !canTransition(item.status, o.status)) throw new Error(blockedReason(item.status, o.status));
 
     const ids = [o.prevId, o.nextId].filter((x): x is string => !!x && x !== item.id);
     const neighbours = ids.length
@@ -316,10 +329,14 @@ export async function moveItem(o: {
     const sprintId = statusChanged
       ? sprintForTransition({ mode: board.mode, to: o.status, currentSprintId: item.sprintId, activeSprintId: activeSprint?.id ?? null })
       : item.sprintId;
-    await tx.update(workItems).set({ status: o.status, rank, sprintId, ...stamps }).where(eq(workItems.id, item.id));
+    const resolution = o.status === "done" ? (o.resolution ?? "done") : null;
+    await tx
+      .update(workItems)
+      .set({ status: o.status, rank, sprintId, ...stamps, ...(statusChanged ? { resolution } : {}) })
+      .where(eq(workItems.id, item.id));
 
     if (statusChanged) {
-      await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "status_changed", payload: { before: item.status, after: o.status } });
+      await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "status_changed", payload: { before: item.status, after: o.status, ...(resolution ? { resolution } : {}) } });
       if (sprintId !== item.sprintId) {
         const before = item.sprintId ? await tx.query.workSprints.findFirst({ where: eq(workSprints.id, item.sprintId), columns: { id: true, name: true } }) : null;
         const after = sprintId === activeSprint?.id ? activeSprint : null;
@@ -403,7 +420,7 @@ export async function deleteItem(o: { itemId: string; actorUserId: string }): Pr
 export async function addComment(o: { itemId: string; body: string; authorUserId: string }): Promise<{ commentId: string; productSlug: string; number: number }> {
   return db.transaction(async (tx) => {
     const { item, productSlug } = await itemContext(tx, o.itemId);
-    const [c] = await tx.insert(workComments).values({ itemId: item.id, authorUserId: o.authorUserId, body: o.body }).returning({ id: workComments.id });
+    const [c] = await tx.insert(workComments).values({ itemId: item.id, authorUserId: o.authorUserId, body: commentBody(o.body) }).returning({ id: workComments.id });
     await recordEvent(tx, { itemId: item.id, actorUserId: o.authorUserId, kind: "comment_added", payload: { commentId: c.id } });
     return { commentId: c.id, productSlug, number: item.number };
   });
@@ -420,7 +437,7 @@ export async function editComment(o: { commentId: string; body: string; actorUse
   return db.transaction(async (tx) => {
     const c = await ownedComment(tx, o.commentId, o.actorUserId, o.actorIsOps);
     const { item, productSlug } = await itemContext(tx, c.itemId);
-    await tx.update(workComments).set({ body: o.body, editedAt: new Date() }).where(eq(workComments.id, c.id));
+    await tx.update(workComments).set({ body: commentBody(o.body), editedAt: new Date() }).where(eq(workComments.id, c.id));
     await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "comment_edited", payload: { commentId: c.id } });
     return { productSlug, number: item.number };
   });
@@ -608,5 +625,84 @@ export async function deleteSprint(o: { sprintId: string; actorUserId: string })
     }
     await tx.delete(workSprints).where(eq(workSprints.id, s.id));
     return { productSlug };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Rich text + attachments
+// ---------------------------------------------------------------------------
+
+/** A comment must say something (text, an image or a checkbox) once sanitised. */
+function commentBody(body: string): string {
+  const clean = normalizeRichText(body);
+  if (!clean) throw new Error("Write something first");
+  return clean;
+}
+
+/** Store a pasted/uploaded image; the type comes from its bytes. Returns the new attachment id. */
+export async function addAttachment(o: { bytes: Uint8Array; fileName: string | null; uploadedByUserId: string }): Promise<{ id: string }> {
+  const type = sniffImageType(o.bytes);
+  const problem = attachmentProblem(o.bytes.byteLength, type);
+  if (problem || !type) throw new Error(problem ?? "Unsupported file");
+  const [row] = await db
+    .insert(workAttachments)
+    .values({
+      uploadedByUserId: o.uploadedByUserId,
+      contentType: type,
+      byteSize: o.bytes.byteLength,
+      fileName: o.fileName?.slice(0, 200) ?? null,
+      data: Buffer.from(o.bytes),
+    })
+    .returning({ id: workAttachments.id });
+  return { id: row.id };
+}
+
+/** Jira's flag: mark an item as impeded (with an optional reason) or clear it. Both land in the history. */
+export async function setItemFlag(o: { itemId: string; flagged: boolean; reason?: string; actorUserId: string }): Promise<{ productSlug: string; number: number }> {
+  return db.transaction(async (tx) => {
+    const { item, productSlug } = await itemContext(tx, o.itemId);
+    const reason = o.reason?.trim() || null;
+    if (o.flagged === (item.flaggedAt != null) && (!o.flagged || reason === item.flagReason)) return { productSlug, number: item.number };
+    await tx
+      .update(workItems)
+      .set(o.flagged ? { flaggedAt: new Date(), flaggedByUserId: o.actorUserId, flagReason: reason } : { flaggedAt: null, flaggedByUserId: null, flagReason: null })
+      .where(eq(workItems.id, item.id));
+    await recordEvent(tx, {
+      itemId: item.id,
+      actorUserId: o.actorUserId,
+      kind: o.flagged ? "flag_added" : "flag_removed",
+      payload: o.flagged && reason ? { reason } : {},
+    });
+    return { productSlug, number: item.number };
+  });
+}
+
+/** Epic links: the parent must be an epic on the same board, and an epic can't have one. */
+async function assertEpicParent(tx: Tx, o: { parentId: string; boardId: string; childType: string; childId?: string }) {
+  if (o.childType === "epic") throw new Error("An epic can't belong to another epic");
+  if (o.childId && o.childId === o.parentId) throw new Error("An item can't be its own epic");
+  const parent = await tx.query.workItems.findFirst({ where: eq(workItems.id, o.parentId), columns: { id: true, number: true, title: true, type: true, boardId: true } });
+  if (!parent || parent.boardId !== o.boardId) throw new Error("That epic isn't on this board");
+  if (parent.type !== "epic") throw new Error("Only an epic can be a parent");
+  return parent;
+}
+
+const epicRef = (e: { id: string; number: number; title: string }, keyPrefix: string) => ({ id: e.id, name: `${formatKey(keyPrefix, e.number)} ${e.title}` });
+
+/** Put an item under an epic (or take it out). */
+export async function setItemParent(o: { itemId: string; parentId: string | null; actorUserId: string }): Promise<{ productSlug: string; number: number }> {
+  return db.transaction(async (tx) => {
+    const { item, board, productSlug } = await itemContext(tx, o.itemId);
+    if ((o.parentId ?? null) === item.parentId) return { productSlug, number: item.number };
+    const after = o.parentId ? await assertEpicParent(tx, { parentId: o.parentId, boardId: item.boardId, childType: item.type, childId: item.id }) : null;
+    const before = item.parentId ? await tx.query.workItems.findFirst({ where: eq(workItems.id, item.parentId), columns: { id: true, number: true, title: true } }) : null;
+    await tx.update(workItems).set({ parentId: after?.id ?? null }).where(eq(workItems.id, item.id));
+    await recordEvent(tx, {
+      itemId: item.id,
+      actorUserId: o.actorUserId,
+      kind: "parent_changed",
+      payload: { before: before ? epicRef(before, board.keyPrefix) : null, after: after ? epicRef(after, board.keyPrefix) : null },
+    });
+    return { productSlug, number: item.number };
   });
 }

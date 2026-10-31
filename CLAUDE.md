@@ -21,7 +21,8 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
 - **No internal REST.** UI uses server actions + RSC queries. Only external
   contracts get route handlers: `/api/auth/[...all]`, `/api/system/health`,
   `/api/metrics/ingest`, `/api/webhooks/stripe`, `/api/partners/*` (MHub
-  feed + Partner API v1).
+  feed + Partner API v1), and `/api/work/attachments/[id]` (images in work
+  item rich text — `<img src>` needs a URL; uploads stay a server action).
 - **Authorization**: everything goes through `src/policy/` (requireUser,
   requireOps(min), requireMembership, getTenantContext/requireTenantPage for
   client pages). Never inline role checks. Pure decision logic lives in

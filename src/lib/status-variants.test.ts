@@ -25,7 +25,8 @@ describe("status variants", () => {
   });
 
   it("covers the work area", () => {
-    expect(statusVariant("workItem", "in_progress")).toEqual({ variant: "default", label: "in progress" });
+    expect(statusVariant("workItem", "in_progress")).toEqual({ variant: "info", label: "in progress" });
+    expect(statusVariant("workItem", "in_review").variant).toBe("info");
     expect(statusVariant("workItem", "done").variant).toBe("success");
     expect(statusVariant("workType", "bug").variant).toBe("destructive");
     expect(statusVariant("workPriority", "urgent").variant).toBe("destructive");

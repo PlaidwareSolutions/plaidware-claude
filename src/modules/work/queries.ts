@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db";
 import { isoDay } from "../../lib/dates";
@@ -20,6 +20,9 @@ import {
   type WorkBoardDto,
   type WorkBoardViewDto,
   type WorkCardDto,
+  type WorkEpicRef,
+  type WorkExplorerProduct,
+  type WorkExplorerViewDto,
   type WorkItemDetailDto,
   type WorkOverviewRow,
   type WorkProductRef,
@@ -28,8 +31,10 @@ import {
   type WorkUserRef,
   type WorkViewer,
 } from "./dto";
-import { defaultKeyPrefix } from "./key-logic";
-import { workBoards, workComments, workItemEvents, workItems, workSprints } from "./schema";
+import { explorerColumns, type ExplorerFilters } from "./explorer-logic";
+import { renderRichText } from "./rich-text-sanitize";
+import { defaultKeyPrefix, formatKey } from "./key-logic";
+import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints } from "./schema";
 import { ensureBoardForProductSlug } from "./service";
 import { velocity } from "./sprint-logic";
 import { OPEN_STATUSES, STATUS_LABELS } from "./transitions";
@@ -43,6 +48,8 @@ import { OPEN_STATUSES, STATUS_LABELS } from "./transitions";
 
 const assignee = alias(user, "assignee");
 const reporter = alias(user, "reporter");
+/** The item's epic (work_items.parent_id). */
+const parentItem = alias(workItems, "parent_item");
 /** Kanban boards keep "done" for this long before it drops off the column. */
 const DONE_WINDOW_DAYS = 14;
 const WORK_ROLES = PLATFORM_ROLES.filter(roleHasWorkAccess);
@@ -66,6 +73,12 @@ const cardColumns = {
   labels: workItems.labels,
   dueOn: workItems.dueOn,
   commentCount: sql<number>`(select count(*)::int from work_comments c where c.item_id = ${workItems.id})`,
+  flaggedAt: workItems.flaggedAt,
+  flagReason: workItems.flagReason,
+  resolution: workItems.resolution,
+  epicId: parentItem.id,
+  epicNumber: parentItem.number,
+  epicTitle: parentItem.title,
   createdAt: workItems.createdAt,
   updatedAt: workItems.updatedAt,
   requesterTenantId: workItems.requesterTenantId,
@@ -86,7 +99,8 @@ function cards() {
     .from(workItems)
     .innerJoin(workBoards, eq(workItems.boardId, workBoards.id))
     .leftJoin(assignee, eq(workItems.assigneeUserId, assignee.id))
-    .leftJoin(organization, eq(workItems.requesterTenantId, organization.id));
+    .leftJoin(organization, eq(workItems.requesterTenantId, organization.id))
+    .leftJoin(parentItem, eq(workItems.parentId, parentItem.id));
 }
 
 function cardsWithProduct() {
@@ -96,7 +110,8 @@ function cardsWithProduct() {
     .innerJoin(workBoards, eq(workItems.boardId, workBoards.id))
     .innerJoin(products, eq(workBoards.productId, products.id))
     .leftJoin(assignee, eq(workItems.assigneeUserId, assignee.id))
-    .leftJoin(organization, eq(workItems.requesterTenantId, organization.id));
+    .leftJoin(organization, eq(workItems.requesterTenantId, organization.id))
+    .leftJoin(parentItem, eq(workItems.parentId, parentItem.id));
 }
 
 const rankOrder = () => [asc(workItems.rank), asc(workItems.createdAt)];
@@ -400,10 +415,11 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
     .leftJoin(organization, eq(workItems.requesterTenantId, organization.id))
     .leftJoin(reporter, eq(workItems.reporterUserId, reporter.id))
     .leftJoin(workSprints, eq(workItems.sprintId, workSprints.id))
+    .leftJoin(parentItem, eq(workItems.parentId, parentItem.id))
     .where(and(eq(workItems.boardId, boardId), eq(workItems.number, number)))
     .limit(1);
   if (!row) return null;
-  const [comments, events, assignees, sprints] = await Promise.all([
+  const [comments, events, assignees, sprints, epics, children] = await Promise.all([
     db
       .select({ id: workComments.id, body: workComments.body, authorId: user.id, authorName: user.name, createdAt: workComments.createdAt, editedAt: workComments.editedAt })
       .from(workComments)
@@ -423,10 +439,17 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
       .from(workSprints)
       .where(and(eq(workSprints.boardId, boardId), inArray(workSprints.status, ["planned", "active"])))
       .orderBy(asc(workSprints.number)),
+    db
+      .select({ id: workItems.id, number: workItems.number, title: workItems.title })
+      .from(workItems)
+      .where(and(eq(workItems.boardId, boardId), eq(workItems.type, "epic"), ne(workItems.status, "canceled")))
+      .orderBy(asc(workItems.number)),
+    row.type === "epic" ? cards().where(eq(workItems.parentId, row.id)).orderBy(asc(workItems.status), ...rankOrder()) : Promise.resolve([]),
   ]);
   return {
     ...toCardDto(row, viewer),
-    description: row.description,
+    // Sanitised again on the way out: the client renders this HTML as-is.
+    description: renderRichText(row.description),
     reporter: row.reporterId ? { id: row.reporterId, name: row.reporterName ?? "" } : null,
     startedAt: row.startedAt?.toISOString() ?? null,
     completedAt: row.completedAt?.toISOString() ?? null,
@@ -434,10 +457,12 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
       row.sprintId && row.sprintName && row.sprintNumber != null && row.sprintStatus
         ? { id: row.sprintId, number: row.sprintNumber, name: row.sprintName, status: row.sprintStatus }
         : null,
-    comments: comments.map((c) => toCommentDto(c, viewer)),
+    comments: comments.map((c) => toCommentDto({ ...c, body: renderRichText(c.body) }, viewer)),
     events: visibleEvents(events, viewer).map(toEventDto),
     assignees,
     sprints,
+    epics: epics.map((e) => ({ id: e.id, key: formatKey(row.keyPrefix, e.number), title: e.title })),
+    children: children.map((c) => toCardDto(c, viewer)),
   };
 }
 
@@ -497,7 +522,139 @@ export async function getSprintReport(sprintId: string, viewer: WorkViewer, now 
 // My work
 // ---------------------------------------------------------------------------
 
-export type MyWorkGroup = { product: WorkProductRef; keyPrefix: string; cards: WorkCardDto[] };
+// ---------------------------------------------------------------------------
+// All work (the cross-product board and list)
+// ---------------------------------------------------------------------------
+
+const KEY_SEARCH = /^([A-Za-z][A-Za-z0-9]{1,5})-(\d{1,9})$/;
+
+/**
+ * Client filter that can't leak: ops pick any workspace; a developer's picks
+ * are cut down to their own workspaces, and their "none" means "no client
+ * I can see" — so a filter never confirms that some other client asked.
+ */
+function clientCond(picked: string[], viewer: WorkViewer) {
+  const wantsNone = picked.includes("none");
+  const ids = picked.filter((x) => x !== "none" && (viewer.isOps || viewer.tenantIds.includes(x)));
+  const parts = [];
+  if (ids.length) parts.push(inArray(workItems.requesterTenantId, ids));
+  if (wantsNone) {
+    parts.push(
+      viewer.isOps || viewer.tenantIds.length === 0
+        ? isNull(workItems.requesterTenantId)
+        : or(isNull(workItems.requesterTenantId), notInArray(workItems.requesterTenantId, [...viewer.tenantIds]))!,
+    );
+  }
+  return parts.length ? or(...parts)! : sql`false`;
+}
+
+function explorerConds(f: ExplorerFilters, viewer: WorkViewer, now: Date) {
+  const conds = [eq(products.isActive, true)];
+  if (f.q) {
+    const key = KEY_SEARCH.exec(f.q);
+    const n = Number(f.q);
+    const byTitle = ilike(workItems.title, `%${f.q}%`);
+    if (key) conds.push(or(byTitle, and(eq(workBoards.keyPrefix, key[1].toUpperCase()), eq(workItems.number, Number(key[2]))))!);
+    else conds.push(Number.isInteger(n) && n > 0 ? or(byTitle, eq(workItems.number, n))! : byTitle);
+  }
+  if (f.product.length) conds.push(inArray(products.slug, f.product));
+  if (f.client.length) conds.push(clientCond(f.client, viewer));
+  if (f.assignee.length) {
+    const ids = f.assignee.map((a) => (a === "me" ? viewer.userId : a)).filter((a) => a !== "unassigned");
+    const parts = [];
+    if (ids.length) parts.push(inArray(workItems.assigneeUserId, ids));
+    if (f.assignee.includes("unassigned")) parts.push(isNull(workItems.assigneeUserId));
+    conds.push(or(...parts)!);
+  }
+  if (f.type.length) conds.push(inArray(workItems.type, f.type));
+  if (f.epic.length) {
+    const ids = f.epic.filter((e) => e !== "none");
+    const parts = [];
+    if (ids.length) parts.push(inArray(workItems.parentId, ids));
+    if (f.epic.includes("none")) parts.push(isNull(workItems.parentId));
+    conds.push(or(...parts)!);
+  }
+  if (f.priority.length) conds.push(inArray(workItems.priority, f.priority));
+  if (f.label.length) conds.push(or(...f.label.map((l) => sql`${workItems.labels} @> ${JSON.stringify([l])}::jsonb`))!);
+  if (f.quick.includes("mine")) conds.push(eq(workItems.assigneeUserId, viewer.userId));
+  if (f.quick.includes("recent")) conds.push(gte(workItems.updatedAt, new Date(now.getTime() - 7 * 86_400_000)));
+  if (f.quick.includes("overdue")) conds.push(and(lt(workItems.dueOn, isoDay(now)), notInArray(workItems.status, ["done", "canceled"]))!);
+  if (f.quick.includes("flagged")) conds.push(isNotNull(workItems.flaggedAt));
+  if (f.quick.includes("requests")) conds.push(eq(workItems.source, "client_request"));
+  return conds;
+}
+
+/** Products with a board, lazily creating boards so every active product can take a new item. */
+async function explorerProducts(): Promise<WorkExplorerProduct[]> {
+  const list = async () =>
+    db
+      .select({ product: productColumns, board: { id: workBoards.id, keyPrefix: workBoards.keyPrefix, mode: workBoards.mode } })
+      .from(products)
+      .leftJoin(workBoards, eq(workBoards.productId, products.id))
+      .where(eq(products.isActive, true))
+      .orderBy(asc(products.sortOrder), asc(products.name));
+  let rows = await list();
+  const missing = rows.filter((r) => !r.board);
+  if (missing.length) {
+    for (const r of missing) await ensureBoardForProductSlug(r.product.slug);
+    rows = await list();
+  }
+  return rows.filter((r) => r.board).map((r) => ({ ...r.product, boardId: r.board!.id, keyPrefix: r.board!.keyPrefix, mode: r.board!.mode }));
+}
+
+export async function getExplorerView(
+  viewer: WorkViewer,
+  f: ExplorerFilters,
+  o: { now?: Date; /** A sprints-mode company board: only this sprint's cards on the board view (null = no active sprint, no cards). */ sprintId?: string | null } = {},
+): Promise<WorkExplorerViewDto> {
+  const now = o.now ?? new Date();
+  const conds = explorerConds(f, viewer, now);
+  if (f.view === "board" && o.sprintId !== undefined) conds.push(o.sprintId ? eq(workItems.sprintId, o.sprintId) : sql`false`);
+  if (f.view === "board") {
+    // Epics group work; like Jira they live in the list/backlog, not as cards on the board.
+    conds.push(ne(workItems.type, "epic"));
+    const since = new Date(now.getTime() - DONE_WINDOW_DAYS * 86_400_000);
+    conds.push(inArray(workItems.status, explorerColumns(f, { backlog: o.sprintId === undefined })), or(ne(workItems.status, "done"), gte(workItems.completedAt, since))!);
+  } else {
+    conds.push(f.status.length ? inArray(workItems.status, f.status) : ne(workItems.status, "canceled"));
+  }
+  const [rows, productList, assignees, labelRows, clientRows, epicRows] = await Promise.all([
+    cardsWithProduct()
+      .where(and(...conds))
+      .orderBy(asc(products.sortOrder), asc(products.name), ...rankOrder())
+      .limit(1000),
+    explorerProducts(),
+    listWorkAssignees(),
+    db.execute<{ label: string }>(sql`select distinct jsonb_array_elements_text(labels) as label from work_items order by 1`),
+    viewer.isOps
+      ? db
+          .selectDistinct({ id: organization.id, name: organization.name })
+          .from(workItems)
+          .innerJoin(organization, eq(workItems.requesterTenantId, organization.id))
+          .orderBy(asc(organization.name))
+      : viewer.tenantIds.length
+        ? db.select({ id: organization.id, name: organization.name }).from(organization).where(inArray(organization.id, [...viewer.tenantIds])).orderBy(asc(organization.name))
+        : Promise.resolve([]),
+    db
+      .select({ id: workItems.id, number: workItems.number, title: workItems.title, keyPrefix: workBoards.keyPrefix, productSlug: products.slug })
+      .from(workItems)
+      .innerJoin(workBoards, eq(workItems.boardId, workBoards.id))
+      .innerJoin(products, eq(workBoards.productId, products.id))
+      .where(and(eq(workItems.type, "epic"), ne(workItems.status, "canceled"), eq(products.isActive, true), ...(f.product.length ? [inArray(products.slug, f.product)] : [])))
+      .orderBy(asc(products.sortOrder), asc(workItems.number)),
+  ]);
+  return {
+    cards: rows.map((r) => ({ ...toCardDto(r, viewer), product: r.product })),
+    products: productList,
+    epics: epicRows.map((e) => ({ id: e.id, key: formatKey(e.keyPrefix, e.number), title: e.title, productSlug: e.productSlug })),
+    clients: clientRows,
+    assignees,
+    labels: labelRows.rows.map((r) => r.label),
+    doneWindowDays: DONE_WINDOW_DAYS,
+  };
+}
+
+export type MyWorkGroup ={ product: WorkProductRef; keyPrefix: string; cards: WorkCardDto[] };
 
 export async function listMyWork(viewer: WorkViewer): Promise<MyWorkGroup[]> {
   const rows = await cardsWithProduct()
@@ -691,4 +848,30 @@ export async function getClientWorkspace(tenantId: string, viewer: WorkViewer): 
     people: people.map((p) => ({ ...p, isViewer: p.userId === viewer.userId })),
     items: rows.map((r) => ({ ...toCardDto(r, viewer), product: r.product })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/** An uploaded image's bytes, for the attachment route (which checks work access first). */
+export async function getAttachment(id: string): Promise<{ contentType: string; data: Buffer; byteSize: number } | null> {
+  if (!/^[0-9a-f-]{36}$/.test(id)) return null;
+  const [row] = await db
+    .select({ contentType: workAttachments.contentType, data: workAttachments.data, byteSize: workAttachments.byteSize })
+    .from(workAttachments)
+    .where(eq(workAttachments.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
+/** A board's open epics, for the Create dialog's Epic picker. */
+export async function listBoardEpics(boardId: string): Promise<WorkEpicRef[]> {
+  const rows = await db
+    .select({ id: workItems.id, number: workItems.number, title: workItems.title, keyPrefix: workBoards.keyPrefix })
+    .from(workItems)
+    .innerJoin(workBoards, eq(workItems.boardId, workBoards.id))
+    .where(and(eq(workItems.boardId, boardId), eq(workItems.type, "epic"), notInArray(workItems.status, ["done", "canceled"])))
+    .orderBy(asc(workItems.number));
+  return rows.map((r) => ({ id: r.id, key: formatKey(r.keyPrefix, r.number), title: r.title }));
 }

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { isNavActive, OPS_NAV, type NavItem, type OpsNavCounts } from "@/components/ops-nav";
 import { WORK_NAV, type WorkBoardNav, type WorkNavCounts } from "@/components/work-nav";
+import { WorkProjectSwitcher } from "@/components/work-project-switcher";
 import { UserAvatar } from "@/components/user-avatar";
 import { AUTH, OPS, TENANT, WORK } from "@/lib/routes";
 import { roleHasCapability } from "@/policy/capabilities";
@@ -68,7 +69,7 @@ export function AppShell({
   tenants: TenantSummary[];
   activeTenantId: string | null;
   counts?: { tenantUnread: number; tenantTeam?: number; ops?: OpsNavCounts; work?: WorkNavCounts };
-  /** Product boards listed under the work nav (developers and ops). */
+  /** Product boards for the work sidebar's project switcher (developers and ops). */
   workBoards?: WorkBoardNav[];
   children: React.ReactNode;
 }) {
@@ -108,6 +109,9 @@ export function AppShell({
 
   const sidebar = (
     <nav className="flex flex-col gap-1 p-3">
+      {workNav && workBoards && workBoards.length > 0 && (
+        <WorkProjectSwitcher boards={workBoards} pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+      )}
       {nav.map((item) => {
         const current = isNavActive(item.href, pathname, item.exact);
         const count =
@@ -140,34 +144,6 @@ export function AppShell({
           </Link>
         );
       })}
-      {workNav && workBoards && workBoards.length > 0 && (
-        <>
-          <div className="mt-4 border-t pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3">
-            Boards
-          </div>
-          {workBoards.map((b) => {
-            const href = WORK.board(b.slug);
-            const current = isNavActive(href, pathname);
-            return (
-              <Link
-                key={b.slug}
-                href={href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
-                  current
-                    ? "bg-primary/10 font-medium text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                )}
-              >
-                <span className="size-2.5 shrink-0 rounded-full" style={{ background: b.color ?? "var(--primary)" }} />
-                <span className="truncate">{b.name}</span>
-                <span className="ml-auto font-mono text-[10px] text-muted-foreground">{b.keyPrefix}</span>
-              </Link>
-            );
-          })}
-        </>
-      )}
       {user.isOps && (inWork || !inOps || tenants.length > 0) && (
         <>
           <div className="mt-4 border-t pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3">
@@ -188,7 +164,7 @@ export function AppShell({
 
   return (
     <div className="flex min-h-screen w-full">
-      <aside className="hidden w-56 shrink-0 border-r bg-card lg:block">
+      <aside data-shell="sidebar" className="hidden w-56 shrink-0 border-r bg-card lg:block">
         <div className="flex h-14 items-center gap-2 border-b px-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/favicon-transparent.svg" alt="" className="size-6" />
@@ -209,7 +185,7 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-2 border-b bg-card px-3 sm:px-4">
+        <header data-shell="topbar" className="flex h-14 items-center gap-2 border-b bg-card px-3 sm:px-4">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Menu">

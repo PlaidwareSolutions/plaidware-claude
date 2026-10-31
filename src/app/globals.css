@@ -36,6 +36,10 @@
   --coral: #cc4520;
   --success: #067a52;
   --warning: #925e06;
+  /* work boards (Jira-style): "in progress" blue, the column surface behind cards, card elevation */
+  --info: #0c66e4;
+  --board-column: #eceef4;
+  --board-card-shadow: 0 1px 1px #091e4240, 0 0 1px #091e424f;
 }
 
 .dark {
@@ -62,6 +66,9 @@
   --coral: #f0663f;
   --success: #34d399;
   --warning: #fbbf24;
+  --info: #579dff;
+  --board-column: #0a1122;
+  --board-card-shadow: 0 0 0 1px #ffffff12, 0 1px 1px #00000080;
 }
 
 @theme inline {
@@ -88,6 +95,9 @@
   --color-coral: var(--coral);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-board-column: var(--board-column);
+  --shadow-board-card: var(--board-card-shadow);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -104,5 +114,59 @@
   body {
     background: var(--background);
     color: var(--foreground);
+  }
+}
+
+/* Work boards' full-screen mode (Jira's expand): the board takes the whole screen. */
+html[data-work-fullscreen] [data-shell="sidebar"],
+html[data-work-fullscreen] [data-shell="topbar"] {
+  display: none;
+}
+
+/* Work item rich text: the editor (ProseMirror) and the read view share these. */
+@layer components {
+  .work-rich-text {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--foreground);
+    overflow-wrap: anywhere;
+  }
+  .work-rich-text > * + * { margin-top: 0.6em; }
+  .work-rich-text h1 { font-size: 1.5rem; font-weight: 600; line-height: 1.25; color: var(--heading); margin-top: 1.1em; }
+  .work-rich-text h2 { font-size: 1.25rem; font-weight: 600; line-height: 1.3; color: var(--heading); margin-top: 1em; }
+  .work-rich-text h3 { font-size: 1.05rem; font-weight: 600; line-height: 1.35; color: var(--heading); margin-top: 0.9em; }
+  .work-rich-text > :first-child { margin-top: 0; }
+  .work-rich-text strong { font-weight: 650; color: var(--heading); }
+  .work-rich-text a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
+  .work-rich-text a:hover { text-decoration-thickness: 2px; }
+  .work-rich-text ul { list-style: disc; padding-left: 1.5rem; }
+  .work-rich-text ol { list-style: decimal; padding-left: 1.5rem; }
+  .work-rich-text li > p { margin: 0; }
+  .work-rich-text li + li { margin-top: 0.2em; }
+  .work-rich-text blockquote { border-left: 3px solid var(--border); padding-left: 0.9rem; color: var(--muted-foreground); }
+  .work-rich-text code { font-family: var(--font-mono); font-size: 0.85em; background: var(--muted); border-radius: 3px; padding: 0.1em 0.35em; }
+  .work-rich-text pre { font-family: var(--font-mono); font-size: 0.8125rem; background: var(--muted); border-radius: 4px; padding: 0.75rem 1rem; overflow-x: auto; }
+  .work-rich-text pre code { background: none; padding: 0; font-size: inherit; }
+  .work-rich-text hr { border: 0; border-top: 2px solid var(--border); margin: 1em 0; }
+  .work-rich-text img { max-width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--border); cursor: zoom-in; }
+  .work-rich-text img.ProseMirror-selectednode { outline: 2px solid var(--info); outline-offset: 2px; }
+  /* While writing: comment boxes show small previews (Jira), descriptions a capped full preview. */
+  .work-media-thumb img { display: inline-block; max-height: 10rem; max-width: min(100%, 20rem); width: auto; object-fit: cover; margin-right: 0.5rem; vertical-align: top; cursor: default; }
+  .work-media-large img { max-height: 24rem; width: auto; cursor: default; }
+  /* Saved text shows images as thumbnails (Jira's media cards); click opens the preview. */
+  .work-rich-view img { display: inline-block; max-height: 10rem; max-width: min(100%, 20rem); width: auto; object-fit: cover; margin-right: 0.5rem; vertical-align: top; transition: box-shadow 0.15s; }
+  .work-rich-view img:hover { box-shadow: 0 0 0 2px var(--info); }
+  .work-rich-text ul[data-type="taskList"] { list-style: none; padding-left: 0.25rem; }
+  .work-rich-text ul[data-type="taskList"] > li { display: flex; align-items: flex-start; gap: 0.5rem; }
+  .work-rich-text ul[data-type="taskList"] > li > label { margin-top: 0.2rem; flex: none; user-select: none; }
+  .work-rich-text ul[data-type="taskList"] > li > label input { width: 0.95rem; height: 0.95rem; accent-color: var(--info); }
+  .work-rich-text ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
+  .work-rich-text ul[data-type="taskList"] > li[data-checked="true"] > div { color: var(--muted-foreground); text-decoration: line-through; }
+  .work-rich-text.ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: var(--muted-foreground);
   }
 }

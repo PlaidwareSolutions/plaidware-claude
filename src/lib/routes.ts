@@ -60,6 +60,8 @@ export const TENANT = {
 export const WORK = {
   home: "/work",
   my: "/work/my",
+  /** The cross-product board and list (every company, filterable). */
+  all: "/work/all",
   /** Developers only: the client workspaces they've been added to (ops use /ops/clients). */
   clients: "/work/clients",
   client: (id: string) => `/work/clients/${id}`,
@@ -70,6 +72,8 @@ export const WORK = {
   sprint: (slug: string, id: string) => `/work/${slug}/sprints/${id}`,
   item: (slug: string, number: number) => `/work/${slug}/items/${number}`,
   settings: (slug: string) => `/work/${slug}/settings`,
+  /** An image in a description/comment (served by the attachment route handler). */
+  attachment: (id: string) => `/api/work/attachments/${id}`,
 } as const;
 
 export const AUTH = {

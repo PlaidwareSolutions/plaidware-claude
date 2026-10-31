@@ -14,6 +14,9 @@ import {
   createSprintSchema,
   editCommentSchema,
   moveItemSchema,
+  quickCreateItemSchema,
+  setItemFlagSchema,
+  setItemParentSchema,
   setItemRequesterSchema,
   setItemSprintSchema,
   updateItemSchema,
@@ -23,11 +26,14 @@ import {
   type CreateItemInput,
   type CreateSprintInput,
   type MoveItemInput,
+  type QuickCreateItemInput,
   type UpdateItemInput,
   type UpdateSprintInput,
   type WorkItemStatus,
 } from "./contracts";
 import * as svc from "./service";
+import { ATTACHMENT_MAX_BYTES } from "./attachment-logic";
+import { isRichTextEmpty } from "./rich-text";
 
 /**
  * Policy → contract → service → revalidate → refresh(). The server-side
@@ -69,6 +75,53 @@ export async function createItemAction(
   }
 }
 
+export async function quickCreateItemAction(
+  input: QuickCreateItemInput & { requesterTenantId?: string | null },
+): Promise<{ ok: true; id: string; number: number; key: string; productSlug: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireWork();
+    const p = quickCreateItemSchema.parse(input);
+    const ensured = await svc.ensureBoardForProductSlug(p.productSlug);
+    if (!ensured) throw new Error("Product not found");
+    const requesterTenantId = isOps(session) ? (input.requesterTenantId ?? null) : null;
+    const r = await svc.createItem({
+      ...createItemSchema.parse({
+        boardId: ensured.board.id,
+        title: p.title,
+        type: p.type,
+        priority: p.priority,
+        status: p.status === "backlog" ? "backlog" : "todo",
+        assigneeUserId: p.assigneeUserId ?? null,
+        parentId: p.parentId ?? null,
+        source: requesterTenantId ? "client_request" : "internal",
+      }),
+      reporterUserId: session.user.id,
+      requesterTenantId,
+    });
+    // Created in to-do, then moved: the move is what stamps started/completed and the sprint.
+    if (p.status !== "backlog" && p.status !== "todo") await svc.moveItem({ itemId: r.id, status: p.status, actorUserId: session.user.id, placement: true });
+    done(r.productSlug);
+    if (requesterTenantId) revalidateClientViews(requesterTenantId);
+    return { ok: true, id: r.id, number: r.number, key: r.key, productSlug: r.productSlug };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** An image pasted, dropped or picked in the editor; returns the URL the editor inserts. */
+export async function uploadWorkImageAction(form: FormData): Promise<{ ok: true; id: string; url: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireWork();
+    const file = form.get("file");
+    if (!(file instanceof File)) throw new Error("No image received");
+    if (file.size > ATTACHMENT_MAX_BYTES) throw new Error(`Images can be up to ${ATTACHMENT_MAX_BYTES / 1024 / 1024} MB`);
+    const r = await svc.addAttachment({ bytes: new Uint8Array(await file.arrayBuffer()), fileName: file.name || null, uploadedByUserId: session.user.id });
+    return { ok: true, id: r.id, url: WORK.attachment(r.id) };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 export async function updateItemAction(input: UpdateItemInput): Promise<ActionResult> {
   try {
     const session = await requireWork();
@@ -86,8 +139,10 @@ export async function moveItemAction(
 ): Promise<{ ok: true; rank: string; status: WorkItemStatus; sprintId: string | null } | { ok: false; error: string }> {
   try {
     const session = await requireWork();
-    const p = moveItemSchema.parse(input);
+    const { comment, ...p } = moveItemSchema.parse(input);
     const r = await svc.moveItem({ ...p, actorUserId: session.user.id });
+    // The transition screen's comment (moving to Done) lands as an ordinary comment.
+    if (comment && !isRichTextEmpty(comment)) await svc.addComment({ itemId: p.itemId, body: comment, authorUserId: session.user.id });
     done(r.productSlug, r.number);
     return { ok: true, rank: r.rank, status: r.status, sprintId: r.sprintId };
   } catch (e) {
@@ -120,6 +175,30 @@ export async function setItemSprintAction(input: z.input<typeof setItemSprintSch
 }
 
 /** Ops (any level): which client asked for this item. */
+export async function setItemParentAction(input: z.input<typeof setItemParentSchema>): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const p = setItemParentSchema.parse(input);
+    const r = await svc.setItemParent({ ...p, actorUserId: session.user.id });
+    done(r.productSlug, r.number);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function setItemFlagAction(input: z.input<typeof setItemFlagSchema>): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const p = setItemFlagSchema.parse(input);
+    const r = await svc.setItemFlag({ ...p, actorUserId: session.user.id });
+    done(r.productSlug, r.number);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 export async function setItemRequesterAction(input: z.input<typeof setItemRequesterSchema>): Promise<ActionResult> {
   try {
     const session = await requireOps("support");

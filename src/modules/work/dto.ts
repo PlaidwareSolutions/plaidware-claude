@@ -5,6 +5,7 @@ import type {
   WorkItemSource,
   WorkItemStatus,
   WorkItemType,
+  WorkResolution,
   WorkSprintStatus,
 } from "./contracts";
 import { OPS_ONLY_EVENT_KINDS } from "./event-kinds";
@@ -31,6 +32,8 @@ export function canSeeTenant(viewer: WorkViewer, tenantId: string | null | undef
   return viewer.isOps || (!!tenantId && viewer.tenantIds.includes(tenantId));
 }
 export type WorkUserRef = { id: string; name: string };
+/** An epic as other items point at it. */
+export type WorkEpicRef = { id: string; key: string; title: string };
 
 export type WorkCardDto = {
   id: string;
@@ -49,6 +52,12 @@ export type WorkCardDto = {
   labels: string[];
   dueOn: string | null;
   commentCount: number;
+  /** Jira's flag: set when the item is impeded (reason optional). */
+  flag: { at: string; reason: string | null } | null;
+  /** How a Done item was resolved; null while open. */
+  resolution: WorkResolution | null;
+  /** The epic it belongs to (Jira's parent), same board. */
+  epic: WorkEpicRef | null;
   createdAt: string;
   updatedAt: string;
   /**
@@ -75,6 +84,12 @@ export type CardRow = {
   labels: string[];
   dueOn: string | null;
   commentCount: number;
+  flaggedAt: Date | null;
+  flagReason: string | null;
+  resolution: WorkResolution | null;
+  epicId: string | null;
+  epicNumber: number | null;
+  epicTitle: string | null;
   createdAt: Date;
   updatedAt: Date;
   requesterTenantId: string | null;
@@ -98,6 +113,9 @@ export function toCardDto(row: CardRow, viewer: WorkViewer): WorkCardDto {
     labels: row.labels,
     dueOn: row.dueOn,
     commentCount: row.commentCount,
+    flag: row.flaggedAt ? { at: row.flaggedAt.toISOString(), reason: row.flagReason } : null,
+    resolution: row.resolution,
+    epic: row.epicId && row.epicNumber != null ? { id: row.epicId, key: formatKey(row.keyPrefix, row.epicNumber), title: row.epicTitle ?? "" } : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -279,6 +297,23 @@ export type WorkBoardViewDto = {
   labels: string[];
 };
 
+/** A product on the cross-product board: filter option, lane, and where "Create" puts an item. */
+export type WorkExplorerProduct = WorkProductRef & { boardId: string; keyPrefix: string; mode: WorkBoardMode };
+
+export type WorkExplorerViewDto = {
+  /** Every card matching the filters, in product → rank order. */
+  cards: (WorkCardDto & { product: WorkProductRef })[];
+  products: WorkExplorerProduct[];
+  /** Epics of the companies in scope (the Epic filter and lanes). */
+  epics: (WorkEpicRef & { productSlug: string })[];
+  /** Ops: clients that have items; a developer: their own workspaces. */
+  clients: { id: string; name: string }[];
+  assignees: WorkUserRef[];
+  labels: string[];
+  /** Board view only: done older than this many days has dropped off. */
+  doneWindowDays: number;
+};
+
 export type WorkBacklogViewDto = {
   plannedSprints: { sprint: WorkSprintDto; cards: WorkCardDto[] }[];
   unscheduled: WorkCardDto[];
@@ -298,6 +333,10 @@ export type WorkItemDetailDto = WorkCardDto & {
   events: WorkEventDto[];
   assignees: WorkUserRef[];
   sprints: Pick<WorkSprintDto, "id" | "number" | "name" | "status">[];
+  /** The board's epics (the Parent picker). */
+  epics: WorkEpicRef[];
+  /** For an epic: its child items, in status order. */
+  children: WorkCardDto[];
 };
 
 export type WorkOverviewRow = {

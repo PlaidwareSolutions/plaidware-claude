@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
+  customType,
   date,
   index,
   integer,
@@ -17,6 +19,7 @@ import {
   WORK_BOARD_MODES,
   WORK_ITEM_PRIORITIES,
   WORK_ITEM_SOURCES,
+  WORK_RESOLUTIONS,
   WORK_ITEM_STATUSES,
   WORK_ITEM_TYPES,
   WORK_SPRINT_STATUSES,
@@ -35,6 +38,7 @@ export const workItemType = pgEnum("work_item_type", WORK_ITEM_TYPES);
 export const workItemStatus = pgEnum("work_item_status", WORK_ITEM_STATUSES);
 export const workItemPriority = pgEnum("work_item_priority", WORK_ITEM_PRIORITIES);
 export const workItemSource = pgEnum("work_item_source", WORK_ITEM_SOURCES);
+export const workResolution = pgEnum("work_resolution", WORK_RESOLUTIONS);
 export const workSprintStatus = pgEnum("work_sprint_status", WORK_SPRINT_STATUSES);
 
 /** One board per product; created lazily on first visit (service.ensureBoard). */
@@ -117,6 +121,14 @@ export const workItems = pgTable(
     reporterUserId: text("reporter_user_id").references(() => user.id, { onDelete: "set null" }),
     sprintId: uuid("sprint_id").references(() => workSprints.id, { onDelete: "set null" }),
     source: workItemSource("source").notNull().default("internal"),
+    /** The epic this item belongs to (an item of type "epic" on the same board). */
+    parentId: uuid("parent_id").references((): AnyPgColumn => workItems.id, { onDelete: "set null" }),
+    /** Set on the move to Done (transition screen), cleared when reopened. */
+    resolution: workResolution("resolution"),
+    /** Jira's flag (impediment); the reason is optional. */
+    flaggedAt: timestamp("flagged_at"),
+    flaggedByUserId: text("flagged_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    flagReason: text("flag_reason"),
     /** OPS-ONLY. Never leaves queries.ts for a developer viewer (dto.ts is the single gate). */
     requesterTenantId: text("requester_tenant_id").references(() => organization.id, { onDelete: "set null" }),
     labels: jsonb("labels").$type<string[]>().notNull().default([]),
@@ -135,6 +147,7 @@ export const workItems = pgTable(
     index("work_items_assignee_status_idx").on(t.assigneeUserId, t.status),
     index("work_items_sprint_idx").on(t.sprintId),
     index("work_items_requester_idx").on(t.requesterTenantId),
+    index("work_items_parent_idx").on(t.parentId),
   ],
 );
 
@@ -167,4 +180,26 @@ export const workItemEvents = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("work_item_events_item_time_idx").on(t.itemId, t.createdAt)],
+);
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+/**
+ * Images pasted or uploaded into descriptions and comments, served by
+ * /api/work/attachments/[id] to work-area users only. Bytes live in Postgres
+ * (small screenshots; the upload action caps size and checks the file
+ * signature). Not tied to an item: an image can be added before the item exists.
+ */
+export const workAttachments = pgTable(
+  "work_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    fileName: text("file_name"),
+    data: bytea("data").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("work_attachments_uploader_idx").on(t.uploadedByUserId)],
 );

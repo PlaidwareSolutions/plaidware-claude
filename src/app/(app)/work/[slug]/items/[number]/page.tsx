@@ -17,7 +17,7 @@ export default async function ItemPage({ params }: { params: Params }) {
   const { slug, number } = await params;
   const n = Number(number);
   if (!Number.isInteger(n) || n < 1) notFound();
-  const { board, viewer, isOps, canManage } = await loadBoard(slug);
+  const { board, viewer, isOps, canManage, session } = await loadBoard(slug);
   if (!board) notFound();
   const [item, tenants] = await Promise.all([getItem(board.id, n, viewer), isOps ? listAllTenants() : Promise.resolve([])]);
   if (!item) notFound();
@@ -29,6 +29,7 @@ export default async function ItemPage({ params }: { params: Params }) {
       canManage={canManage}
       canLinkClient={isOps}
       tenants={tenants.map((t) => ({ id: t.id, name: t.name }))}
+      viewer={{ id: session.user.id, name: session.user.name }}
     />
   );
 }

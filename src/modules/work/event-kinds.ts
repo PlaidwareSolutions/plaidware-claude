@@ -1,5 +1,5 @@
-import { STATUS_LABELS } from "./transitions";
-import type { WorkItemStatus } from "./contracts";
+import { RESOLUTION_LABELS, STATUS_LABELS } from "./transitions";
+import type { WorkItemStatus, WorkResolution } from "./contracts";
 
 /**
  * Every work-item event `kind` the service writes, with the label and group
@@ -16,6 +16,9 @@ const KINDS: Record<string, { label: string; group: WorkEventGroup }> = {
   assignee_changed: { label: "Assignee changed", group: "people" },
   sprint_changed: { label: "Sprint changed", group: "planning" },
   requester_changed: { label: "Requesting client changed", group: "lifecycle" },
+  flag_added: { label: "Flag added", group: "flow" },
+  flag_removed: { label: "Flag removed", group: "flow" },
+  parent_changed: { label: "Epic changed", group: "planning" },
   comment_added: { label: "Commented", group: "discussion" },
   comment_edited: { label: "Comment edited", group: "discussion" },
   comment_deleted: { label: "Comment deleted", group: "discussion" },
@@ -58,7 +61,11 @@ export function describeWorkEvent(kind: string, payload: Record<string, unknown>
       return fields.length ? fields.join(", ") : null;
     }
     case "status_changed":
-      return `${statusLabel(payload.before)} → ${statusLabel(payload.after)}${reason}`;
+      return `${statusLabel(payload.before)} → ${statusLabel(payload.after)}${str(payload.resolution) ? ` (${RESOLUTION_LABELS[str(payload.resolution) as WorkResolution] ?? str(payload.resolution)})` : ""}${reason}`;
+    case "parent_changed":
+      return `${ref(payload.before) ?? "no epic"} → ${ref(payload.after) ?? "no epic"}`;
+    case "flag_added":
+      return str(payload.reason);
     case "priority_changed":
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
     case "assignee_changed":
