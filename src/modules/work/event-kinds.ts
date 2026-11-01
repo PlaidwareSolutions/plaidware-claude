@@ -23,6 +23,11 @@ const KINDS: Record<string, { label: string; group: WorkEventGroup }> = {
   mentioned: { label: "Mentioned people", group: "discussion" },
   comment_edited: { label: "Comment edited", group: "discussion" },
   comment_deleted: { label: "Comment deleted", group: "discussion" },
+  link_added: { label: "Linked", group: "planning" },
+  link_removed: { label: "Link removed", group: "planning" },
+  item_moved: { label: "Moved", group: "lifecycle" },
+  attachment_added: { label: "Attached a file", group: "discussion" },
+  attachment_removed: { label: "Removed a file", group: "discussion" },
 };
 
 /** Events that name a client; queries drop them for developers. item_created never carries the requester. */
@@ -79,6 +84,16 @@ export function describeWorkEvent(kind: string, payload: Record<string, unknown>
       return `${ref(payload.before) ?? "no sprint"} → ${ref(payload.after) ?? "no sprint"}${reason}`;
     case "requester_changed":
       return `${ref(payload.before) ?? "none"} → ${ref(payload.after) ?? "none"}`;
+    case "link_added":
+    case "link_removed":
+      return [str(payload.phrase), ref(payload.other)].filter(Boolean).join(" ") || null;
+    case "item_moved": {
+      const cleared = [payload.clearedSprint ? "sprint" : null, payload.clearedEpic ? "epic" : null].filter(Boolean);
+      return `${str(payload.from) ?? "?"} → ${str(payload.to) ?? "?"}${cleared.length ? ` · ${cleared.join(" and ")} cleared` : ""}`;
+    }
+    case "attachment_added":
+    case "attachment_removed":
+      return str(payload.fileName);
     default:
       return null;
   }

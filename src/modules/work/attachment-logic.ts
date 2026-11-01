@@ -25,3 +25,70 @@ export function attachmentProblem(size: number, type: AttachmentType | null): st
   if (!type) return "Only PNG, JPEG, GIF or WebP images can be added";
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Files in an item's Attachments section (Jira's Attach)
+// ---------------------------------------------------------------------------
+
+export const FILE_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Accepted extensions → the Content-Type we store. The type comes from this
+ * table, never the browser; images are still checked by their bytes. Nothing
+ * here is served inline except those images (the route sends the rest as a
+ * download), so a file can't run in the app's origin.
+ */
+export const FILE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  pdf: "application/pdf",
+  txt: "text/plain",
+  log: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  xml: "application/xml",
+  zip: "application/zip",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+};
+
+/** The `accept` attribute for the file picker. */
+export const FILE_ACCEPT = Object.keys(FILE_TYPES).map((e) => `.${e}`).join(",");
+
+export function fileExtension(name: string): string {
+  const m = /.([A-Za-z0-9]{1,8})$/.exec(name.trim());
+  return m ? m[1].toLowerCase() : "";
+}
+
+/** The stored type for an attached file, or why it's refused. */
+export function fileAttachmentType(name: string, bytes: Uint8Array): { type: string } | { problem: string } {
+  if (bytes.byteLength === 0) return { problem: "That file is empty" };
+  if (bytes.byteLength > FILE_MAX_BYTES) return { problem: `Files can be up to ${FILE_MAX_BYTES / 1024 / 1024} MB` };
+  const type = FILE_TYPES[fileExtension(name)];
+  if (!type) return { problem: "That file type can't be attached (images, PDF, Office, text, CSV, JSON, ZIP or video)" };
+  // An image must really be the image it says it is: the route shows images inline.
+  if (type.startsWith("image/") && sniffImageType(bytes) !== type) return { problem: "That image file is damaged or not what its name says" };
+  return { type };
+}
+
+/** Shown inline (thumbnail, preview) only for images we verified. */
+export function isInlineImage(contentType: string): boolean {
+  return (ATTACHMENT_TYPES as readonly string[]).includes(contentType);
+}
+
+/** "2.4 MB", "830 KB", "12 B". */
+export function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(n >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}

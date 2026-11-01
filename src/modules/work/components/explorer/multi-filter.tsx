@@ -61,7 +61,7 @@ export function MultiFilter({
           variant="outline"
           size="sm"
           className={cn(
-            "h-9 gap-1 rounded-[3px] px-3 font-medium shadow-none",
+            "h-9 shrink-0 gap-1 rounded-[3px] px-3 font-medium shadow-none",
             selected.length ? "border-info bg-info/10 text-info hover:bg-info/15 hover:text-info" : "text-foreground",
           )}
         >

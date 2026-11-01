@@ -35,6 +35,23 @@ export type WorkUserRef = { id: string; name: string };
 /** An epic as other items point at it. */
 export type WorkEpicRef = { id: string; key: string; title: string };
 
+/** Another item, as a link target or a linked item (titles only — never client data). */
+export type WorkLinkTargetDto = { id: string; key: string; number: number; title: string; status: WorkItemStatus; type: WorkItemType; slug: string };
+/** One link read from this item's side: "blocks", "is blocked by", "relates to"… */
+export type WorkItemLinkDto = { id: string; phrase: string; item: WorkLinkTargetDto };
+/** A file in the item's Attachments section. */
+export type WorkAttachmentDto = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  createdAt: string;
+  uploader: WorkUserRef | null;
+  url: string;
+  /** A verified image: shown as a thumbnail and previewed inline. */
+  isImage: boolean;
+};
+
 export type WorkCardDto = {
   id: string;
   number: number;
@@ -344,6 +361,10 @@ export type WorkItemDetailDto = WorkCardDto & {
   children: WorkCardDto[];
   /** Who gets this item's emails (Jira's watchers). */
   watchers: WorkUserRef[];
+  links: WorkItemLinkDto[];
+  attachments: WorkAttachmentDto[];
+  /** Boards the item can move to (every product, this one included; the UI leaves it out). */
+  moveTargets: { slug: string; name: string; keyPrefix: string }[];
 };
 
 export type WorkOverviewRow = {

@@ -23,7 +23,10 @@ import {
   type WorkEpicRef,
   type WorkExplorerProduct,
   type WorkExplorerViewDto,
+  type WorkAttachmentDto,
   type WorkItemDetailDto,
+  type WorkItemLinkDto,
+  type WorkLinkTargetDto,
   type WorkOverviewRow,
   type WorkProductRef,
   type WorkSprintDto,
@@ -34,7 +37,10 @@ import {
 import { explorerColumns, type ExplorerFilters } from "./explorer-logic";
 import { renderRichText } from "./rich-text-sanitize";
 import { defaultKeyPrefix, formatKey } from "./key-logic";
-import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints, workWatchers } from "./schema";
+import { workAttachments, workBoards, workComments, workItemAliases, workItemEvents, workItemLinks, workItems, workSprints, workWatchers } from "./schema";
+import { isInlineImage } from "./attachment-logic";
+import { linkGroupRank, linkPhrase, parseItemKey } from "./link-logic";
+import { WORK } from "../../lib/routes";
 import { ensureBoardForProductSlug } from "./service";
 import { velocity } from "./sprint-logic";
 import { OPEN_STATUSES, STATUS_LABELS } from "./transitions";
@@ -420,7 +426,7 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
     .where(and(eq(workItems.boardId, boardId), eq(workItems.number, number)))
     .limit(1);
   if (!row) return null;
-  const [comments, events, assignees, sprints, epics, children, watchers] = await Promise.all([
+  const [comments, events, assignees, sprints, epics, children, watchers, links, attachments, moveTargets] = await Promise.all([
     db
       .select({ id: workComments.id, parentId: workComments.parentCommentId, body: workComments.body, authorId: user.id, authorName: user.name, createdAt: workComments.createdAt, editedAt: workComments.editedAt })
       .from(workComments)
@@ -452,6 +458,9 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
       .innerJoin(user, eq(workWatchers.userId, user.id))
       .where(eq(workWatchers.itemId, row.id))
       .orderBy(asc(user.name)),
+    itemLinks(row.id),
+    itemFiles(row.id),
+    listBoardsNav(),
   ]);
   return {
     ...toCardDto(row, viewer),
@@ -471,6 +480,9 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
     epics: epics.map((e) => ({ id: e.id, key: formatKey(row.keyPrefix, e.number), title: e.title })),
     children: children.map((c) => toCardDto(c, viewer)),
     watchers,
+    links,
+    attachments,
+    moveTargets: moveTargets.map((b) => ({ slug: b.slug, name: b.name, keyPrefix: b.keyPrefix })),
   };
 }
 
@@ -863,10 +875,10 @@ export async function getClientWorkspace(tenantId: string, viewer: WorkViewer): 
 // ---------------------------------------------------------------------------
 
 /** An uploaded image's bytes, for the attachment route (which checks work access first). */
-export async function getAttachment(id: string): Promise<{ contentType: string; data: Buffer; byteSize: number } | null> {
+export async function getAttachment(id: string): Promise<{ contentType: string; data: Buffer; byteSize: number; fileName: string | null } | null> {
   if (!/^[0-9a-f-]{36}$/.test(id)) return null;
   const [row] = await db
-    .select({ contentType: workAttachments.contentType, data: workAttachments.data, byteSize: workAttachments.byteSize })
+    .select({ contentType: workAttachments.contentType, data: workAttachments.data, byteSize: workAttachments.byteSize, fileName: workAttachments.fileName })
     .from(workAttachments)
     .where(eq(workAttachments.id, id))
     .limit(1);
@@ -894,4 +906,113 @@ export async function itemTitleByRef(slug: string, number: number): Promise<{ ke
     .where(and(eq(products.slug, slug), eq(workItems.number, number)))
     .limit(1);
   return row ? { key: formatKey(row.keyPrefix, row.number), title: row.title, status: STATUS_LABELS[row.status] } : null;
+}
+
+// ---------------------------------------------------------------------------
+// Links, attachments, move targets, old keys
+// ---------------------------------------------------------------------------
+
+const linkedItem = alias(workItems, "linked_item");
+const linkedBoard = alias(workBoards, "linked_board");
+const linkedProduct = alias(products, "linked_product");
+
+/** Both directions of an item's links, each read from this item's side, blockers first. */
+async function itemLinks(itemId: string): Promise<WorkItemLinkDto[]> {
+  const read = (side: "source" | "target") =>
+    db
+      .select({
+        id: workItemLinks.id,
+        type: workItemLinks.type,
+        otherId: linkedItem.id,
+        number: linkedItem.number,
+        title: linkedItem.title,
+        status: linkedItem.status,
+        type2: linkedItem.type,
+        prefix: linkedBoard.keyPrefix,
+        slug: linkedProduct.slug,
+      })
+      .from(workItemLinks)
+      .innerJoin(linkedItem, eq(linkedItem.id, side === "source" ? workItemLinks.targetItemId : workItemLinks.sourceItemId))
+      .innerJoin(linkedBoard, eq(linkedBoard.id, linkedItem.boardId))
+      .innerJoin(linkedProduct, eq(linkedProduct.id, linkedBoard.productId))
+      .where(eq(side === "source" ? workItemLinks.sourceItemId : workItemLinks.targetItemId, itemId));
+  const [out, inn] = await Promise.all([read("source"), read("target")]);
+  const rows = [
+    ...out.map((r) => ({ r, phrase: linkPhrase(r.type, "outward") })),
+    ...inn.map((r) => ({ r, phrase: linkPhrase(r.type, "inward") })),
+  ];
+  return rows
+    .map(({ r, phrase }) => ({
+      id: r.id,
+      phrase,
+      item: { id: r.otherId, key: formatKey(r.prefix, r.number), number: r.number, title: r.title, status: r.status, type: r.type2, slug: r.slug },
+    }))
+    .sort((a, b) => linkGroupRank(a.phrase) - linkGroupRank(b.phrase) || a.item.key.localeCompare(b.item.key, undefined, { numeric: true }));
+}
+
+async function itemFiles(itemId: string): Promise<WorkAttachmentDto[]> {
+  const rows = await db
+    .select({
+      id: workAttachments.id,
+      fileName: workAttachments.fileName,
+      contentType: workAttachments.contentType,
+      byteSize: workAttachments.byteSize,
+      createdAt: workAttachments.createdAt,
+      uploaderId: user.id,
+      uploaderName: user.name,
+    })
+    .from(workAttachments)
+    .leftJoin(user, eq(workAttachments.uploadedByUserId, user.id))
+    .where(eq(workAttachments.itemId, itemId))
+    .orderBy(desc(workAttachments.createdAt));
+  return rows.map((r) => ({
+    id: r.id,
+    fileName: r.fileName ?? "file",
+    contentType: r.contentType,
+    byteSize: r.byteSize,
+    createdAt: r.createdAt.toISOString(),
+    uploader: r.uploaderId ? { id: r.uploaderId, name: r.uploaderName ?? "" } : null,
+    url: WORK.attachment(r.id),
+    isImage: isInlineImage(r.contentType),
+  }));
+}
+
+/**
+ * The link picker: items on any board by key ("FIXO-12") or title words,
+ * newest first. Titles only — no client data reaches this list.
+ */
+export async function searchItemsForLink(q: string, excludeItemId: string): Promise<WorkLinkTargetDto[]> {
+  const term = q.trim();
+  if (!term) return [];
+  const key = parseItemKey(term);
+  const where = key
+    ? and(eq(workBoards.keyPrefix, key.prefix), eq(workItems.number, key.number))
+    : or(...term.split(/\s+/).slice(0, 5).map((w) => ilike(workItems.title, `%${w.replace(/[%_\\]/g, (c) => `\\${c}`)}%`)));
+  const rows = await db
+    .select({ id: workItems.id, number: workItems.number, title: workItems.title, status: workItems.status, type: workItems.type, prefix: workBoards.keyPrefix, slug: products.slug })
+    .from(workItems)
+    .innerJoin(workBoards, eq(workBoards.id, workItems.boardId))
+    .innerJoin(products, eq(products.id, workBoards.productId))
+    .where(and(ne(workItems.id, excludeItemId), where))
+    .orderBy(desc(workItems.createdAt))
+    .limit(20);
+  return rows.map((r) => ({ id: r.id, key: formatKey(r.prefix, r.number), number: r.number, title: r.title, status: r.status, type: r.type, slug: r.slug }));
+}
+
+const aliasBoard = alias(workBoards, "alias_board");
+const aliasProduct = alias(products, "alias_product");
+
+/** Where an old key lives now (the item was moved), or null when that key was never moved. */
+export async function resolveMovedItem(slug: string, number: number): Promise<{ slug: string; number: number } | null> {
+  const [row] = await db
+    .select({ slug: products.slug, number: workItems.number })
+    .from(workItemAliases)
+    .innerJoin(aliasBoard, eq(aliasBoard.id, workItemAliases.boardId))
+    .innerJoin(aliasProduct, eq(aliasProduct.id, aliasBoard.productId))
+    .innerJoin(workItems, eq(workItems.id, workItemAliases.itemId))
+    .innerJoin(workBoards, eq(workBoards.id, workItems.boardId))
+    .innerJoin(products, eq(products.id, workBoards.productId))
+    .where(and(eq(aliasProduct.slug, slug), eq(workItemAliases.number, number)))
+    .limit(1);
+  return row ?? null;
 }

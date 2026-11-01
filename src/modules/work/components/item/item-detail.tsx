@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Link2, Paperclip } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WORK } from "@/lib/routes";
 import { useAction } from "@/lib/use-action";
 import { useConfirm } from "@/components/confirm-dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { deleteItemAction, updateItemAction } from "../../actions";
 import { isRichTextEmpty } from "../../rich-text";
@@ -17,6 +19,9 @@ import { ChildIssues } from "./child-issues";
 import { ItemActivity } from "./item-activity";
 import { MentionPeopleProvider } from "../editor/mention-people";
 import { ItemSidebar } from "./item-sidebar";
+import { ItemAttachments } from "./item-attachments";
+import { ItemLinks } from "./item-links";
+import { CloneItemDialog, MoveItemDialog } from "./item-action-dialogs";
 
 /** One work item: editable title and description, fields, comments and history. */
 export function ItemDetail({
@@ -43,6 +48,10 @@ export function ItemDetail({
   const router = useRouter();
   const confirm = useConfirm();
   const { run, isPending } = useAction();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [linking, setLinking] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [moving, setMoving] = useState(false);
 
   async function remove() {
     const ok = await confirm({
@@ -61,9 +70,9 @@ export function ItemDetail({
 
   return (
     <MentionPeopleProvider people={item.assignees}>
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)]">
-      <div className="flex min-w-0 flex-col gap-6">
-        <div className="flex flex-col gap-1">
+    {/* Phones: summary, then status + details, then the body. Desktop: body on the left, details on the right. */}
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)] lg:grid-rows-[auto_1fr] lg:gap-x-8">
+        <div className="flex min-w-0 flex-col gap-1 lg:col-start-1 lg:row-start-1">
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             {item.epic && (
               <>
@@ -76,19 +85,38 @@ export function ItemDetail({
             <span className="font-medium">{item.key}</span>
           </div>
           <EditableTitle itemId={item.id} title={item.title} />
+          {/* Jira's quick-add row under the summary. */}
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" className="h-8 cursor-pointer rounded-[3px]" onClick={() => fileInput.current?.click()}>
+              <Paperclip className="size-4" /> Attach
+            </Button>
+            <Button variant="secondary" size="sm" className="h-8 cursor-pointer rounded-[3px]" onClick={() => setLinking(true)}>
+              <Link2 className="size-4" /> Link issue
+            </Button>
+          </div>
         </div>
-        <EditableDescription itemId={item.id} description={item.description} />
-        {item.type === "epic" && <ChildIssues epicId={item.id} slug={slug} items={item.children} />}
-        <ItemActivity itemId={item.id} comments={item.comments} events={item.events} viewer={viewer} />
-      </div>
       <ItemSidebar
+        className="lg:col-start-2 lg:row-span-2 lg:row-start-1"
         mode={mode}
         item={item}
         canLinkClient={canLinkClient}
         tenants={tenants}
         viewer={viewer}
         onDelete={canManage && !isPending("delete") ? () => void remove() : undefined}
+        onAttach={() => fileInput.current?.click()}
+        onLink={() => setLinking(true)}
+        onClone={() => setCloning(true)}
+        onMove={() => setMoving(true)}
       />
+      <div className="flex min-w-0 flex-col gap-6 lg:col-start-1 lg:row-start-2">
+        <EditableDescription itemId={item.id} description={item.description} />
+        <ItemAttachments itemId={item.id} attachments={item.attachments} inputRef={fileInput} viewer={viewer} canManage={canManage} />
+        {item.type === "epic" && <ChildIssues epicId={item.id} slug={slug} items={item.children} />}
+        <ItemLinks itemId={item.id} links={item.links} adding={linking} onAddingChange={setLinking} />
+        <ItemActivity itemId={item.id} comments={item.comments} events={item.events} viewer={viewer} />
+      </div>
+      {cloning && <CloneItemDialog item={item} slug={slug} open={cloning} onOpenChange={setCloning} />}
+      {moving && <MoveItemDialog item={item} slug={slug} open={moving} onOpenChange={setMoving} />}
     </div>
     </MentionPeopleProvider>
   );

@@ -116,7 +116,7 @@ export function BoardSettingsForm({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">They're emailed when a report lands on this board, like any assignment.</p>
+          <p className="text-xs text-muted-foreground">They&apos;re emailed when a report lands on this board, like any assignment.</p>
         </div>
       </Section>
 

@@ -29,13 +29,13 @@ export function StatTile({
   className?: string;
 }) {
   const body = (
-    <Card className={cn("h-full gap-2 py-5", href && "transition-colors hover:border-primary/50", className)}>
-      <CardHeader className="gap-1">
-        <CardDescription className="flex items-center gap-1.5">
+    <Card className={cn("h-full gap-2 py-3.5 sm:py-5", href && "transition-colors hover:border-primary/50", className)}>
+      <CardHeader className="gap-1 px-3.5 sm:px-6">
+        <CardDescription className="flex min-w-0 items-center gap-1.5 text-xs sm:text-sm">
           {Icon && <Icon className="size-3.5" />}
           {label}
         </CardDescription>
-        <CardTitle className={cn("text-2xl tabular-nums", TONE[tone])}>{value}</CardTitle>
+        <CardTitle className={cn("text-xl tabular-nums break-words sm:text-2xl", TONE[tone])}>{value}</CardTitle>
         {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
       </CardHeader>
     </Card>

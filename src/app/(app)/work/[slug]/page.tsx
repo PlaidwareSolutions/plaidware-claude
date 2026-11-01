@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { CalendarRange } from "lucide-react";
 import { listAllTenants } from "@/modules/tenancy/queries";
-import { getBoardView, getExplorerView, getItem } from "@/modules/work/queries";
+import { getBoardView, getExplorerView, getItem, resolveMovedItem } from "@/modules/work/queries";
 import { parseExplorerFilters, parseItemRef } from "@/modules/work/explorer-logic";
 import { ExplorerToolbar } from "@/modules/work/components/explorer/explorer-toolbar";
 import { ExplorerBoard } from "@/modules/work/components/explorer/explorer-board";
@@ -47,6 +47,11 @@ export default async function BoardPage({
     isOps ? listAllTenants() : Promise.resolve([]),
     sprints ? getBoardView(board.id, viewer) : Promise.resolve(null),
   ]);
+  if (peekNumber && !peekItem) {
+    // An old key in a shared link: the item moved boards since.
+    const moved = await resolveMovedItem(slug, peekNumber);
+    if (moved) redirect(WORK.item(moved.slug, moved.number));
+  }
   const products = view.products.filter((p) => p.slug === slug);
   const noSprint = sprints && !board.activeSprint && filters.view === "board";
 

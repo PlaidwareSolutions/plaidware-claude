@@ -131,11 +131,11 @@ export function ExplorerToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2" data-pending={pending ? "" : undefined}>
-      <div className="relative mr-1.5">
+      <div className="relative w-full sm:mr-1.5 sm:w-auto">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={searchRef}
-          className="h-9 w-52 rounded-[3px] border-2 pl-8 shadow-none transition-[width] focus-visible:w-64 focus-visible:border-info focus-visible:ring-0"
+          className="h-9 w-full rounded-[3px] border-2 pl-8 shadow-none transition-[width] focus-visible:border-info focus-visible:ring-0 sm:w-52 sm:focus-visible:w-64"
           placeholder="Search board"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -145,8 +145,10 @@ export function ExplorerToolbar({
         />
       </div>
 
+      {/* Phones: one swipeable row of filters instead of four wrapped rows; desktop keeps the wrapping toolbar. */}
+      <div className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-1.5 overflow-x-auto px-1 py-0.5 [scrollbar-width:none] sm:contents [&::-webkit-scrollbar]:hidden">
       {faces.length > 0 && (
-        <div className="mr-1.5 flex items-center -space-x-1" role="group" aria-label="Filter by assignee">
+        <div className="mr-1.5 flex shrink-0 items-center -space-x-1" role="group" aria-label="Filter by assignee">
           {faces.map((a) => {
             const on = filters.assignee.includes(a.id);
             return (
@@ -241,10 +243,11 @@ export function ExplorerToolbar({
         </>
       )}
       {count > 0 && (
-        <Button variant="ghost" size="sm" className="h-9 gap-1 px-2 text-info hover:text-info" onClick={clearAll}>
+        <Button variant="ghost" size="sm" className="h-9 shrink-0 gap-1 px-2 text-info hover:text-info" onClick={clearAll}>
           <X className="size-3.5" /> Clear filters
         </Button>
       )}
+      </div>
 
       <div className="ml-auto flex items-center gap-1.5">
         {extra}

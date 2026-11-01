@@ -209,6 +209,22 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   kanban's optimistic move and the fresh tree land in one transition; client
   code in this module uses `useAction(…, { refresh: false })`. Drag and drop is
   `@dnd-kit` (explicit `DndContext id` to avoid hydration mismatches).
+- Ticket actions (2026-11, Jira's Link / Clone / Move / Attach): `work_item_links`
+  (stored outward: source blocks/duplicates/clones target; "relates" one row,
+  the mirror refused; phrases + picker in `link-logic.ts`); clone =
+  `service.cloneItem` (same board, "CLONE - …", optional attachments/links,
+  requester copied only for ops, linked "clones"); move = `moveItemToBoard`
+  (next key on the target board, sprint + epic cleared, epic with children
+  refused) with `work_item_aliases` so old keys redirect (item page + quick
+  view via `resolveMovedItem`); attachments = `work_attachments.item_id`
+  (null = inline rich-text image), files by extension allowlist up to 10 MB
+  (`attachment-logic.fileAttachmentType`), only verified images served inline
+  — everything else `Content-Disposition: attachment`. Server actions body
+  limit is 11mb for this. Delete: uploader or ops admin.
+- Mobile (2026-11): `DataTableShell` tables render as labelled cards under
+  640px (`TableCardLabels` copies header text to `data-label`; CSS at the end
+  of globals.css). Stat grids are `grid-cols-2` on phones. The ticket view puts
+  status + Details (collapsed on phones) right under the summary.
 
 ## Deployment (Railway project "plaidware-hub")
 

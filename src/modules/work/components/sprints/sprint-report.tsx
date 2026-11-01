@@ -32,7 +32,7 @@ export function SprintReport({ slug, report }: { slug: string; report: WorkSprin
         {s.status !== "planned" && <SprintProgress done={report.done.length} total={Math.max(total, s.committedCount ?? 0)} className="max-w-md" />}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile label="Committed" value={s.committedPoints ?? "—"} sub={s.committedCount != null ? `${s.committedCount} items at start` : "snapshot taken at start"} />
         <StatTile label="Completed" value={s.status === "completed" ? (s.completedPoints ?? 0) : report.done.reduce((n, c) => n + (c.estimatePoints ?? 0), 0)} sub={`${report.done.length} item${report.done.length === 1 ? "" : "s"} done`} tone="success" />
         <StatTile label="Carried out" value={report.carriedOut.length} sub="moved on at completion" tone={report.carriedOut.length ? "warning" : "default"} />

@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
+import { WORK } from "@/lib/routes";
 import { impersonationOf, isOps, isOpsAdmin, requireWorkPage, workViewer } from "@/policy";
 import { listAllTenants } from "@/modules/tenancy/queries";
-import { getBoardBySlug, getExplorerView, getItem } from "@/modules/work/queries";
+import { getBoardBySlug, getExplorerView, getItem, resolveMovedItem } from "@/modules/work/queries";
 import { parseExplorerFilters, parseItemRef } from "@/modules/work/explorer-logic";
 import { ProjectScopePicker } from "@/modules/work/components/explorer/project-scope-picker";
 import { ExplorerToolbar } from "@/modules/work/components/explorer/explorer-toolbar";
@@ -31,6 +33,10 @@ export default async function AllWorkPage({ searchParams }: { searchParams: Prom
     ref ? getBoardBySlug(ref.slug) : Promise.resolve(null),
   ]);
   const peekItem = peekBoard && ref ? await getItem(peekBoard.id, ref.number, viewer) : null;
+  if (ref && !peekItem) {
+    const moved = await resolveMovedItem(ref.slug, ref.number);
+    if (moved) redirect(WORK.item(moved.slug, moved.number));
+  }
   const tenantOptions = tenants.map((t) => ({ id: t.id, name: t.name }));
   const productOrder = view.products.map((p) => p.slug);
 

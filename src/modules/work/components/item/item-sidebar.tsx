@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Flag, MoreHorizontal, Trash2 } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Copy, Flag, Link2, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
 import { WORK } from "@/lib/routes";
 import { useAction } from "@/lib/use-action";
 import { formatDateTime, formatRelative } from "@/lib/dates";
@@ -32,6 +32,11 @@ export function ItemSidebar({
   tenants,
   viewer,
   onDelete,
+  onAttach,
+  onLink,
+  onClone,
+  onMove,
+  className,
 }: {
   mode: WorkBoardMode;
   item: WorkItemDetailDto;
@@ -40,31 +45,54 @@ export function ItemSidebar({
   viewer: WorkUserRef | null;
   /** Ops admins: the ⋯ menu's Delete. */
   onDelete?: () => void;
+  onAttach: () => void;
+  onLink: () => void;
+  onClone: () => void;
+  onMove: () => void;
+  className?: string;
 }) {
   const { run, isPending } = useAction();
-  const [open, setOpen] = useState(true);
+  // null = the default: open on desktop, collapsed on phones (CSS, so no hydration flash); a tap decides from then on.
+  const [open, setOpen] = useState<boolean | null>(null);
   const busy = (k: string) => isPending(`field:${k}`);
   const save = (k: string, fn: () => Promise<{ ok: boolean }>) => run(fn as () => Promise<{ ok: true } | { ok: false; error?: string }>, { key: `field:${k}`, refresh: false });
   const patch = (k: string, p: Parameters<typeof updateItemAction>[0]["patch"]) => save(k, () => updateItemAction({ itemId: item.id, patch: p }));
   const assign = (id: string | null) => void save("assignee", () => assignItemAction({ itemId: item.id, assigneeUserId: id }));
   const transitions = useWorkTransitions();
   const subject = { id: item.id, key: item.key, type: item.type, status: item.status, title: item.title };
+  // Who, from the history (newest first): the person, else the app that filed it ("Fixorata").
+  const who = (e: (typeof item.events)[number] | undefined) => e?.actor?.name ?? (typeof e?.payload.via === "string" ? e.payload.via : null);
+  const createdBy = who(item.events.find((e) => e.kind === "item_created")) ?? item.reporter?.name ?? null;
+  const updatedBy = who(item.events[0]);
 
   return (
-    <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
+    <aside className={cn("flex min-w-0 flex-col gap-4 lg:sticky lg:top-6 lg:self-start", className)}>
       <div className="flex items-center gap-2">
         <StatusButton status={item.status} onChange={(v) => void transitions.move(subject, v)} />
         <span className="ml-auto" />
         <WatchButton itemId={item.id} watchers={item.watchers} viewer={viewer} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-8 rounded-[3px]" aria-label="More actions">
+            <Button variant="ghost" size="icon" className="size-8 cursor-pointer rounded-[3px]" aria-label="More actions">
               <MoreHorizontal className="size-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onSelect={() => void transitions.flag(subject, !item.flag)}>
               <Flag className={cn("size-4", !item.flag && "fill-warning text-warning")} /> {item.flag ? "Remove flag" : "Add flag"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onAttach}>
+              <Paperclip className="size-4" /> Attach files
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onLink}>
+              <Link2 className="size-4" /> Link issue
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onClone}>
+              <Copy className="size-4" /> Clone
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onMove}>
+              <ArrowRightLeft className="size-4" /> Move
             </DropdownMenuItem>
             {onDelete && (
               <>
@@ -97,15 +125,15 @@ export function ItemSidebar({
       <div className="rounded-[3px] border">
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
+          onClick={() => setOpen((v) => (v === null ? !window.matchMedia("(min-width: 1024px)").matches : !v))}
+          aria-expanded={open !== false}
           className="flex w-full items-center justify-between border-b px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-accent/50"
         >
           Details
-          <ChevronDown className={cn("size-4 transition-transform", !open && "-rotate-90")} />
+          <ChevronDown className={cn("size-4 transition-transform", open === false && "-rotate-90", open === null && "max-lg:-rotate-90")} />
         </button>
-        {open && (
-          <dl className="flex flex-col gap-1 p-3 text-sm">
+        {open !== false && (
+          <dl className={cn("flex flex-col gap-1 p-3 text-sm", open === null && "max-lg:hidden")}>
             <Row label="Assignee">
               <AssigneeSelect ghost value={item.assignee?.id ?? null} assignees={item.assignees} disabled={busy("assignee")} className={FIELD} onChange={assign} />
               {viewer && item.assignee?.id !== viewer.id && (
@@ -205,8 +233,14 @@ export function ItemSidebar({
       </div>
 
       <dl className="flex flex-col gap-0.5 px-1 text-xs text-muted-foreground">
-        <div title={formatDateTime(item.createdAt)}>Created {formatRelative(item.createdAt)}</div>
-        <div title={formatDateTime(item.updatedAt)}>Updated {formatRelative(item.updatedAt)}</div>
+        <div title={formatDateTime(item.createdAt)}>
+          Created {formatRelative(item.createdAt)}
+          {createdBy && <> by <span className="font-medium text-foreground/80">{createdBy}</span></>}
+        </div>
+        <div title={formatDateTime(item.updatedAt)}>
+          Updated {formatRelative(item.updatedAt)}
+          {updatedBy && <> by <span className="font-medium text-foreground/80">{updatedBy}</span></>}
+        </div>
         {item.startedAt && <div title={formatDateTime(item.startedAt)}>Started {formatRelative(item.startedAt)}</div>}
         {item.completedAt && (
           <div title={formatDateTime(item.completedAt)}>

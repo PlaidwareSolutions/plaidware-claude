@@ -73,7 +73,7 @@ export default async function DashboardPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile label="Active products" value={live.length} icon={Package} href={TENANT.billing} sub={mrrCents > 0 ? `${formatCents(mrrCents)}/mo` : "no recurring charges"} />
         <StatTile
           label="Open balance"

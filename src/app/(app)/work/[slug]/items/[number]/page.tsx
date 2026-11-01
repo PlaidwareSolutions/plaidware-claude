@@ -1,6 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { WORK } from "@/lib/routes";
 import { listAllTenants } from "@/modules/tenancy/queries";
-import { getItem } from "@/modules/work/queries";
+import { getItem, resolveMovedItem } from "@/modules/work/queries";
 import { ItemDetail } from "@/modules/work/components/item/item-detail";
 import { boardMetadata, loadBoard } from "../../load";
 
@@ -20,7 +21,12 @@ export default async function ItemPage({ params }: { params: Params }) {
   const { board, viewer, isOps, canManage, session } = await loadBoard(slug);
   if (!board) notFound();
   const [item, tenants] = await Promise.all([getItem(board.id, n, viewer), isOps ? listAllTenants() : Promise.resolve([])]);
-  if (!item) notFound();
+  if (!item) {
+    // A key from before the item moved to another board (Jira keeps old keys working).
+    const moved = await resolveMovedItem(slug, n);
+    if (moved) redirect(WORK.item(moved.slug, moved.number));
+    notFound();
+  }
   return (
     <ItemDetail
       slug={slug}

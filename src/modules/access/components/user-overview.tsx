@@ -31,7 +31,7 @@ export function UserOverview({
   const disabled = !!user.disabledAt;
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile label="Workspaces" value={user.membershipCount} icon={Building2} href={OPS.userTab(user.id, "workspaces")} />
         <StatTile
           label="Active sessions"

@@ -4,9 +4,12 @@ import { refresh, revalidatePath } from "next/cache";
 import { z } from "zod";
 import { revalidateClientViews, revalidateWorkViews } from "@/lib/ops-revalidate";
 import { WORK } from "@/lib/routes";
-import { isOps, requireOps, requireWork, requireWorkManage } from "../../policy";
+import { isOps, isOpsAdmin, requireOps, requireWork, requireWorkManage } from "../../policy";
 import {
+  addItemLinkSchema,
   assignItemSchema,
+  cloneItemSchema,
+  moveItemToBoardSchema,
   boardSettingsSchema,
   commentSchema,
   completeSprintSchema,
@@ -35,8 +38,9 @@ import {
 import * as svc from "./service";
 import { env } from "@/env";
 import { fetchLinkPreview } from "./link-preview";
-import { itemTitleByRef } from "./queries";
-import { ATTACHMENT_MAX_BYTES } from "./attachment-logic";
+import { itemTitleByRef, searchItemsForLink } from "./queries";
+import { ATTACHMENT_MAX_BYTES, FILE_MAX_BYTES } from "./attachment-logic";
+import type { WorkLinkTargetDto } from "./dto";
 import { isRichTextEmpty } from "./rich-text";
 
 /**
@@ -381,6 +385,103 @@ export async function updateBoardSettingsAction(input: BoardSettingsInput): Prom
     const p = boardSettingsSchema.parse(input);
     const r = await svc.updateBoardSettings({ ...p, actorUserId: session.user.id });
     done(r.productSlug);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Links, clone, move, attachments
+// ---------------------------------------------------------------------------
+
+export async function addItemLinkAction(input: z.input<typeof addItemLinkSchema>): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const p = addItemLinkSchema.parse(input);
+    const r = await svc.addItemLink({ ...p, actorUserId: session.user.id });
+    revalidateWorkViews(r.otherSlug, r.otherNumber);
+    done(r.productSlug, r.number);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function removeItemLinkAction(linkId: string): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const r = await svc.removeItemLink({ linkId: uuid.parse(linkId), actorUserId: session.user.id });
+    for (const i of r.items) revalidateWorkViews(i.slug, i.number);
+    refresh();
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** The link picker's search: items on any board by key or title. */
+export async function searchLinkTargetsAction(input: { q: string; excludeItemId: string }): Promise<{ ok: true; items: WorkLinkTargetDto[] } | { ok: false; error: string }> {
+  try {
+    await requireWork();
+    const q = z.string().trim().max(200).parse(input.q);
+    return { ok: true, items: await searchItemsForLink(q, uuid.parse(input.excludeItemId)) };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function cloneItemAction(
+  input: z.input<typeof cloneItemSchema>,
+): Promise<{ ok: true; slug: string; number: number; key: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireWork();
+    const p = cloneItemSchema.parse(input);
+    // The client (requester) is ops-only data: a developer's clone never carries it.
+    const r = await svc.cloneItem({ ...p, actorUserId: session.user.id, copyRequester: isOps(session) });
+    done(r.productSlug, r.number);
+    return { ok: true, slug: r.productSlug, number: r.number, key: r.key };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function moveItemToBoardAction(
+  input: z.input<typeof moveItemToBoardSchema>,
+): Promise<{ ok: true; slug: string; number: number; key: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireWork();
+    const p = moveItemToBoardSchema.parse(input);
+    const r = await svc.moveItemToBoard({ ...p, actorUserId: session.user.id });
+    revalidateWorkViews(r.fromSlug);
+    done(r.slug, r.number);
+    return { ok: true, slug: r.slug, number: r.number, key: r.key };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Attach one file (FormData: itemId, file) to the item's Attachments section. */
+export async function attachFileAction(form: FormData): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const itemId = uuid.parse(form.get("itemId"));
+    const file = form.get("file");
+    if (!(file instanceof File)) throw new Error("No file received");
+    if (file.size > FILE_MAX_BYTES) throw new Error(`Files can be up to ${FILE_MAX_BYTES / 1024 / 1024} MB`);
+    const r = await svc.attachFile({ itemId, bytes: new Uint8Array(await file.arrayBuffer()), fileName: file.name || "file", actorUserId: session.user.id });
+    done(r.productSlug, r.number);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function removeAttachmentAction(attachmentId: string): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const r = await svc.removeAttachment({ attachmentId: uuid.parse(attachmentId), actorUserId: session.user.id, actorIsAdmin: isOpsAdmin(session) });
+    done(r.productSlug, r.number);
     return { ok: true };
   } catch (e) {
     return fail(e);

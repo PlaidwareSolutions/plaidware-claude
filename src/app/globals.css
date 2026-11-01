@@ -171,3 +171,50 @@ html[data-work-fullscreen] [data-shell="topbar"] {
     color: var(--muted-foreground);
   }
 }
+
+/*
+ * Phones (< 640px): a DataTableShell table becomes a list of cards. The first
+ * cell is the row's title; every other cell shows its column name (data-label,
+ * set by TableCardLabels) on the left and the value on the right. Cells with
+ * no header (row actions) sit on the right; spanning cells (empty states) are
+ * full width.
+ */
+@media (max-width: 639.98px) {
+  [data-slot="data-table"] [data-slot="table-container"] { overflow-x: visible; }
+  [data-slot="data-table"] [data-slot="table"],
+  [data-slot="data-table"] [data-slot="table-body"] { display: block; width: 100%; }
+  [data-slot="data-table"] [data-slot="table-header"] { display: none; }
+  [data-slot="data-table"] [data-slot="table-row"] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.75rem 1rem;
+  }
+  [data-slot="data-table"] [data-slot="table-cell"] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 0;
+    white-space: normal;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+  [data-slot="data-table"] [data-slot="table-cell"][data-label]:not([data-label=""])::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    text-align: left;
+  }
+  [data-slot="data-table"] [data-slot="table-cell"]:first-child {
+    justify-content: flex-start;
+    text-align: left;
+    font-weight: 500;
+  }
+  [data-slot="data-table"] [data-slot="table-cell"]:first-child::before { display: none; }
+  [data-slot="data-table"] [data-slot="table-cell"][data-label=""] { justify-content: flex-end; }
+  [data-slot="data-table"] [data-slot="table-cell"][data-label=""]:first-child { justify-content: flex-start; }
+  [data-slot="data-table"] [data-slot="table-cell"][data-span] { display: block; text-align: left; }
+}

@@ -36,7 +36,7 @@ export default async function ProductDetailsPage({ params }: { params: Promise<{
         actions={<Link href={boardHref} className="text-sm text-primary hover:underline">Open board →</Link>}
       >
         {work ? (
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:grid-cols-3">
             <StatTile label="Open items" value={work.open} href={boardHref} sub="to do, in progress, in review" />
             <StatTile label="In progress" value={work.inProgress} href={boardHref} />
             <StatTile

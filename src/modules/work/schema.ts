@@ -23,6 +23,7 @@ import {
   WORK_RESOLUTIONS,
   WORK_ITEM_STATUSES,
   WORK_ITEM_TYPES,
+  WORK_LINK_TYPES,
   WORK_SPRINT_STATUSES,
   type WorkItemStatus,
 } from "./contracts";
@@ -41,6 +42,7 @@ export const workItemPriority = pgEnum("work_item_priority", WORK_ITEM_PRIORITIE
 export const workItemSource = pgEnum("work_item_source", WORK_ITEM_SOURCES);
 export const workResolution = pgEnum("work_resolution", WORK_RESOLUTIONS);
 export const workSprintStatus = pgEnum("work_sprint_status", WORK_SPRINT_STATUSES);
+export const workLinkType = pgEnum("work_link_type", WORK_LINK_TYPES);
 
 /** One board per product; created lazily on first visit (service.ensureBoard). */
 export const workBoards = pgTable("work_boards", {
@@ -224,11 +226,58 @@ export const workAttachments = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     uploadedByUserId: text("uploaded_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    /** Set for files in an item's Attachments section; null for images inside rich text. */
+    itemId: uuid("item_id").references(() => workItems.id, { onDelete: "cascade" }),
     contentType: text("content_type").notNull(),
     byteSize: integer("byte_size").notNull(),
     fileName: text("file_name"),
     data: bytea("data").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => [index("work_attachments_uploader_idx").on(t.uploadedByUserId)],
+  (t) => [index("work_attachments_uploader_idx").on(t.uploadedByUserId), index("work_attachments_item_idx").on(t.itemId)],
+);
+
+/**
+ * Jira's issue links, stored from the outward side: source blocks /
+ * duplicates / clones target; "relates" is symmetric (one row either way,
+ * the service refuses the mirror). Both ends cascade.
+ */
+export const workItemLinks = pgTable(
+  "work_item_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceItemId: uuid("source_item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    targetItemId: uuid("target_item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    type: workLinkType("type").notNull(),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("work_item_links_uidx").on(t.sourceItemId, t.targetItemId, t.type),
+    index("work_item_links_target_idx").on(t.targetItemId),
+  ],
+);
+
+/**
+ * Keys an item had before it was moved to another board (FIXO-12 → PROP-3):
+ * the item page and quick view redirect an old key to where the item lives
+ * now. Board numbers only ever count up, so an old key is never reused.
+ */
+export const workItemAliases = pgTable(
+  "work_item_aliases",
+  {
+    boardId: uuid("board_id")
+      .notNull()
+      .references(() => workBoards.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.boardId, t.number] }), index("work_item_aliases_item_idx").on(t.itemId)],
 );

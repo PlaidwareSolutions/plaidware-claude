@@ -17,6 +17,8 @@ export const WORK_SPRINT_STATUSES = ["planned", "active", "completed"] as const;
 export const BOARD_COLUMNS = ["todo", "in_progress", "in_review", "done"] as const;
 export const SPRINT_LENGTHS = [7, 14] as const;
 export const CARRY_OVER = ["next", "backlog"] as const;
+/** Jira's issue link types, stored from the outward side (A blocks B, A duplicates B, A clones B; relates is symmetric). */
+export const WORK_LINK_TYPES = ["blocks", "relates", "duplicates", "clones"] as const;
 
 export type WorkBoardMode = (typeof WORK_BOARD_MODES)[number];
 export type WorkItemType = (typeof WORK_ITEM_TYPES)[number];
@@ -28,6 +30,7 @@ export type WorkSprintStatus = (typeof WORK_SPRINT_STATUSES)[number];
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
 export type SprintLength = (typeof SPRINT_LENGTHS)[number];
 export type CarryOver = (typeof CARRY_OVER)[number];
+export type WorkLinkType = (typeof WORK_LINK_TYPES)[number];
 
 const uuid = z.uuid();
 const userId = z.string().min(1);
@@ -110,6 +113,21 @@ export const setItemSprintSchema = z.object({ itemId: uuid, sprintId: uuid.nulla
 export const setItemRequesterSchema = z.object({ itemId: uuid, requesterTenantId: z.string().min(1).nullable() });
 export const setItemParentSchema = z.object({ itemId: uuid, parentId: uuid.nullable() });
 export const setWatchingSchema = z.object({ itemId: uuid, watching: z.boolean() });
+
+/** Link this item to another: `direction` says which side this item is on ("outward": this blocks that). */
+export const addItemLinkSchema = z.object({
+  itemId: uuid,
+  otherItemId: uuid,
+  type: z.enum(WORK_LINK_TYPES),
+  direction: z.enum(["outward", "inward"]).default("outward"),
+});
+export const cloneItemSchema = z.object({
+  itemId: uuid,
+  title: z.string().trim().min(1).max(300),
+  includeAttachments: z.boolean().default(true),
+  includeLinks: z.boolean().default(true),
+});
+export const moveItemToBoardSchema = z.object({ itemId: uuid, targetSlug: z.string().regex(/^[a-z0-9-]{1,80}$/) });
 
 /** Jira's flag: an impediment marker with an optional reason. */
 export const setItemFlagSchema = z.object({ itemId: uuid, flagged: z.boolean(), reason: z.string().trim().max(500).optional() });

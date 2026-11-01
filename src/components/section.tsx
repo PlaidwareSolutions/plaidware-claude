@@ -29,11 +29,11 @@ export function Section({
   return (
     <section id={id} className={cn("flex flex-col gap-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
           {Icon && <Icon className="size-4 text-muted-foreground" />}
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{title}</h2>
+          <h2 className="shrink-0 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{title}</h2>
           {count != null && <Badge variant="outline" className="text-[10px]">{count}</Badge>}
-          {description && <span className="text-sm text-muted-foreground">{description}</span>}
+          {description && <span className="text-sm text-muted-foreground max-sm:basis-full">{description}</span>}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>

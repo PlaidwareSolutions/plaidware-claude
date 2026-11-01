@@ -1,17 +1,18 @@
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { isoDay } from "../../lib/dates";
 import { roleHasWorkAccess } from "../../lib/roles";
 import { organization, user } from "../auth/schema";
 import { products } from "../catalog/schema";
-import type { BoardSettings, CarryOver, CreateItem, ItemPatch, WorkItemStatus, WorkResolution } from "./contracts";
+import type { BoardSettings, CarryOver, CreateItem, ItemPatch, WorkItemStatus, WorkLinkType, WorkResolution } from "./contracts";
 import { defaultKeyPrefix, formatKey, uniqueKeyPrefix } from "./key-logic";
 import { RANK_REBALANCE_AT, rankBetween, rebalanceRanks } from "./rank-logic";
-import { attachmentProblem, sniffImageType } from "./attachment-logic";
+import { attachmentProblem, fileAttachmentType, sniffImageType } from "./attachment-logic";
+import { cloneTitle, linkPhrase, linkRow, type LinkDirection } from "./link-logic";
 import { normalizeRichText } from "./rich-text-sanitize";
 import { richTextToPlain } from "./rich-text";
 import { extractMentionIds, newMentionIds } from "./mention-logic";
-import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints, workWatchers } from "./schema";
+import { workAttachments, workBoards, workComments, workItemAliases, workItemEvents, workItemLinks, workItems, workSprints, workWatchers } from "./schema";
 import { addDays, carryOverPatch, isClosedStatus, nextSprintWindow, sprintCommitment, sprintCompletion } from "./sprint-logic";
 import { applyTransition, blockedReason, canTransition, sprintForTransition, statusForSprintChange } from "./transitions";
 
@@ -769,6 +770,204 @@ export async function setWatching(o: { itemId: string; userId: string; watching:
     const { item, productSlug } = await itemContext(tx, o.itemId);
     if (o.watching) await addWatchers(tx, item.id, [o.userId]);
     else await tx.delete(workWatchers).where(and(eq(workWatchers.itemId, item.id), eq(workWatchers.userId, o.userId)));
+    return { productSlug, number: item.number };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Links, clone, move, attachments (Jira's Link issue / Clone / Move / Attach)
+// ---------------------------------------------------------------------------
+
+const itemLabel = (key: string, title: string) => ({ name: `${key} ${title}` });
+
+/** Insert one link and write the event on both ends; false when that exact link already exists. */
+async function linkTx(
+  tx: Tx,
+  o: { a: { id: string; key: string; title: string }; b: { id: string; key: string; title: string }; type: WorkLinkType; direction: LinkDirection; actorUserId: string | null },
+): Promise<boolean> {
+  if (o.a.id === o.b.id) throw new Error("An item can't be linked to itself");
+  const row = linkRow({ itemId: o.a.id, otherItemId: o.b.id, type: o.type, direction: o.direction });
+  if (o.type === "relates") {
+    // Symmetric: one row covers both directions, so refuse the mirror too.
+    const mirror = await tx.query.workItemLinks.findFirst({
+      where: and(eq(workItemLinks.sourceItemId, row.targetItemId), eq(workItemLinks.targetItemId, row.sourceItemId), eq(workItemLinks.type, "relates")),
+      columns: { id: true },
+    });
+    if (mirror) return false;
+  }
+  const [created] = await tx.insert(workItemLinks).values({ ...row, createdByUserId: o.actorUserId }).onConflictDoNothing().returning({ id: workItemLinks.id });
+  if (!created) return false;
+  const aDir: LinkDirection = row.sourceItemId === o.a.id ? "outward" : "inward";
+  const bDir: LinkDirection = aDir === "outward" ? "inward" : "outward";
+  await recordEvent(tx, { itemId: o.a.id, actorUserId: o.actorUserId, kind: "link_added", payload: { phrase: linkPhrase(o.type, aDir), other: itemLabel(o.b.key, o.b.title) } });
+  await recordEvent(tx, { itemId: o.b.id, actorUserId: o.actorUserId, kind: "link_added", payload: { phrase: linkPhrase(o.type, bDir), other: itemLabel(o.a.key, o.a.title) } });
+  return true;
+}
+
+export async function addItemLink(o: {
+  itemId: string;
+  otherItemId: string;
+  type: WorkLinkType;
+  direction: LinkDirection;
+  actorUserId: string;
+}): Promise<{ productSlug: string; number: number; otherSlug: string; otherNumber: number }> {
+  return db.transaction(async (tx) => {
+    const a = await itemContext(tx, o.itemId);
+    const b = await itemContext(tx, o.otherItemId);
+    const created = await linkTx(tx, {
+      a: { id: a.item.id, key: a.key, title: a.item.title },
+      b: { id: b.item.id, key: b.key, title: b.item.title },
+      type: o.type,
+      direction: o.direction,
+      actorUserId: o.actorUserId,
+    });
+    if (!created) throw new Error(`${a.key} and ${b.key} are already linked that way`);
+    return { productSlug: a.productSlug, number: a.item.number, otherSlug: b.productSlug, otherNumber: b.item.number };
+  });
+}
+
+export async function removeItemLink(o: { linkId: string; actorUserId: string }): Promise<{ items: { slug: string; number: number }[] }> {
+  return db.transaction(async (tx) => {
+    const link = await tx.query.workItemLinks.findFirst({ where: eq(workItemLinks.id, o.linkId) });
+    if (!link) throw new Error("That link no longer exists");
+    const s = await itemContext(tx, link.sourceItemId);
+    const t = await itemContext(tx, link.targetItemId);
+    await tx.delete(workItemLinks).where(eq(workItemLinks.id, link.id));
+    await recordEvent(tx, { itemId: s.item.id, actorUserId: o.actorUserId, kind: "link_removed", payload: { phrase: linkPhrase(link.type, "outward"), other: itemLabel(t.key, t.item.title) } });
+    await recordEvent(tx, { itemId: t.item.id, actorUserId: o.actorUserId, kind: "link_removed", payload: { phrase: linkPhrase(link.type, "inward"), other: itemLabel(s.key, s.item.title) } });
+    return { items: [{ slug: s.productSlug, number: s.item.number }, { slug: t.productSlug, number: t.item.number }] };
+  });
+}
+
+/**
+ * Jira's Clone: a new item on the same board with the same fields (status back
+ * to To do, or Backlog for a backlog item; no sprint), linked to the original
+ * as "clones". The client (requester) is copied only when ops clone it.
+ */
+export async function cloneItem(o: {
+  itemId: string;
+  title: string;
+  includeAttachments: boolean;
+  includeLinks: boolean;
+  actorUserId: string;
+  copyRequester: boolean;
+}): Promise<{ id: string; number: number; key: string; productSlug: string }> {
+  const src = await db.query.workItems.findFirst({ where: eq(workItems.id, o.itemId) });
+  if (!src) throw new Error("Item not found");
+  const created = await createItem({
+    boardId: src.boardId,
+    title: o.title.trim() || cloneTitle(src.title),
+    description: src.description,
+    type: src.type,
+    priority: src.priority,
+    status: src.status === "backlog" ? "backlog" : "todo",
+    estimatePoints: src.estimatePoints,
+    assigneeUserId: src.assigneeUserId,
+    labels: src.labels,
+    dueOn: src.dueOn,
+    source: src.source,
+    parentId: src.type === "epic" ? null : src.parentId,
+    reporterUserId: o.actorUserId,
+    requesterTenantId: o.copyRequester ? src.requesterTenantId : null,
+  });
+  await db.transaction(async (tx) => {
+    const a = await itemContext(tx, created.id);
+    const b = await itemContext(tx, src.id);
+    if (o.includeAttachments) {
+      await tx.execute(sql`
+        insert into work_attachments (item_id, uploaded_by_user_id, content_type, byte_size, file_name, data)
+        select ${created.id}, uploaded_by_user_id, content_type, byte_size, file_name, data
+        from work_attachments where item_id = ${src.id}`);
+    }
+    if (o.includeLinks) {
+      const links = await tx.select().from(workItemLinks).where(or(eq(workItemLinks.sourceItemId, src.id), eq(workItemLinks.targetItemId, src.id)));
+      for (const l of links) {
+        const outward = l.sourceItemId === src.id;
+        const other = await itemContext(tx, outward ? l.targetItemId : l.sourceItemId);
+        await linkTx(tx, {
+          a: { id: a.item.id, key: a.key, title: a.item.title },
+          b: { id: other.item.id, key: other.key, title: other.item.title },
+          type: l.type,
+          direction: outward ? "outward" : "inward",
+          actorUserId: o.actorUserId,
+        });
+      }
+    }
+    await linkTx(tx, {
+      a: { id: a.item.id, key: a.key, title: a.item.title },
+      b: { id: b.item.id, key: b.key, title: b.item.title },
+      type: "clones",
+      direction: "outward",
+      actorUserId: o.actorUserId,
+    });
+  });
+  return created;
+}
+
+/**
+ * Jira's Move: the item goes to another product's board under that board's
+ * next key. Sprint and epic are board-local, so both are cleared; an epic with
+ * children stays put until they move or leave it. The old key keeps working
+ * (work_item_aliases; the item page and quick view redirect).
+ */
+export async function moveItemToBoard(o: { itemId: string; targetSlug: string; actorUserId: string }): Promise<{ fromSlug: string; slug: string; number: number; key: string }> {
+  const target = await ensureBoardForProductSlug(o.targetSlug);
+  if (!target) throw new Error("That board doesn't exist");
+  return db.transaction(async (tx) => {
+    const { item, productSlug, key } = await itemContext(tx, o.itemId, true);
+    if (item.boardId === target.board.id) throw new Error(`${key} is already on that board`);
+    if (item.type === "epic") {
+      const child = await tx.query.workItems.findFirst({ where: eq(workItems.parentId, item.id), columns: { id: true } });
+      if (child) throw new Error("Move this epic's child items, or take them out of it, first");
+    }
+    const [claim] = await tx
+      .update(workBoards)
+      .set({ nextItemNumber: sql`${workBoards.nextItemNumber} + 1` })
+      .where(eq(workBoards.id, target.board.id))
+      .returning({ next: workBoards.nextItemNumber });
+    const number = claim.next - 1;
+    const newKey = formatKey(target.board.keyPrefix, number);
+    await tx.insert(workItemAliases).values({ boardId: item.boardId, number: item.number, itemId: item.id }).onConflictDoNothing();
+    const rank = await appendRank(tx, target.board.id, item.status);
+    await tx.update(workItems).set({ boardId: target.board.id, number, rank, sprintId: null, parentId: null }).where(eq(workItems.id, item.id));
+    await recordEvent(tx, {
+      itemId: item.id,
+      actorUserId: o.actorUserId,
+      kind: "item_moved",
+      payload: { from: key, to: newKey, fromBoard: productSlug, toBoard: o.targetSlug, clearedSprint: item.sprintId != null, clearedEpic: item.parentId != null },
+    });
+    return { fromSlug: productSlug, slug: o.targetSlug, number, key: newKey };
+  });
+}
+
+/** Jira's Attach: a file in the item's Attachments section. */
+export async function attachFile(o: { itemId: string; bytes: Uint8Array; fileName: string; actorUserId: string }): Promise<{ id: string; productSlug: string; number: number }> {
+  const check = fileAttachmentType(o.fileName, o.bytes);
+  if ("problem" in check) throw new Error(check.problem);
+  return db.transaction(async (tx) => {
+    const { item, productSlug } = await itemContext(tx, o.itemId);
+    const fileName = o.fileName.trim().slice(0, 200) || "file";
+    const [row] = await tx
+      .insert(workAttachments)
+      .values({ itemId: item.id, uploadedByUserId: o.actorUserId, contentType: check.type, byteSize: o.bytes.byteLength, fileName, data: Buffer.from(o.bytes) })
+      .returning({ id: workAttachments.id });
+    await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "attachment_added", payload: { fileName } });
+    return { id: row.id, productSlug, number: item.number };
+  });
+}
+
+/** The person who attached a file, or an ops admin, may remove it. */
+export async function removeAttachment(o: { attachmentId: string; actorUserId: string; actorIsAdmin: boolean }): Promise<{ productSlug: string; number: number }> {
+  return db.transaction(async (tx) => {
+    const att = await tx.query.workAttachments.findFirst({
+      where: eq(workAttachments.id, o.attachmentId),
+      columns: { id: true, itemId: true, uploadedByUserId: true, fileName: true },
+    });
+    if (!att?.itemId) throw new Error("That attachment no longer exists");
+    if (!o.actorIsAdmin && att.uploadedByUserId !== o.actorUserId) throw new Error("Only the person who attached it or an ops admin can delete it");
+    const { item, productSlug } = await itemContext(tx, att.itemId);
+    await tx.delete(workAttachments).where(eq(workAttachments.id, att.id));
+    await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "attachment_removed", payload: { fileName: att.fileName ?? "file" } });
     return { productSlug, number: item.number };
   });
 }
