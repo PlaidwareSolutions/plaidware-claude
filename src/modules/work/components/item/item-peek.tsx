@@ -72,8 +72,15 @@ export function ItemPeek({
                     <ExternalLink className="size-3.5" /> Open
                   </Link>
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={close} aria-label="Close" title="Close (Esc)">
-                  <X className="size-4" />
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={close}
+                  aria-label="Close"
+                  title="Close (Esc)"
+                  className="ml-1 rounded-full border bg-muted text-foreground hover:bg-accent"
+                >
+                  <X className="size-4" strokeWidth={2.5} />
                 </Button>
               </div>
             </SheetHeader>
