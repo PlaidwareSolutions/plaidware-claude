@@ -199,7 +199,10 @@ WorkItemRef: { key, number, product_slug, status, resolution, url }
   `feature`, feedback → `enhancement`. The title is `title`, else the
   message's first line. The body is the message, the screenshot, and a
   details list: reporter role, page, browser, screen, and a link to
-  `report_url`. The reporter shows in the history as "System".
+  `report_url`. **Reporter** is the Hub account with the actor's email,
+  but only when it's a developer or ops account (a staffer testing from
+  the app). A shop user is never matched; the history names the app
+  ("Fixorata") for them.
 - **Who gets it.** The board's Settings → "Reports from partner apps" names an
   assignee (`work_boards.report_assignee_user_id`). They get the normal
   "assigned to you" email. When that person can no longer take work, the

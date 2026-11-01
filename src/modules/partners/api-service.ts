@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../../db";
 import { env } from "../../env";
@@ -578,6 +578,19 @@ async function reportAssignee(userId: string | null): Promise<string | null> {
   return u && !u.disabledAt && roleHasWorkAccess(u.platformRole) ? userId : null;
 }
 
+/**
+ * The ticket's Reporter: the Hub account behind the partner's actor, matched by
+ * email — but only a work-area account (developer / ops), so a shop user never
+ * becomes a name developers can see. Anyone else stays a role in the body.
+ */
+async function reportReporter(email: string): Promise<string | null> {
+  const u = await db.query.user.findFirst({
+    where: sql`lower(${user.email}) = ${email.trim().toLowerCase()}`,
+    columns: { id: true, platformRole: true, disabledAt: true },
+  });
+  return u && !u.disabledAt && roleHasWorkAccess(u.platformRole) ? u.id : null;
+}
+
 /** The app's own product: the one whose slug IS a prefix, else the first that matches one. */
 async function partnerProductSlug(app: PartnerApp): Promise<string> {
   const rows = await db.select({ slug: products.slug }).from(products).orderBy(asc(products.createdAt));
@@ -674,7 +687,7 @@ export async function createPartnerWorkItem(opts: {
       assigneeUserId: await reportAssignee(target.board.reportAssigneeUserId),
       labels: reportLabels(app.name, body.kind),
       source: "client_request",
-      reporterUserId: null,
+      reporterUserId: await reportReporter(actor.email),
       requesterTenantId: tenantId,
       via: app.displayName,
     });
