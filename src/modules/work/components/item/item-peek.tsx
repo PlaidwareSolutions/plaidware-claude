@@ -60,6 +60,7 @@ export function ItemPeek({
                 <Button
                   variant="ghost"
                   size="xs"
+                  className="cursor-pointer"
                   onClick={() => {
                     const url = new URL(WORK.item(product.slug, item.number), window.location.origin).toString();
                     void navigator.clipboard.writeText(url).then(() => toast.success(`Link to ${item.key} copied`), () => toast.error("Couldn't copy the link"));
@@ -78,7 +79,7 @@ export function ItemPeek({
                   onClick={close}
                   aria-label="Close"
                   title="Close (Esc)"
-                  className="ml-1 rounded-full border bg-muted text-foreground hover:bg-accent"
+                  className="ml-1 cursor-pointer rounded-full border bg-muted text-foreground hover:bg-accent"
                 >
                   <X className="size-4" strokeWidth={2.5} />
                 </Button>
