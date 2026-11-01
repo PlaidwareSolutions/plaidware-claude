@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Link2, MoreHorizontal, RefreshCw, Search, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { Check, Code, Link2, MoreHorizontal, RefreshCw, Search, SlidersHorizontal, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { WORK, withQuery } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -30,6 +30,7 @@ import {
   type ExplorerGroup,
   type ExplorerQuick,
 } from "../../explorer-logic";
+import { filtersToJql } from "../../jql-logic";
 import { STATUS_LABELS } from "../../transitions";
 import { CARD_FIELD_LABELS, DEFAULT_CARD_FIELDS, setCardFields, useCardFields, type CardFields } from "../board/card-fields";
 import { TypeIcon, epicTone } from "../item-bits";
@@ -92,6 +93,20 @@ export function ExplorerToolbar({
   const [q, setQ] = useState(filters.q ?? "");
   const searchRef = useRef<HTMLInputElement>(null);
   const fields = useCardFields();
+  // Jira's "Switch to JQL": the same filters (and sort) as a query on the search page.
+  const toJql = () => {
+    const slug = lockProduct ? base.split("/").pop() : undefined;
+    const jql = filtersToJql(
+      { ...filters, q, product: slug ? [slug] : filters.product },
+      {
+        boardKey: () => undefined,
+        user: (id) => assignees.find((a) => a.id === id)?.name,
+        epicKey: (id) => epics.find((e) => e.id === id)?.key,
+        client: (id) => clients.find((c) => c.id === id)?.name,
+      },
+    );
+    router.push(withQuery(WORK.search, { jql: jql || undefined }));
+  };
   const push = (patch: Partial<ExplorerFilters>) =>
     start(() => router.replace(withQuery(base, explorerQuery({ ...filters, ...patch, ...(lockProduct ? { product: [] } : {}) })), { scroll: false }));
   // The company scope lives in the header breadcrumb, so it doesn't count as a filter here.
@@ -251,6 +266,9 @@ export function ExplorerToolbar({
 
       <div className="ml-auto flex items-center gap-1.5">
         {extra}
+        <Button variant="ghost" size="sm" className="h-9 cursor-pointer rounded-[3px] border px-3 font-mono text-xs font-semibold" title="Switch to JQL — these filters as a query" onClick={toJql}>
+          JQL
+        </Button>
         <Button
           variant="ghost"
           size="icon"
@@ -302,6 +320,9 @@ export function ExplorerToolbar({
               }
             >
               <Link2 className="size-4" /> Copy link to this view
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={toJql}>
+              <Code className="size-4" /> Switch to JQL
             </DropdownMenuItem>
             {count > 0 && (
               <DropdownMenuItem onSelect={clearAll}>

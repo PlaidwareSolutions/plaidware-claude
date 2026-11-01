@@ -1,4 +1,4 @@
-import { Building2, Kanban, LayoutDashboard, SquareUserRound } from "lucide-react";
+import { Building2, Kanban, LayoutDashboard, Search, SquareUserRound } from "lucide-react";
 import { WORK } from "@/lib/routes";
 import type { NavItem } from "@/components/ops-nav";
 
@@ -15,6 +15,7 @@ export const WORK_NAV: NavItem[] = [
   { href: WORK.home, label: "Overview", icon: LayoutDashboard, exact: true },
   { href: WORK.all, label: "All work", icon: Kanban },
   { href: WORK.my, label: "My work", icon: SquareUserRound, countKey: "my" },
+  { href: WORK.search, label: "Search (JQL)", icon: Search },
   // Ops have the full client pages; a developer's clients are the workspaces ops added them to.
   { href: WORK.clients, label: "Clients", icon: Building2, developerOnly: true },
 ];

@@ -62,6 +62,8 @@ export const WORK = {
   my: "/work/my",
   /** The cross-product board and list (every company, filterable). */
   all: "/work/all",
+  /** JQL search across every board (?jql=…). */
+  search: "/work/search",
   /** Developers only: the client workspaces they've been added to (ops use /ops/clients). */
   clients: "/work/clients",
   client: (id: string) => `/work/clients/${id}`,

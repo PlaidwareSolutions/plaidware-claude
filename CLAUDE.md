@@ -221,6 +221,15 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   (`attachment-logic.fileAttachmentType`), only verified images served inline
   — everything else `Content-Disposition: attachment`. Server actions body
   limit is 11mb for this. Delete: uploader or ops admin.
+- JQL search (2026-11): `/work/search?jql=…` (`WORK.search`, sidebar "Search
+  (JQL)"). `jql-logic.ts` (pure, tested): tokenizer, parser (AND/OR/NOT,
+  parens, IN, IS [NOT] EMPTY, ~, ORDER BY), field registry `JQL_FIELDS`
+  (aliases, operators, enum synonyms like Highest→urgent), relative dates
+  (-7d, startOfWeek()), autocomplete `jqlSuggest`, `filtersToJql` (the board
+  toolbar's "JQL" / "Switch to JQL"). `queries.searchWorkByJql` resolves names
+  in one batch (unknown → error with position), compiles to parameterised SQL,
+  caps at 500; `client` is ops-only (parser refuses it for developers).
+  Results reuse `ExplorerList` with `jql` (headers rewrite ORDER BY).
 - Mobile (2026-11): `DataTableShell` tables render as labelled cards under
   640px (`TableCardLabels` copies header text to `data-label`; CSS at the end
   of globals.css). Stat grids are `grid-cols-2` on phones. The ticket view puts

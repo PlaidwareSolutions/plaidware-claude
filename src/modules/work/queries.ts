@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db";
 import { isoDay } from "../../lib/dates";
@@ -34,7 +34,8 @@ import {
   type WorkUserRef,
   type WorkViewer,
 } from "./dto";
-import { explorerColumns, type ExplorerFilters } from "./explorer-logic";
+import { explorerColumns, type ExplorerCard, type ExplorerFilters } from "./explorer-logic";
+import { enumLabel, JQL_FIELDS, JqlError, normalizeEnum, parseJql, parseKey, resolveDate, type JqlDynamic, type JqlExpr, type JqlOp, type JqlQuery, type JqlValue } from "./jql-logic";
 import { renderRichText } from "./rich-text-sanitize";
 import { defaultKeyPrefix, formatKey } from "./key-logic";
 import { workAttachments, workBoards, workComments, workItemAliases, workItemEvents, workItemLinks, workItems, workSprints, workWatchers } from "./schema";
@@ -1015,4 +1016,287 @@ export async function resolveMovedItem(slug: string, number: number): Promise<{ 
     .where(and(eq(aliasProduct.slug, slug), eq(workItemAliases.number, number)))
     .limit(1);
   return row ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// JQL search (/work/search)
+// ---------------------------------------------------------------------------
+
+export type JqlSearchResult =
+  | { ok: true; items: ExplorerCard[]; total: number; truncated: boolean }
+  | { ok: false; error: string; pos: number | null };
+
+const JQL_LIMIT = 500;
+const lc = (s: string) => s.trim().toLowerCase();
+const likeArg = (s: string) => `%${s.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+
+/** Every literal under each field, for one batch of lookups before compiling. */
+function jqlLiterals(e: JqlExpr | null, out = new Map<string, Set<string>>()): Map<string, Set<string>> {
+  if (!e) return out;
+  if (e.kind === "and" || e.kind === "or") {
+    jqlLiterals(e.left, out);
+    jqlLiterals(e.right, out);
+  } else if (e.kind === "not") jqlLiterals(e.expr, out);
+  else for (const v of e.values) if (v.kind === "lit") (out.get(e.field) ?? out.set(e.field, new Set()).get(e.field)!).add(v.v);
+  return out;
+}
+
+/**
+ * Jira's JQL over every board: parse (jql-logic), resolve names to ids in one
+ * pass (an unknown name is an error, like Jira), compile to parameterised SQL,
+ * order (default: newest first) and cap at 500. Client data stays ops-only:
+ * the parser refuses `client` for developers and toCardDto gates the requester.
+ */
+export async function searchWorkByJql(jql: string, viewer: WorkViewer, now = new Date()): Promise<JqlSearchResult> {
+  let q: JqlQuery;
+  try {
+    q = parseJql(jql, { ops: viewer.isOps });
+  } catch (e) {
+    if (e instanceof JqlError) return { ok: false, error: e.message, pos: e.pos };
+    throw e;
+  }
+  const lits = jqlLiterals(q.where);
+  const want = (...fields: string[]) => [...new Set(fields.flatMap((f) => [...(lits.get(f) ?? [])]))];
+
+  // --- lookups ---------------------------------------------------------------
+  const userWords = want("assignee", "reporter", "watcher");
+  const [users, boards, clients, sprintRows] = await Promise.all([
+    userWords.length
+      ? db
+          .select({ id: user.id, name: user.name, email: user.email })
+          .from(user)
+          .where(or(inArray(sql`lower(${user.name})`, userWords.map(lc)), inArray(sql`lower(${user.email})`, userWords.map(lc)), inArray(user.id, userWords)))
+      : Promise.resolve([]),
+    db.select({ id: workBoards.id, prefix: workBoards.keyPrefix, slug: products.slug, name: products.name }).from(workBoards).innerJoin(products, eq(products.id, workBoards.productId)),
+    viewer.isOps && want("client").length
+      ? db.select({ id: organization.id, name: organization.name }).from(organization).where(or(inArray(sql`lower(${organization.name})`, want("client").map(lc)), inArray(organization.id, want("client"))))
+      : Promise.resolve([]),
+    want("sprint").length ? db.select({ id: workSprints.id, name: workSprints.name }).from(workSprints).where(inArray(sql`lower(${workSprints.name})`, want("sprint").map(lc))) : Promise.resolve([]),
+  ]);
+  const boardFor = (w: string) => boards.find((b) => b.prefix.toLowerCase() === lc(w) || b.slug === lc(w) || b.name.toLowerCase() === lc(w));
+  const epicKeys = want("epic").map((k) => ({ k, key: parseKey(k) })).filter((x) => x.key);
+  const epics = epicKeys.length
+    ? await db
+        .select({ id: workItems.id, prefix: workBoards.keyPrefix, number: workItems.number })
+        .from(workItems)
+        .innerJoin(workBoards, eq(workBoards.id, workItems.boardId))
+        .where(and(eq(workItems.type, "epic"), or(...epicKeys.map((x) => and(eq(workBoards.keyPrefix, x.key!.prefix), eq(workItems.number, x.key!.number))))))
+    : [];
+
+  // --- compile ---------------------------------------------------------------
+  const fail = (message: string, pos: number): never => {
+    throw new JqlError(message, pos);
+  };
+  const userIds = (field: string, v: JqlValue): string[] => {
+    if (v.kind === "fn") return v.name === "currentuser" ? [viewer.userId] : fail(`${v.name}() isn't a person`, v.pos);
+    if (v.kind !== "lit") return [];
+    const hits = users.filter((u) => u.id === v.v || u.name.toLowerCase() === lc(v.v) || u.email.toLowerCase() === lc(v.v));
+    return hits.length ? hits.map((u) => u.id) : fail(`No user "${v.v}" for ${field}`, v.pos);
+  };
+  const values = (c: Extract<JqlExpr, { kind: "cmp" }>) => c.values.filter((v) => v.kind !== "empty");
+  const positive = (op: JqlOp) => op === "=" || op === "in" || op === "~" || op === "is";
+  const negate = (op: JqlOp, cond: SQL) => (positive(op) ? cond : sql`not (${cond})`);
+  const cmpOp = (op: JqlOp, col: SQL | AnyColumn, v: unknown): SQL => {
+    switch (op) {
+      case ">":
+        return sql`${col} > ${v}`;
+      case ">=":
+        return sql`${col} >= ${v}`;
+      case "<":
+        return sql`${col} < ${v}`;
+      case "<=":
+        return sql`${col} <= ${v}`;
+      case "!=":
+        return sql`${col} <> ${v}`;
+      default:
+        return sql`${col} = ${v}`;
+    }
+  };
+  const anyOf = (conds: SQL[]) => (conds.length === 1 ? conds[0] : sql`(${sql.join(conds, sql` or `)})`);
+
+  function clause(c: Extract<JqlExpr, { kind: "cmp" }>): SQL {
+    const vs = values(c);
+    const isEmpty = c.op === "is" || c.op === "is not";
+    const nullCheck = (col: SQL | AnyColumn) => (c.op === "is" ? sql`${col} is null` : sql`${col} is not null`);
+    const def = JQL_FIELDS[c.field];
+
+    switch (def.type) {
+      case "project": {
+        const ids = vs.map((v) => (v.kind === "lit" && boardFor(v.v)?.id) || fail(`No board "${v.kind === "lit" ? v.v : "?"}"`, v.pos));
+        return negate(c.op, sql`${workItems.boardId} in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`);
+      }
+      case "key": {
+        const conds = vs.map((v) => {
+          const k = v.kind === "lit" ? parseKey(v.v) : null;
+          if (!k) return fail(`"${v.kind === "lit" ? v.v : "?"}" isn't a key like FIXO-12`, v.pos);
+          return sql`(${workBoards.keyPrefix} = ${k.prefix} and ${workItems.number} = ${k.number})`;
+        });
+        return negate(c.op, anyOf(conds));
+      }
+      case "text": {
+        const term = vs[0];
+        if (isEmpty) return c.field === "description" ? (c.op === "is" ? sql`${workItems.description} = ''` : sql`${workItems.description} <> ''`) : fail(`${c.field} can't be EMPTY`, c.pos);
+        if (term.kind !== "lit") return fail("Search for words in quotes", term.pos);
+        const like = likeArg(term.v);
+        const inComments = sql`exists (select 1 from work_comments wc where wc.item_id = ${workItems.id} and wc.body ilike ${like})`;
+        const cond =
+          c.field === "summary"
+            ? sql`${workItems.title} ilike ${like}`
+            : c.field === "description"
+              ? sql`${workItems.description} ilike ${like}`
+              : c.field === "comment"
+                ? inComments
+                : sql`(${workItems.title} ilike ${like} or ${workItems.description} ilike ${like} or ${inComments})`;
+        return c.op === "~" ? cond : sql`not ${cond}`;
+      }
+      case "enum": {
+        const col = { status: workItems.status, type: workItems.type, priority: workItems.priority, resolution: workItems.resolution, source: workItems.source }[c.field as "status"];
+        if (isEmpty) return nullCheck(col);
+        const vals = vs.map((v) => (v.kind === "lit" && normalizeEnum(c.field, v.v)) || fail(`"${v.kind === "lit" ? v.v : "?"}" isn't a ${c.field} — try ${(def.values ?? []).map(enumLabel).join(", ")}`, v.pos));
+        return negate(c.op, sql`${col}::text in (${sql.join(vals.map((v) => sql`${v}`), sql`, `)})`);
+      }
+      case "user": {
+        if (c.field === "watcher") {
+          const ids = vs.flatMap((v) => userIds(c.field, v));
+          return negate(c.op, sql`exists (select 1 from work_watchers ww where ww.item_id = ${workItems.id} and ww.user_id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)}))`);
+        }
+        const col = c.field === "assignee" ? workItems.assigneeUserId : workItems.reporterUserId;
+        if (isEmpty) return nullCheck(col);
+        const ids = vs.flatMap((v) => userIds(c.field, v));
+        const cond = sql`${col} in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`;
+        return positive(c.op) ? cond : sql`(${col} is null or not ${cond})`;
+      }
+      case "labels": {
+        if (isEmpty) return c.op === "is" ? sql`jsonb_array_length(${workItems.labels}) = 0` : sql`jsonb_array_length(${workItems.labels}) > 0`;
+        const conds = vs.map((v) => (v.kind === "lit" ? sql`${workItems.labels} @> ${JSON.stringify([v.v])}::jsonb` : fail("A label is a word", v.pos)));
+        return negate(c.op, anyOf(conds));
+      }
+      case "epic": {
+        if (isEmpty) return nullCheck(workItems.parentId);
+        const ids = vs.map((v) => {
+          const k = v.kind === "lit" ? parseKey(v.v) : null;
+          const hit = k && epics.find((e) => e.prefix === k.prefix && e.number === k.number);
+          return hit ? hit.id : fail(`No epic "${v.kind === "lit" ? v.v : "?"}"`, v.pos);
+        });
+        const cond = sql`${workItems.parentId} in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`;
+        return positive(c.op) ? cond : sql`(${workItems.parentId} is null or not ${cond})`;
+      }
+      case "sprint": {
+        if (isEmpty) return nullCheck(workItems.sprintId);
+        const conds = vs.map((v) => {
+          if (v.kind === "fn") {
+            if (v.name === "opensprints") return sql`${workItems.sprintId} in (select id from work_sprints where status in ('planned', 'active'))`;
+            if (v.name === "closedsprints") return sql`${workItems.sprintId} in (select id from work_sprints where status = 'completed')`;
+            return fail(`${v.name}() isn't a sprint`, v.pos);
+          }
+          const ids = sprintRows.filter((s) => v.kind === "lit" && s.name.toLowerCase() === lc(v.v)).map((s) => s.id);
+          return ids.length ? sql`${workItems.sprintId} in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})` : fail(`No sprint "${v.kind === "lit" ? v.v : "?"}"`, v.pos);
+        });
+        const cond = anyOf(conds);
+        return positive(c.op) ? cond : sql`(${workItems.sprintId} is null or not ${cond})`;
+      }
+      case "bool": {
+        const v = vs[0];
+        const t = v.kind === "lit" ? lc(v.v) : "";
+        if (t !== "true" && t !== "false") return fail("flagged is true or false", v.pos);
+        const flagged = (t === "true") === (c.op === "=");
+        return flagged ? isNotNull(workItems.flaggedAt) : isNull(workItems.flaggedAt);
+      }
+      case "number": {
+        if (isEmpty) return nullCheck(workItems.estimatePoints);
+        const v = vs[0];
+        const n = v.kind === "lit" ? Number(v.v) : NaN;
+        if (!Number.isFinite(n)) return fail("points is a number", v.pos);
+        return cmpOp(c.op, workItems.estimatePoints, n);
+      }
+      case "date": {
+        const col = { created: workItems.createdAt, updated: workItems.updatedAt, resolved: workItems.completedAt, due: workItems.dueOn }[c.field as "created"];
+        if (isEmpty) return nullCheck(col);
+        const v = vs[0];
+        const d = resolveDate(v, now);
+        if (!d) return fail("Expected a date", v.pos);
+        if (c.field === "due") return cmpOp(c.op, col, d.toISOString().slice(0, 10));
+        // "created = 2026-11-01" means that day, like Jira.
+        if ((c.op === "=" || c.op === "!=") && v.kind === "lit" && /^\d{4}-\d{2}-\d{2}$/.test(v.v)) {
+          const day = sql`(${col} >= ${d} and ${col} < ${new Date(d.getTime() + 86_400_000)})`;
+          return c.op === "=" ? day : sql`not ${day}`;
+        }
+        return cmpOp(c.op, col, d);
+      }
+      case "client": {
+        if (isEmpty) return nullCheck(workItems.requesterTenantId);
+        const ids = vs.map((v) => (v.kind === "lit" && clients.find((t) => t.id === v.v || t.name.toLowerCase() === lc(v.v))?.id) || fail(`No client "${v.kind === "lit" ? v.v : "?"}"`, v.pos));
+        const cond = sql`${workItems.requesterTenantId} in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`;
+        return positive(c.op) ? cond : sql`(${workItems.requesterTenantId} is null or not ${cond})`;
+      }
+    }
+  }
+  function compile(e: JqlExpr): SQL {
+    if (e.kind === "and") return sql`(${compile(e.left)} and ${compile(e.right)})`;
+    if (e.kind === "or") return sql`(${compile(e.left)} or ${compile(e.right)})`;
+    if (e.kind === "not") return sql`not (${compile(e.expr)})`;
+    return clause(e);
+  }
+
+  let where: SQL | undefined;
+  try {
+    where = q.where ? compile(q.where) : undefined;
+  } catch (e) {
+    if (e instanceof JqlError) return { ok: false, error: e.message, pos: e.pos };
+    throw e;
+  }
+
+  const orderCols: Record<string, SQL | AnyColumn> = {
+    project: products.name,
+    key: sql`${workBoards.keyPrefix}, ${workItems.number}`,
+    summary: workItems.title,
+    status: workItems.status,
+    type: workItems.type,
+    // Jira's DESC puts the highest priority first.
+    priority: sql`array_position(array['low','medium','high','urgent'], ${workItems.priority}::text)`,
+    assignee: assignee.name,
+    reporter: sql`(select name from "user" ru where ru.id = ${workItems.reporterUserId})`,
+    points: workItems.estimatePoints,
+    created: workItems.createdAt,
+    updated: workItems.updatedAt,
+    due: workItems.dueOn,
+    resolved: workItems.completedAt,
+  };
+  const order = q.orderBy.length
+    ? q.orderBy.map((o) => (o.field === "key" ? sql`${workBoards.keyPrefix} ${sql.raw(o.dir)}, ${workItems.number} ${sql.raw(o.dir)}` : sql`${orderCols[o.field]} ${sql.raw(o.dir)} nulls last`))
+    : [desc(workItems.createdAt)];
+
+  const rows = await cardsWithProduct()
+    .where(where)
+    .orderBy(...order)
+    .limit(JQL_LIMIT + 1);
+  const truncated = rows.length > JQL_LIMIT;
+  const items = rows.slice(0, JQL_LIMIT).map((r) => ({ ...toCardDto(r, viewer), product: r.product }));
+  return { ok: true, items, total: items.length, truncated };
+}
+
+/** What the JQL bar can suggest: board keys, people, labels, epics, sprints, and (ops) clients. */
+export async function jqlSuggestData(viewer: WorkViewer): Promise<Omit<JqlDynamic, "ops">> {
+  const [boards, people, labels, epics, sprints, clients] = await Promise.all([
+    db.select({ prefix: workBoards.keyPrefix }).from(workBoards).orderBy(asc(workBoards.keyPrefix)),
+    listWorkAssignees(),
+    db.execute<{ label: string }>(sql`select distinct jsonb_array_elements_text(labels) as label from work_items order by 1 limit 200`),
+    db
+      .select({ prefix: workBoards.keyPrefix, number: workItems.number })
+      .from(workItems)
+      .innerJoin(workBoards, eq(workBoards.id, workItems.boardId))
+      .where(and(eq(workItems.type, "epic"), ne(workItems.status, "canceled")))
+      .orderBy(asc(workBoards.keyPrefix), asc(workItems.number))
+      .limit(200),
+    db.select({ name: workSprints.name }).from(workSprints).where(ne(workSprints.status, "completed")).orderBy(asc(workSprints.name)).limit(100),
+    viewer.isOps ? db.select({ name: organization.name }).from(organization).orderBy(asc(organization.name)).limit(300) : Promise.resolve([]),
+  ]);
+  return {
+    projects: boards.map((b) => b.prefix),
+    people: people.map((p) => p.name),
+    labels: labels.rows.map((l) => l.label),
+    epics: epics.map((e) => formatKey(e.prefix, e.number)),
+    sprints: [...new Set(sprints.map((s) => s.name))],
+    clients: clients.map((c) => c.name),
+  };
 }

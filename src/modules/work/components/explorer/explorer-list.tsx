@@ -12,6 +12,7 @@ import { assignItemAction, updateItemAction } from "../../actions";
 import { useWorkTransitions } from "../transition-host";
 import type { WorkUserRef } from "../../dto";
 import { explorerQuery, isOverdue, sortCards, type ExplorerCard, type ExplorerFilters, type ExplorerSort } from "../../explorer-logic";
+import { withOrderBy } from "../../jql-logic";
 import { TypeIcon } from "../item-bits";
 import { usePeekHref } from "../peek-link";
 import { AssigneeSelect, PrioritySelect } from "../pickers";
@@ -24,17 +25,20 @@ export function ExplorerList({
   assignees,
   productOrder,
   base = WORK.all,
+  jql,
 }: {
   cards: ExplorerCard[];
   filters: ExplorerFilters;
   assignees: WorkUserRef[];
   productOrder: string[];
   base?: string;
+  /** The search page: rows keep the query's order and the headers rewrite its ORDER BY. */
+  jql?: string;
 }) {
   const peek = usePeekHref();
   const { run, isPending } = useAction();
   const transitions = useWorkTransitions();
-  const rows = sortCards(cards, filters.sort, filters.dir, productOrder);
+  const rows = jql === undefined ? sortCards(cards, filters.sort, filters.dir, productOrder) : cards;
   const today = isoDay();
   const save = (key: string, fn: () => Promise<{ ok: true } | { ok: false; error: string }>) => void run(fn, { key, refresh: false });
 
@@ -44,18 +48,18 @@ export function ExplorerList({
       <Table>
         <TableHeader>
           <TableRow>
-            <SortHead base={base} filters={filters} by="key" className="w-28">Key</SortHead>
+            <SortHead base={base} jql={jql} filters={filters} by="key" className="w-28">Key</SortHead>
             <TableHead>Summary</TableHead>
-            <SortHead base={base} filters={filters} by="status" className="w-36">Status</SortHead>
+            <SortHead base={base} jql={jql} filters={filters} by="status" className="w-36">Status</SortHead>
             <TableHead className="hidden w-44 md:table-cell">Assignee</TableHead>
-            <SortHead base={base} filters={filters} by="priority" className="hidden w-32 sm:table-cell">Priority</SortHead>
+            <SortHead base={base} jql={jql} filters={filters} by="priority" className="hidden w-32 sm:table-cell">Priority</SortHead>
             <TableHead className="hidden lg:table-cell">Client</TableHead>
-            <SortHead base={base} filters={filters} by="due" className="hidden md:table-cell">Due</SortHead>
-            <SortHead base={base} filters={filters} by="updated" className="hidden lg:table-cell">Updated</SortHead>
+            <SortHead base={base} jql={jql} filters={filters} by="due" className="hidden md:table-cell">Due</SortHead>
+            <SortHead base={base} jql={jql} filters={filters} by="updated" className="hidden lg:table-cell">Updated</SortHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.length === 0 && <TableEmpty colSpan={8} title="No items match these filters" description="Clear a filter or widen the status to see more." />}
+          {rows.length === 0 && <TableEmpty colSpan={8} title={jql === undefined ? "No items match these filters" : "No items match this query"} description={jql === undefined ? "Clear a filter or widen the status to see more." : "Loosen a clause, or check the values (status = Done, assignee = currentUser())."} />}
           {rows.map((c) => {
             const href = peek.open(c.product.slug, c.number);
             const overdue = isOverdue(c, today);
@@ -101,10 +105,14 @@ export function ExplorerList({
   );
 }
 
-function SortHead({ base, by, filters, children, className }: { base: string; by: ExplorerSort; filters: ExplorerFilters; children: React.ReactNode; className?: string }) {
+function SortHead({ base, jql, by, filters, children, className }: { base: string; jql?: string; by: ExplorerSort; filters: ExplorerFilters; children: React.ReactNode; className?: string }) {
   const on = filters.sort === by;
   const Icon = !on ? ArrowUpDown : filters.dir === "asc" ? ArrowUp : ArrowDown;
-  const href = withQuery(base, explorerQuery({ ...filters, ...(base === WORK.all ? {} : { product: [] }), sort: by, dir: on && filters.dir === "asc" ? "desc" : "asc" }));
+  const dir = on && filters.dir === "asc" ? "desc" : "asc";
+  const href =
+    jql !== undefined
+      ? withQuery(WORK.search, { jql: withOrderBy(jql, by, dir) })
+      : withQuery(base, explorerQuery({ ...filters, ...(base === WORK.all ? {} : { product: [] }), sort: by, dir }));
   return (
     <TableHead className={className} aria-sort={on ? (filters.dir === "asc" ? "ascending" : "descending") : undefined}>
       <Link href={href} scroll={false} replace className={cn("inline-flex items-center gap-1 hover:text-heading", on && "text-heading")}>
