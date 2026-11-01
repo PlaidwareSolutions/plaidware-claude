@@ -4,7 +4,7 @@ import { dropTarget, neighboursFor, reduceMove, type ColumnMap } from "./move-ma
 
 const card = (id: string, status: WorkCardDto["status"]): WorkCardDto => ({
   id, number: 1, key: `K-${id}`, type: "task", title: id, status, priority: "medium", rank: "n", estimatePoints: null,
-  assignee: null, sprintId: null, source: "internal", labels: [], dueOn: null, commentCount: 0, flag: null, resolution: null, epic: null, createdAt: "", updatedAt: "",
+  assignee: null, sprintId: null, source: "internal", labels: [], dueOn: null, commentCount: 0, flag: null, resolution: null, coverUrl: null, epic: null, createdAt: "", updatedAt: "",
 });
 const cols = (): ColumnMap => ({
   todo: [card("a", "todo"), card("b", "todo"), card("c", "todo")],

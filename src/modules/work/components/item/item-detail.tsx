@@ -22,6 +22,7 @@ import { ItemSidebar } from "./item-sidebar";
 import { ItemAttachments } from "./item-attachments";
 import { ItemLinks } from "./item-links";
 import { CloneItemDialog, MoveItemDialog } from "./item-action-dialogs";
+import { useReadItemNotifications } from "../notification-bell";
 
 /** One work item: editable title and description, fields, comments and history. */
 export function ItemDetail({
@@ -49,6 +50,7 @@ export function ItemDetail({
   const confirm = useConfirm();
   const { run, isPending } = useAction();
   const fileInput = useRef<HTMLInputElement>(null);
+  useReadItemNotifications(item.id);
   const [linking, setLinking] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [moving, setMoving] = useState(false);

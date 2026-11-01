@@ -207,3 +207,37 @@ function describeFieldChanges(fields: unknown): { html: string; text: string }[]
   }
   return out;
 }
+
+/**
+ * The bell's line for one notification, after the actor's name: "commented",
+ * "assigned this to you", "moved this to In review"… Plain text (React escapes it).
+ */
+export function inAppSummary(kind: string, payload: Record<string, unknown>, reason: string): string {
+  const status = (v: unknown) => (typeof v === "string" && v in STATUS_LABELS ? STATUS_LABELS[v as WorkItemStatus] : String(v ?? "?"));
+  switch (kind) {
+    case "comment_added":
+      return reason === "mentioned" ? "replied to your comment" : "commented";
+    case "mentioned":
+      return `mentioned you in ${typeof payload.commentId === "string" ? "a comment" : "the description"}`;
+    case "assignee_changed":
+      return reason === "assigned" ? "assigned this to you" : refName(payload.after) ? `assigned this to ${refName(payload.after)}` : "unassigned this";
+    case "status_changed":
+      return `moved this to ${status(payload.after)}`;
+    case "flag_added":
+      return typeof payload.reason === "string" && payload.reason ? `flagged this: ${payload.reason}` : "flagged this";
+    case "flag_removed":
+      return "removed the flag";
+    case "priority_changed":
+      return `changed priority to ${String(payload.after ?? "?")}`;
+    case "parent_changed":
+      return refName(payload.after) ? `moved this into ${refName(payload.after)}` : "took this out of its epic";
+    case "sprint_changed":
+      return refName(payload.after) ? `added this to ${refName(payload.after)}` : "took this out of its sprint";
+    case "item_updated": {
+      const fields = payload.fields && typeof payload.fields === "object" ? Object.keys(payload.fields as object) : [];
+      return fields.length ? `edited the ${fields.join(", ")}` : "edited this";
+    }
+    default:
+      return kind.replace(/_/g, " ");
+  }
+}

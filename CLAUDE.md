@@ -230,6 +230,20 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   in one batch (unknown → error with position), compiles to parameterised SQL,
   caps at 500; `client` is ops-only (parser refuses it for developers).
   Results reuse `ExplorerList` with `jql` (headers rewrite ORDER BY).
+- Card ⋯ menu (2026-11, `components/board/card-menu.tsx`): Move work item ›
+  (top/up/down/bottom = `service.rankInColumn`), Change status ›, Copy link /
+  key, flag, Add label, Link work item (reuses `LinkForm`), Change parent,
+  Select cover › (`work_items.cover_attachment_id`, one of the item's own
+  images, shown on the card), Remove from sprint. Epics/images/labels load
+  lazily via `cardMenuDataAction`. Dialogs spread `shield` so clicks/keys
+  don't reach the draggable card.
+- The bell (2026-11): `work_notifications` rows are written inside
+  `service.recordEvent` (`notifyInApp`) for the same people as the emails
+  (`notify-logic.recipientsFor`; wording `inAppSummary`), with a comment
+  excerpt. `NotificationBell` in the top bar (work users, not view-as) polls
+  `myNotificationsAction` every 30s/on focus; opening an item reads its
+  notifications (`useReadItemNotifications`); pruned hourly by work.notify
+  (read > 30 days, any > 90).
 - Mobile (2026-11): `DataTableShell` tables render as labelled cards under
   640px (`TableCardLabels` copies header text to `data-label`; CSS at the end
   of globals.css). Stat grids are `grid-cols-2` on phones. The ticket view puts

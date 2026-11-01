@@ -38,7 +38,7 @@ import {
 import * as svc from "./service";
 import { env } from "@/env";
 import { fetchLinkPreview } from "./link-preview";
-import { itemTitleByRef, searchItemsForLink } from "./queries";
+import { itemTitleByRef, listMyNotifications, searchItemsForLink } from "./queries";
 import { ATTACHMENT_MAX_BYTES, FILE_MAX_BYTES } from "./attachment-logic";
 import type { WorkLinkTargetDto } from "./dto";
 import { isRichTextEmpty } from "./rich-text";
@@ -483,6 +483,70 @@ export async function removeAttachmentAction(attachmentId: string): Promise<Acti
     const r = await svc.removeAttachment({ attachmentId: uuid.parse(attachmentId), actorUserId: session.user.id, actorIsAdmin: isOpsAdmin(session) });
     done(r.productSlug, r.number);
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Card menu
+// ---------------------------------------------------------------------------
+
+export async function rankItemInColumnAction(input: { itemId: string; to: svc.ColumnMove }): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const to = z.enum(["top", "up", "down", "bottom"]).parse(input.to);
+    const r = await svc.rankInColumn({ itemId: uuid.parse(input.itemId), to, actorUserId: session.user.id });
+    done(r.productSlug, r.number);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function setItemCoverAction(input: { itemId: string; attachmentId: string | null }): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const r = await svc.setItemCover({ itemId: uuid.parse(input.itemId), attachmentId: input.attachmentId ? uuid.parse(input.attachmentId) : null, actorUserId: session.user.id });
+    done(r.productSlug, r.number);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Read-only: what the card menu's dialogs offer (epics, images, labels). */
+export async function cardMenuDataAction(itemId: string): Promise<({ ok: true } & Awaited<ReturnType<typeof svc.cardMenuData>>) | { ok: false; error: string }> {
+  try {
+    await requireWork();
+    return { ok: true, ...(await svc.cardMenuData(uuid.parse(itemId))) };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The bell
+// ---------------------------------------------------------------------------
+
+/** The signed-in person's latest notifications and unread count (polled by the bell). */
+export async function myNotificationsAction(): Promise<({ ok: true } & Awaited<ReturnType<typeof listMyNotifications>>) | { ok: false; error: string }> {
+  try {
+    const session = await requireWork();
+    return { ok: true, ...(await listMyNotifications(session.user.id)) };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Read: by ids (clicked), for one item (opened), or all ("Mark all as read"). View-as sessions are refused, like every work action. */
+export async function markNotificationsReadAction(input: { ids?: string[]; itemId?: string; all?: boolean }): Promise<{ ok: true; changed: number } | { ok: false; error: string }> {
+  try {
+    const session = await requireWork();
+    const ids = input.ids ? z.array(uuid).max(100).parse(input.ids) : undefined;
+    const itemId = input.itemId ? uuid.parse(input.itemId) : undefined;
+    const changed = await svc.markNotificationsRead({ userId: session.user.id, ids, itemId, all: input.all === true });
+    return { ok: true, changed };
   } catch (e) {
     return fail(e);
   }

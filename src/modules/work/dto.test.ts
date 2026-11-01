@@ -28,6 +28,7 @@ const row: CardRow = {
   updatedAt: new Date("2026-09-02T10:00:00Z"),
   requesterTenantId: "org_acme",
   requesterTenantName: "ACME Corp",
+  coverId: null,
 };
 const dev = { userId: "u9", isOps: false, tenantIds: [] };
 /** A developer an ops admin added to the ACME workspace. */

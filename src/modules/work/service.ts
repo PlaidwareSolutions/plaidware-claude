@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { isoDay } from "../../lib/dates";
 import { roleHasWorkAccess } from "../../lib/roles";
@@ -12,7 +12,8 @@ import { cloneTitle, linkPhrase, linkRow, type LinkDirection } from "./link-logi
 import { normalizeRichText } from "./rich-text-sanitize";
 import { richTextToPlain } from "./rich-text";
 import { extractMentionIds, newMentionIds } from "./mention-logic";
-import { workAttachments, workBoards, workComments, workItemAliases, workItemEvents, workItemLinks, workItems, workSprints, workWatchers } from "./schema";
+import { workAttachments, workBoards, workComments, workItemAliases, workItemEvents, workItemLinks, workItems, workNotifications, workSprints, workWatchers } from "./schema";
+import { NOTIFY_KINDS, recipientsFor } from "./notify-logic";
 import { addDays, carryOverPatch, isClosedStatus, nextSprintWindow, sprintCommitment, sprintCompletion } from "./sprint-logic";
 import { applyTransition, blockedReason, canTransition, sprintForTransition, statusForSprintChange } from "./transitions";
 
@@ -42,12 +43,48 @@ async function recordEvent(
   tx: Tx,
   e: { itemId: string; actorUserId: string | null; kind: string; payload?: Record<string, unknown> },
 ): Promise<void> {
-  await tx.insert(workItemEvents).values({
-    itemId: e.itemId,
-    actorUserId: e.actorUserId,
-    kind: e.kind,
-    payload: e.payload ?? {},
-  });
+  const [row] = await tx
+    .insert(workItemEvents)
+    .values({
+      itemId: e.itemId,
+      actorUserId: e.actorUserId,
+      kind: e.kind,
+      payload: e.payload ?? {},
+    })
+    .returning({ id: workItemEvents.id });
+  await notifyInApp(tx, { id: row.id, itemId: e.itemId, actorUserId: e.actorUserId, kind: e.kind, payload: e.payload ?? {} });
+}
+
+/**
+ * The bell: one unread row per person who should hear about this event — the
+ * same people the emails go to (recipientsFor), written right away. Comments
+ * and description mentions carry their first words.
+ */
+async function notifyInApp(tx: Tx, e: { id: string; itemId: string; actorUserId: string | null; kind: string; payload: Record<string, unknown> }) {
+  if (!NOTIFY_KINDS.has(e.kind)) return;
+  const [watchers, item] = await Promise.all([
+    tx.select({ userId: workWatchers.userId }).from(workWatchers).where(eq(workWatchers.itemId, e.itemId)),
+    tx.query.workItems.findFirst({ where: eq(workItems.id, e.itemId), columns: { assigneeUserId: true } }),
+  ]);
+  const who = recipientsFor({ ...e, actorName: null }, watchers.map((w) => w.userId), item?.assigneeUserId ?? null);
+  if (who.size === 0) return;
+  let excerpt: string | null = typeof e.payload.excerpt === "string" ? e.payload.excerpt : null;
+  if (e.kind === "comment_added" && typeof e.payload.commentId === "string") {
+    const c = await tx.query.workComments.findFirst({ where: eq(workComments.id, e.payload.commentId), columns: { body: true } });
+    excerpt = c ? richTextToPlain(c.body) : null;
+  }
+  await tx.insert(workNotifications).values(
+    [...who].map(([userId, reason]) => ({
+      userId,
+      itemId: e.itemId,
+      eventId: e.id,
+      kind: e.kind,
+      reason,
+      actorUserId: e.actorUserId,
+      payload: e.payload,
+      excerpt: excerpt ? excerpt.replace(/\s+/g, " ").trim().slice(0, 200) : null,
+    })),
+  );
 }
 
 /** Add people to an item's watchers (idempotent). */
@@ -970,4 +1007,111 @@ export async function removeAttachment(o: { attachmentId: string; actorUserId: s
     await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "attachment_removed", payload: { fileName: att.fileName ?? "file" } });
     return { productSlug, number: item.number };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Card menu (Jira's ⋯ on a card): move within the column, cover image
+// ---------------------------------------------------------------------------
+
+export type ColumnMove = "top" | "up" | "down" | "bottom";
+
+/** Jira's "Move work item": reorder within the item's own column (same board and status). */
+export async function rankInColumn(o: { itemId: string; to: ColumnMove; actorUserId: string }): Promise<{ productSlug: string; number: number }> {
+  return db.transaction(async (tx) => {
+    const { item, productSlug } = await itemContext(tx, o.itemId, true);
+    const col = await tx
+      .select({ id: workItems.id, rank: workItems.rank })
+      .from(workItems)
+      .where(and(eq(workItems.boardId, item.boardId), eq(workItems.status, item.status)))
+      .orderBy(asc(workItems.rank), asc(workItems.createdAt));
+    const i = col.findIndex((r) => r.id === item.id);
+    const others = col.filter((r) => r.id !== item.id);
+    const at = (k: number) => others[k]?.rank ?? null;
+    // Target slot in `others` (the column without this item): the item goes before others[slot].
+    const slot = o.to === "top" ? 0 : o.to === "bottom" ? others.length : o.to === "up" ? Math.max(0, i - 1) : Math.min(others.length, i + 1);
+    if (slot === i) return { productSlug, number: item.number }; // already there
+    const rank = rankBetween(at(slot - 1), at(slot));
+    await tx.update(workItems).set({ rank }).where(eq(workItems.id, item.id));
+    return { productSlug, number: item.number };
+  });
+}
+
+/** Jira's card cover: one of the item's own attached images, or none. */
+export async function setItemCover(o: { itemId: string; attachmentId: string | null; actorUserId: string }): Promise<{ productSlug: string; number: number }> {
+  return db.transaction(async (tx) => {
+    const { item, productSlug } = await itemContext(tx, o.itemId);
+    if (o.attachmentId) {
+      const att = await tx.query.workAttachments.findFirst({ where: eq(workAttachments.id, o.attachmentId), columns: { itemId: true, contentType: true } });
+      if (!att || att.itemId !== item.id) throw new Error("Pick one of this item's attached images");
+      if (!att.contentType.startsWith("image/")) throw new Error("Only an image can be a cover");
+    }
+    await tx.update(workItems).set({ coverAttachmentId: o.attachmentId }).where(eq(workItems.id, item.id));
+    return { productSlug, number: item.number };
+  });
+}
+
+/** What the card menu's dialogs need, loaded when one opens: the board's epics, the item's images, the board's labels. */
+export async function cardMenuData(itemId: string): Promise<{
+  epics: { id: string; key: string; title: string }[];
+  images: { id: string; fileName: string }[];
+  labels: string[];
+  parentId: string | null;
+  coverId: string | null;
+}> {
+  const item = await db.query.workItems.findFirst({ where: eq(workItems.id, itemId), columns: { id: true, boardId: true, type: true, parentId: true, coverAttachmentId: true } });
+  if (!item) throw new Error("Item not found");
+  const board = await db.query.workBoards.findFirst({ where: eq(workBoards.id, item.boardId), columns: { keyPrefix: true } });
+  const [epics, images, labels] = await Promise.all([
+    item.type === "epic"
+      ? Promise.resolve([])
+      : db
+          .select({ id: workItems.id, number: workItems.number, title: workItems.title })
+          .from(workItems)
+          .where(and(eq(workItems.boardId, item.boardId), eq(workItems.type, "epic"), ne(workItems.status, "canceled")))
+          .orderBy(asc(workItems.number)),
+    db
+      .select({ id: workAttachments.id, fileName: workAttachments.fileName, contentType: workAttachments.contentType })
+      .from(workAttachments)
+      .where(eq(workAttachments.itemId, item.id))
+      .orderBy(desc(workAttachments.createdAt)),
+    db.execute<{ label: string }>(sql`select distinct jsonb_array_elements_text(labels) as label from work_items where board_id = ${item.boardId} order by 1 limit 200`),
+  ]);
+  return {
+    epics: epics.map((e) => ({ id: e.id, key: formatKey(board?.keyPrefix ?? "", e.number), title: e.title })),
+    images: images.filter((a) => a.contentType.startsWith("image/")).map((a) => ({ id: a.id, fileName: a.fileName ?? "image" })),
+    labels: labels.rows.map((l) => l.label),
+    parentId: item.parentId,
+    coverId: item.coverAttachmentId,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The bell: read state
+// ---------------------------------------------------------------------------
+
+/** Mark a person's notifications read: some by id, all for one item (they opened it), or all. Returns how many changed. */
+export async function markNotificationsRead(o: { userId: string; ids?: string[]; itemId?: string; all?: boolean }): Promise<number> {
+  const scope = o.all ? undefined : o.itemId ? eq(workNotifications.itemId, o.itemId) : o.ids?.length ? inArray(workNotifications.id, o.ids) : null;
+  if (scope === null) return 0;
+  const rows = await db
+    .update(workNotifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(workNotifications.userId, o.userId), isNull(workNotifications.readAt), scope))
+    .returning({ id: workNotifications.id });
+  return rows.length;
+}
+
+/** Keep the bell small: read notifications go after 30 days, unread after 90. */
+export async function pruneNotifications(now = new Date()): Promise<number> {
+  const day = 86_400_000;
+  const rows = await db
+    .delete(workNotifications)
+    .where(
+      or(
+        and(isNotNull(workNotifications.readAt), lt(workNotifications.createdAt, new Date(now.getTime() - 30 * day))),
+        lt(workNotifications.createdAt, new Date(now.getTime() - 90 * day)),
+      ),
+    )
+    .returning({ id: workNotifications.id });
+  return rows.length;
 }

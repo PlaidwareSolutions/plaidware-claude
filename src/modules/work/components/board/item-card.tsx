@@ -3,10 +3,9 @@
 import { createContext, useContext, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, CalendarClock, Check, ExternalLink, Flag, Link2, MessageSquare, MoreHorizontal, Pencil, Search, UserRound } from "lucide-react";
+import { Building2, CalendarClock, Check, Flag, MessageSquare, Pencil, Search, UserRound } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { toast } from "sonner";
 import { WORK } from "@/lib/routes";
 import { formatDay, isoDay } from "@/lib/dates";
 import { useAction } from "@/lib/use-action";
@@ -20,20 +19,17 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { assignItemAction, updateItemAction } from "../../actions";
 import type { WorkCardDto, WorkProductRef, WorkUserRef } from "../../dto";
 import { isOverdue } from "../../explorer-logic";
-import { RESOLUTION_LABELS, STATUS_LABELS, WORKFLOW } from "../../transitions";
+import { RESOLUTION_LABELS } from "../../transitions";
 import { EpicLozenge, LabelChips, PointsPill, PriorityIcon, TypeIcon } from "../item-bits";
 import { usePeekHref } from "../peek-link";
-import { useWorkTransitions } from "../transition-host";
 import { useCardFields } from "./card-fields";
 import { wasJustDragged } from "./use-board-dnd";
+import { CardMenu } from "./card-menu";
 
 /** A card on a product board, or on the cross-product board (which also knows the product). */
 export type BoardCard = WorkCardDto & { product?: WorkProductRef };
@@ -96,6 +92,11 @@ export function ItemCardBody({
         blocked && "cursor-not-allowed opacity-80 ring-2 ring-destructive/60",
       )}
     >
+      {card.coverUrl && !renaming && (
+        // Jira's card cover (an attached image the item picked).
+        // eslint-disable-next-line @next/next/no-img-element -- user upload served by the attachment route
+        <img src={card.coverUrl} alt="" loading="lazy" className="-mx-3 -mt-3 h-32 w-[calc(100%+1.5rem)] max-w-none rounded-t-md object-cover" />
+      )}
       {renaming ? (
         <RenameTitle card={card} onDone={() => setRenaming(false)} />
       ) : (
@@ -278,55 +279,6 @@ function AssigneeControl({ card, disabled }: { card: BoardCard; disabled?: boole
 }
 
 /** The ⋯ on a hovered card: open, move along the workflow, flag, copy link. */
-function CardMenu({ card, href }: { card: BoardCard; href: string }) {
-  const router = useRouter();
-  const transitions = useWorkTransitions();
-  const subject = { id: card.id, key: card.key, type: card.type, status: card.status, title: card.title };
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          data-card-control
-          onKeyDown={(e) => e.stopPropagation()}
-          aria-label={`Actions for ${card.key}`}
-          className="inline-flex size-6 items-center justify-center rounded-[3px] bg-card text-muted-foreground shadow-xs hover:bg-accent hover:text-foreground"
-        >
-          <MoreHorizontal className="size-4" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52" data-card-control onClick={(e) => e.stopPropagation()}>
-        <DropdownMenuItem onSelect={() => router.push(href, { scroll: false })}>
-          <ExternalLink className="size-4" /> Open
-        </DropdownMenuItem>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>Move to</DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            {WORKFLOW[card.status].map((s) => (
-              <DropdownMenuItem key={s} onSelect={() => void transitions.move(subject, s)} className={cn(s === "canceled" && "text-destructive")}>
-                {STATUS_LABELS[s]}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuItem onSelect={() => void transitions.flag(subject, !card.flag)}>
-          <Flag className={cn("size-4", !card.flag && "fill-warning text-warning")} /> {card.flag ? "Remove flag" : "Add flag"}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => {
-            const slug = card.product?.slug;
-            const url = new URL(slug ? WORK.item(slug, card.number) : href, window.location.origin).toString();
-            void navigator.clipboard.writeText(url).then(() => toast.success(`Link to ${card.key} copied`), () => toast.error("Couldn't copy the link"));
-          }}
-        >
-          <Link2 className="size-4" /> Copy link
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 export function ItemCard({
   card,
   slug,

@@ -42,6 +42,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { NotificationBell } from "@/modules/work/components/notification-bell";
 import { TenantStatusBanner } from "@/components/tenant-status-banner";
 import { ViewAsBanner, useStopViewingAs, type ViewingAs } from "@/components/view-as-banner";
 
@@ -224,6 +225,8 @@ export function AppShell({
           )}
 
           <div className="flex-1" />
+
+          {(user.isOps || user.isDeveloper) && !viewingAs && <NotificationBell />}
 
           <Button
             variant="ghost"

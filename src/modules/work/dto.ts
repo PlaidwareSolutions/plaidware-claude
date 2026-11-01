@@ -73,6 +73,8 @@ export type WorkCardDto = {
   flag: { at: string; reason: string | null } | null;
   /** How a Done item was resolved; null while open. */
   resolution: WorkResolution | null;
+  /** The card cover image (an attached image), or null. */
+  coverUrl: string | null;
   /** The epic it belongs to (Jira's parent), same board. */
   epic: WorkEpicRef | null;
   createdAt: string;
@@ -111,6 +113,7 @@ export type CardRow = {
   updatedAt: Date;
   requesterTenantId: string | null;
   requesterTenantName: string | null;
+  coverId: string | null;
 };
 
 export function toCardDto(row: CardRow, viewer: WorkViewer): WorkCardDto {
@@ -132,6 +135,7 @@ export function toCardDto(row: CardRow, viewer: WorkViewer): WorkCardDto {
     commentCount: row.commentCount,
     flag: row.flaggedAt ? { at: row.flaggedAt.toISOString(), reason: row.flagReason } : null,
     resolution: row.resolution,
+    coverUrl: row.coverId ? `/api/work/attachments/${row.coverId}` : null,
     epic: row.epicId && row.epicNumber != null ? { id: row.epicId, key: formatKey(row.keyPrefix, row.epicNumber), title: row.epicTitle ?? "" } : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

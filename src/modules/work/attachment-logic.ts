@@ -66,7 +66,7 @@ export const FILE_TYPES: Record<string, string> = {
 export const FILE_ACCEPT = Object.keys(FILE_TYPES).map((e) => `.${e}`).join(",");
 
 export function fileExtension(name: string): string {
-  const m = /.([A-Za-z0-9]{1,8})$/.exec(name.trim());
+  const m = /\.([A-Za-z0-9]{1,8})$/.exec(name.trim());
   return m ? m[1].toLowerCase() : "";
 }
 

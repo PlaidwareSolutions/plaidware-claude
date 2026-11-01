@@ -38,7 +38,8 @@ import { explorerColumns, type ExplorerCard, type ExplorerFilters } from "./expl
 import { enumLabel, JQL_FIELDS, JqlError, normalizeEnum, parseJql, parseKey, resolveDate, type JqlDynamic, type JqlExpr, type JqlOp, type JqlQuery, type JqlValue } from "./jql-logic";
 import { renderRichText } from "./rich-text-sanitize";
 import { defaultKeyPrefix, formatKey } from "./key-logic";
-import { workAttachments, workBoards, workComments, workItemAliases, workItemEvents, workItemLinks, workItems, workSprints, workWatchers } from "./schema";
+import { workAttachments, workBoards, workComments, workItemAliases, workItemEvents, workItemLinks, workItems, workNotifications, workSprints, workWatchers } from "./schema";
+import { inAppSummary } from "./notify-logic";
 import { isInlineImage } from "./attachment-logic";
 import { linkGroupRank, linkPhrase, parseItemKey } from "./link-logic";
 import { WORK } from "../../lib/routes";
@@ -90,6 +91,7 @@ const cardColumns = {
   updatedAt: workItems.updatedAt,
   requesterTenantId: workItems.requesterTenantId,
   requesterTenantName: organization.name,
+  coverId: workItems.coverAttachmentId,
 };
 
 const productColumns = {
@@ -1298,5 +1300,64 @@ export async function jqlSuggestData(viewer: WorkViewer): Promise<Omit<JqlDynami
     epics: epics.map((e) => formatKey(e.prefix, e.number)),
     sprints: [...new Set(sprints.map((s) => s.name))],
     clients: clients.map((c) => c.name),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The bell (in-app notifications)
+// ---------------------------------------------------------------------------
+
+export type WorkNotificationDto = {
+  id: string;
+  /** "<actor> <summary>", e.g. "Ada commented". */
+  actor: string;
+  summary: string;
+  excerpt: string | null;
+  item: { key: string; title: string; slug: string; number: number };
+  createdAt: string;
+  read: boolean;
+};
+
+const notifActor = alias(user, "notif_actor");
+
+/** The latest notifications for one person (unread first is the UI's job), plus how many are unread. */
+export async function listMyNotifications(userId: string, limit = 30): Promise<{ items: WorkNotificationDto[]; unread: number }> {
+  const [rows, [unreadRow]] = await Promise.all([
+    db
+      .select({
+        id: workNotifications.id,
+        kind: workNotifications.kind,
+        reason: workNotifications.reason,
+        payload: workNotifications.payload,
+        excerpt: workNotifications.excerpt,
+        createdAt: workNotifications.createdAt,
+        readAt: workNotifications.readAt,
+        actorName: notifActor.name,
+        number: workItems.number,
+        title: workItems.title,
+        prefix: workBoards.keyPrefix,
+        slug: products.slug,
+      })
+      .from(workNotifications)
+      .innerJoin(workItems, eq(workItems.id, workNotifications.itemId))
+      .innerJoin(workBoards, eq(workBoards.id, workItems.boardId))
+      .innerJoin(products, eq(products.id, workBoards.productId))
+      .leftJoin(notifActor, eq(notifActor.id, workNotifications.actorUserId))
+      .where(eq(workNotifications.userId, userId))
+      .orderBy(desc(workNotifications.createdAt))
+      .limit(limit),
+    db.select({ n: count() }).from(workNotifications).where(and(eq(workNotifications.userId, userId), isNull(workNotifications.readAt))),
+  ]);
+  return {
+    unread: Number(unreadRow?.n ?? 0),
+    items: rows.map((r) => ({
+      id: r.id,
+      actor: r.actorName ?? (typeof r.payload.via === "string" ? r.payload.via : "Someone"),
+      summary: inAppSummary(r.kind, r.payload, r.reason),
+      excerpt: r.excerpt,
+      item: { key: formatKey(r.prefix, r.number), title: r.title, slug: r.slug, number: r.number },
+      createdAt: r.createdAt.toISOString(),
+      read: r.readAt != null,
+    })),
   };
 }

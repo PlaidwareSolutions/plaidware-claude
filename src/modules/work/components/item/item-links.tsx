@@ -86,7 +86,7 @@ export function ItemLinks({
   );
 }
 
-function LinkForm({ itemId, onDone }: { itemId: string; onDone: () => void }) {
+export function LinkForm({ itemId, onDone }: { itemId: string; onDone: () => void }) {
   const { run, isPending } = useAction();
   const [choice, setChoice] = useState(CHOICE_OPTIONS[2].id); // "relates to"
   const [q, setQ] = useState("");

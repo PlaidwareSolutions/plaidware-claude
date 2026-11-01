@@ -604,7 +604,7 @@ export function jqlSuggest(src: string, caret: number, dyn: JqlDynamic): { from:
 
 /** The query with its ORDER BY replaced (column-header sorting on the search page). */
 export function withOrderBy(jql: string, field: string, dir: "asc" | "desc"): string {
-  const base = jql.replace(/s*orders+by[sS]*$/i, "").trim();
+  const base = jql.replace(/\s*\border\s+by\b[\s\S]*$/i, "").trim();
   return `${base}${base ? " " : ""}ORDER BY ${field} ${dir.toUpperCase()}`;
 }
 

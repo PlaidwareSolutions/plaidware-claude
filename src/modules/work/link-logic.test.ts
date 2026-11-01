@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileAttachmentType, formatBytes, isInlineImage, FILE_MAX_BYTES } from "./attachment-logic";
+import { fileAttachmentType, fileExtension, formatBytes, isInlineImage, FILE_MAX_BYTES } from "./attachment-logic";
 import { cloneTitle, LINK_CHOICES, linkGroupRank, linkPhrase, linkRow, parseItemKey } from "./link-logic";
 
 describe("link phrases", () => {
@@ -61,6 +61,12 @@ describe("attached files", () => {
     expect(isInlineImage("image/png")).toBe(true);
     expect(isInlineImage("application/pdf")).toBe(false);
     expect(isInlineImage("image/svg+xml")).toBe(false);
+  });
+
+  it("reads the extension after the last dot only", () => {
+    expect(fileExtension("report.final.PDF")).toBe("pdf");
+    expect(fileExtension("cvjpg")).toBe("");
+    expect(fileExtension("README")).toBe("");
   });
 
   it("formats sizes", () => {

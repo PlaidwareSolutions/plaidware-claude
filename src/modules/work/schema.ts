@@ -130,6 +130,8 @@ export const workItems = pgTable(
     parentId: uuid("parent_id").references((): AnyPgColumn => workItems.id, { onDelete: "set null" }),
     /** Set on the move to Done (transition screen), cleared when reopened. */
     resolution: workResolution("resolution"),
+    /** Jira's card cover: one of the item's attached images, shown on top of the card. */
+    coverAttachmentId: uuid("cover_attachment_id").references((): AnyPgColumn => workAttachments.id, { onDelete: "set null" }),
     /** Jira's flag (impediment); the reason is optional. */
     flaggedAt: timestamp("flagged_at"),
     flaggedByUserId: text("flagged_by_user_id").references(() => user.id, { onDelete: "set null" }),
@@ -280,4 +282,38 @@ export const workItemAliases = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.boardId, t.number] }), index("work_item_aliases_item_idx").on(t.itemId)],
+);
+
+/**
+ * In-app notifications (the bell): one row per person per event they should
+ * hear about — the same people the emails go to (notify-logic.recipientsFor),
+ * written as the event is recorded. Read when clicked, when the item is
+ * opened, or with "Mark all as read".
+ */
+export const workNotifications = pgTable(
+  "work_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").references(() => workItemEvents.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    /** assigned | mentioned | assignee | watching (notify-logic.NotifyReason). */
+    reason: text("reason").notNull(),
+    actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    /** A comment's or description's first words, plain text. */
+    excerpt: text("excerpt"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    readAt: timestamp("read_at"),
+  },
+  (t) => [
+    index("work_notifications_user_created_idx").on(t.userId, t.createdAt),
+    index("work_notifications_user_unread_idx").on(t.userId).where(sql`${t.readAt} is null`),
+    index("work_notifications_item_idx").on(t.itemId),
+  ],
 );

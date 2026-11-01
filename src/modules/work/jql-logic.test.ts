@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_EXPLORER } from "./explorer-logic";
-import { filtersToJql, JqlError, jqlSuggest, normalizeEnum, parseJql, parseKey, resolveDate, resolveField, tokenize } from "./jql-logic";
+import { filtersToJql, JqlError, jqlSuggest, withOrderBy, normalizeEnum, parseJql, parseKey, resolveDate, resolveField, tokenize } from "./jql-logic";
 
 const NOW = new Date("2026-11-04T15:30:00Z"); // a Wednesday
 
@@ -100,6 +100,15 @@ describe("filtersToJql", () => {
   });
   it("is empty for no filters", () => {
     expect(filtersToJql(DEFAULT_EXPLORER, names)).toBe("");
+  });
+});
+
+describe("withOrderBy", () => {
+  it("replaces an existing ORDER BY and adds one when missing", () => {
+    expect(withOrderBy("status = Done ORDER BY created DESC, key", "key", "asc")).toBe("status = Done ORDER BY key ASC");
+    expect(withOrderBy("status = Done", "updated", "desc")).toBe("status = Done ORDER BY updated DESC");
+    expect(withOrderBy("", "key", "asc")).toBe("ORDER BY key ASC");
+    expect(withOrderBy("summary ~ sorted order   by due", "due", "desc")).toBe("summary ~ sorted ORDER BY due DESC");
   });
 });
 
