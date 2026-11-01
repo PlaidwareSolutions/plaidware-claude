@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLink, Link2 } from "lucide-react";
+import { ExternalLink, Link2, X } from "lucide-react";
 import { toast } from "sonner";
 import { WORK } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
@@ -43,12 +43,14 @@ export function ItemPeek({
       <SheetContent
         side="right"
         className="w-full gap-0 overflow-y-auto p-0 sm:max-w-4xl"
+        // The sheet's own × sat under the sticky header; ours lives in the header row.
+        showCloseButton={false}
         // Jira opens the issue without focusing a control; Esc and the × still work.
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         {item && product && (
           <>
-            <SheetHeader className="sticky top-0 z-10 flex-row items-center gap-2 border-b bg-background/95 px-6 py-3 pr-12 backdrop-blur">
+            <SheetHeader className="sticky top-0 z-10 flex-row items-center gap-2 border-b bg-background/95 px-6 py-3 pr-4 backdrop-blur">
               <span className="size-2.5 rounded-full" style={{ background: product.color ?? "var(--primary)" }} />
               <SheetTitle className="text-sm font-medium">
                 {product.name} <span className="text-muted-foreground">/ {item.key}</span>
@@ -69,6 +71,9 @@ export function ItemPeek({
                   <Link href={WORK.item(product.slug, item.number)}>
                     <ExternalLink className="size-3.5" /> Open
                   </Link>
+                </Button>
+                <Button variant="ghost" size="icon-sm" onClick={close} aria-label="Close" title="Close (Esc)">
+                  <X className="size-4" />
                 </Button>
               </div>
             </SheetHeader>
