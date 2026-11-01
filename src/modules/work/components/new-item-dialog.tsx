@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isRichTextEmpty } from "../rich-text";
 import { RichEditor } from "./editor/rich-editor";
+import { MentionPeopleProvider } from "./editor/mention-people";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { parseLabels } from "./labels";
 import { AssigneeSelect, PrioritySelect, RefSelect, SourceSelect, TypeSelect } from "./pickers";
@@ -232,6 +233,7 @@ export function NewItemDialog({
             )}
             <div className="grid gap-2">
               <Label>Description</Label>
+              <MentionPeopleProvider people={assignees}>
               <RichEditor
                 key={round}
                 initialHtml=""
@@ -240,6 +242,7 @@ export function NewItemDialog({
                 minHeight="min-h-28"
                 onChange={(html) => set("description", isRichTextEmpty(html) ? "" : html)}
               />
+              </MentionPeopleProvider>
             </div>
             <div className="grid items-start gap-4 sm:grid-cols-3">
               <div className="grid gap-2">

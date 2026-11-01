@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/confirm-dialog";
 import { UserAvatar } from "@/components/user-avatar";
 import { addCommentAction, deleteCommentAction, editCommentAction } from "../../actions";
 import type { WorkCommentDto, WorkUserRef } from "../../dto";
-import { isRichTextEmpty } from "../../rich-text";
+import { escapeHtml, isRichTextEmpty } from "../../rich-text";
 import { RichEditor } from "../editor/rich-editor";
 import { RichTextView } from "../editor/rich-text-view";
 
@@ -101,8 +101,64 @@ export function PendingComment({ body, viewer }: { body: string; viewer: WorkUse
   );
 }
 
+/**
+ * A comment and its replies (one level, Jira-style). Reply opens a box under
+ * the thread that starts with an @mention of the person answered.
+ */
+export function CommentThread({ itemId, comment, replies }: { itemId: string; comment: WorkCommentDto; replies: WorkCommentDto[] }) {
+  const { run, isPending } = useAction();
+  const [replyTo, setReplyTo] = useState<WorkCommentDto | null>(null);
+  const [round, setRound] = useState(0);
+
+  async function send(html: string) {
+    if (isRichTextEmpty(html) || !replyTo) return;
+    const res = await run(() => addCommentAction({ itemId, body: html, parentId: replyTo.id }), { key: "reply", refresh: false, success: "Reply posted" });
+    if (res?.ok) {
+      setReplyTo(null);
+      setRound((r) => r + 1);
+    }
+  }
+
+  return (
+    <li className="flex flex-col gap-3">
+      <CommentItem comment={comment} onReply={() => setReplyTo(comment)} />
+      {(replies.length > 0 || replyTo) && (
+        <ol className="ml-[2.125rem] flex flex-col gap-3 border-l-2 pl-4">
+          {replies.map((r) => (
+            <CommentItem key={r.id} comment={r} onReply={() => setReplyTo(r)} />
+          ))}
+          {replyTo && (
+            <li>
+              <RichEditor
+                key={`${replyTo.id}:${round}`}
+                initialHtml={replyStart(replyTo)}
+                ariaLabel={`Reply to ${replyTo.author?.name ?? "comment"}`}
+                placeholder="Write a reply…"
+                autoFocus
+                minHeight="min-h-20"
+                media="thumb"
+                saveLabel="Reply"
+                saving={isPending("reply")}
+                onSave={send}
+                onCancel={() => setReplyTo(null)}
+              />
+            </li>
+          )}
+        </ol>
+      )}
+    </li>
+  );
+}
+
+/** A reply starts by @mentioning the person answered (as Jira does). */
+function replyStart(c: WorkCommentDto): string {
+  if (!c.author) return "";
+  const name = escapeHtml(c.author.name);
+  return `<p><span data-type="mention" data-id="${escapeHtml(c.author.id)}" data-label="${name}">@${name}</span>&nbsp;</p>`;
+}
+
 /** `comment.body` is server-rendered, sanitised HTML (queries.renderRichText). */
-export function CommentItem({ comment }: { comment: WorkCommentDto }) {
+export function CommentItem({ comment, onReply }: { comment: WorkCommentDto; onReply?: () => void }) {
   const { run, isPending } = useAction();
   const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
@@ -125,7 +181,7 @@ export function CommentItem({ comment }: { comment: WorkCommentDto }) {
   }
 
   return (
-    <li className="flex gap-3">
+    <div className="flex gap-3">
       <UserAvatar name={name} />
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex flex-wrap items-baseline gap-x-2 text-sm">
@@ -144,16 +200,26 @@ export function CommentItem({ comment }: { comment: WorkCommentDto }) {
         ) : (
           <>
             <RichTextView html={comment.body} />
-            {comment.canEdit && (
+            {(onReply || comment.canEdit) && (
               <div className="mt-1 flex gap-2 text-xs font-semibold text-muted-foreground">
-                <button type="button" className="hover:text-foreground hover:underline" onClick={() => setEditing(true)} disabled={busy}>Edit</button>
-                <span aria-hidden>•</span>
-                <button type="button" className="hover:text-foreground hover:underline" onClick={remove} disabled={busy}>Delete</button>
+                {onReply && (
+                  <button type="button" className="hover:text-foreground hover:underline" onClick={onReply}>
+                    Reply
+                  </button>
+                )}
+                {comment.canEdit && (
+                  <>
+                    {onReply && <span aria-hidden>•</span>}
+                    <button type="button" className="hover:text-foreground hover:underline" onClick={() => setEditing(true)} disabled={busy}>Edit</button>
+                    <span aria-hidden>•</span>
+                    <button type="button" className="hover:text-foreground hover:underline" onClick={remove} disabled={busy}>Delete</button>
+                  </>
+                )}
               </div>
             )}
           </>
         )}
       </div>
-    </li>
+    </div>
   );
 }

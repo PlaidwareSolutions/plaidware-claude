@@ -182,6 +182,8 @@ function eventTenantIds(payload: unknown): string[] {
 
 export type WorkCommentDto = {
   id: string;
+  /** Set on a reply: its thread's top-level comment. */
+  parentId: string | null;
   body: string;
   author: WorkUserRef | null;
   createdAt: string;
@@ -192,6 +194,7 @@ export type WorkCommentDto = {
 
 export type CommentRow = {
   id: string;
+  parentId?: string | null;
   body: string;
   authorId: string | null;
   authorName: string | null;
@@ -202,6 +205,7 @@ export type CommentRow = {
 export function toCommentDto(row: CommentRow, viewer: WorkViewer): WorkCommentDto {
   return {
     id: row.id,
+    parentId: row.parentId ?? null,
     body: row.body,
     author: row.authorId ? { id: row.authorId, name: row.authorName ?? "" } : null,
     createdAt: row.createdAt.toISOString(),
@@ -337,6 +341,8 @@ export type WorkItemDetailDto = WorkCardDto & {
   epics: WorkEpicRef[];
   /** For an epic: its child items, in status order. */
   children: WorkCardDto[];
+  /** Who gets this item's emails (Jira's watchers). */
+  watchers: WorkUserRef[];
 };
 
 export type WorkOverviewRow = {

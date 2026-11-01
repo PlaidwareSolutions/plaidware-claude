@@ -5,7 +5,7 @@ import { LinkTabs } from "@/components/link-tabs";
 import { WORK, withQuery } from "@/lib/routes";
 import type { WorkBoardMode } from "../contracts";
 
-/** A company board's tabs, Jira-style (icon + label): Board · Backlog · Sprints · List · Settings. */
+/** A company board's tabs, Jira-style (icon + label): Board · List · Settings — plus Backlog and Sprints on a sprints board. */
 export function WorkTabs({
   slug,
   mode,
@@ -22,8 +22,13 @@ export function WorkTabs({
       tone="info"
       items={[
         { href: WORK.board(slug), label: mode === "sprints" ? "Active sprint" : "Board", icon: Columns3, exact: true, query: { view: undefined } },
-        { href: WORK.backlog(slug), label: "Backlog", icon: ListTodo, count: counts.backlog },
-        ...(mode === "sprints" ? [{ href: WORK.sprints(slug), label: "Sprints", icon: CalendarRange, count: counts.sprints }] : []),
+        // Kanban boards keep the backlog as a board column; a sprints board plans its sprints from the Backlog page.
+        ...(mode === "sprints"
+          ? [
+              { href: WORK.backlog(slug), label: "Backlog", icon: ListTodo, count: counts.backlog },
+              { href: WORK.sprints(slug), label: "Sprints", icon: CalendarRange, count: counts.sprints },
+            ]
+          : []),
         { href: withQuery(WORK.board(slug), { view: "list" }), label: "List", icon: List, exact: true, query: { view: "list" } },
         ...(canManage ? [{ href: WORK.settings(slug), label: "Settings", icon: Settings }] : []),
       ]}

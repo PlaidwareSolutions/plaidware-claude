@@ -19,6 +19,7 @@ import { AssigneeSelect, PrioritySelect, RefSelect, SourceSelect, TypeSelect } f
 import { RESOLUTION_LABELS } from "../../transitions";
 import { useWorkTransitions } from "../transition-host";
 import { StatusButton } from "./status-button";
+import { WatchButton } from "./watch-button";
 
 const FIELD = "h-8 w-full justify-start px-2";
 const GHOST_INPUT = "h-8 rounded-[3px] border-transparent bg-transparent px-2 shadow-none hover:bg-accent focus-visible:border-info focus-visible:bg-background focus-visible:ring-0 dark:bg-transparent";
@@ -53,9 +54,11 @@ export function ItemSidebar({
     <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
       <div className="flex items-center gap-2">
         <StatusButton status={item.status} onChange={(v) => void transitions.move(subject, v)} />
+        <span className="ml-auto" />
+        <WatchButton itemId={item.id} watchers={item.watchers} viewer={viewer} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="ml-auto size-8 rounded-[3px]" aria-label="More actions">
+            <Button variant="ghost" size="icon" className="size-8 rounded-[3px]" aria-label="More actions">
               <MoreHorizontal className="size-4" />
             </Button>
           </DropdownMenuTrigger>

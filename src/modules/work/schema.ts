@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -159,6 +160,8 @@ export const workComments = pgTable(
       .notNull()
       .references(() => workItems.id, { onDelete: "cascade" }),
     authorUserId: text("author_user_id").references(() => user.id, { onDelete: "set null" }),
+    /** A reply's top-level comment (one level, Jira-style); deleting it leaves the replies as comments. */
+    parentCommentId: uuid("parent_comment_id").references((): AnyPgColumn => workComments.id, { onDelete: "set null" }),
     body: text("body").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     editedAt: timestamp("edited_at"),
@@ -178,8 +181,32 @@ export const workItemEvents = pgTable(
     kind: text("kind").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    /** Set once the worker has handled the event's email notifications (notify-service.ts). */
+    notifiedAt: timestamp("notified_at"),
   },
-  (t) => [index("work_item_events_item_time_idx").on(t.itemId, t.createdAt)],
+  (t) => [
+    index("work_item_events_item_time_idx").on(t.itemId, t.createdAt),
+    index("work_item_events_unnotified_idx").on(t.createdAt).where(sql`${t.notifiedAt} is null`),
+  ],
+);
+
+/**
+ * Who hears about an item by email (Jira's watchers): added automatically
+ * when someone reports, is assigned, comments or is mentioned, and toggled
+ * by the Watch button.
+ */
+export const workWatchers = pgTable(
+  "work_watchers",
+  {
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.itemId, t.userId] }), index("work_watchers_user_idx").on(t.userId)],
 );
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { UserAvatar } from "@/components/user-avatar";
 import type { WorkCommentDto, WorkEventDto, WorkUserRef } from "../../dto";
 import { describeWorkEvent, workEventLabel } from "../../event-kinds";
-import { CommentComposer, CommentItem, PendingComment, usePendingComments } from "./comments-section";
+import { CommentComposer, CommentThread, PendingComment, usePendingComments } from "./comments-section";
 
 type Tab = "all" | "comments" | "history";
 const TABS: { value: Tab; label: string }[] = [
@@ -30,8 +30,14 @@ export function ItemActivity({
   const [tab, setTab] = useState<Tab>("comments");
   const [pending, addPending] = usePendingComments();
 
+  // Threads: top-level comments (or replies whose parent is gone) with their replies, oldest first.
+  const ids = new Set(comments.map((c) => c.id));
+  const tops = comments.filter((c) => !c.parentId || !ids.has(c.parentId));
+  const repliesOf = (id: string) => comments.filter((c) => c.parentId === id);
+  const thread = (c: WorkCommentDto) => <CommentThread key={`c-${c.id}`} itemId={itemId} comment={c} replies={repliesOf(c.id)} />;
+
   const all = [
-    ...comments.map((c) => ({ at: c.createdAt, node: <CommentItem key={`c-${c.id}`} comment={c} /> })),
+    ...tops.map((c) => ({ at: c.createdAt, node: thread(c) })),
     ...events.map((e) => ({ at: e.createdAt, node: <HistoryRow key={`e-${e.id}`} event={e} /> })),
   ].sort((a, b) => b.at.localeCompare(a.at));
 
@@ -62,7 +68,7 @@ export function ItemActivity({
 
       <ol className="flex flex-col gap-5">
         {tab !== "history" && pending.map((body, i) => <PendingComment key={`p-${i}`} body={body} viewer={viewer} />)}
-        {tab === "comments" && comments.map((c) => <CommentItem key={c.id} comment={c} />)}
+        {tab === "comments" && tops.map(thread)}
         {tab === "history" && events.map((e) => <HistoryRow key={e.id} event={e} />)}
         {tab === "all" && all.map((x) => x.node)}
         {tab === "comments" && comments.length === 0 && pending.length === 0 && (

@@ -51,7 +51,7 @@ export default async function BoardLayout({
         title={`${board.product.name} board`}
         badge={
           <>
-            <BoardTitleMenu backlogHref={WORK.backlog(slug)} settingsHref={canManage ? WORK.settings(slug) : undefined} />
+            <BoardTitleMenu backlogHref={board.mode === "sprints" ? WORK.backlog(slug) : undefined} settingsHref={canManage ? WORK.settings(slug) : undefined} />
             {board.mode === "sprints" &&
               (s ? <StatusBadge kind="sprint" status="active" label={`${s.name} · ${sprintTiming(s)}`} /> : <StatusBadge kind="sprint" status="planned" label="no active sprint" />)}
           </>

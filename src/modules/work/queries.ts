@@ -34,7 +34,7 @@ import {
 import { explorerColumns, type ExplorerFilters } from "./explorer-logic";
 import { renderRichText } from "./rich-text-sanitize";
 import { defaultKeyPrefix, formatKey } from "./key-logic";
-import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints } from "./schema";
+import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints, workWatchers } from "./schema";
 import { ensureBoardForProductSlug } from "./service";
 import { velocity } from "./sprint-logic";
 import { OPEN_STATUSES, STATUS_LABELS } from "./transitions";
@@ -419,9 +419,9 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
     .where(and(eq(workItems.boardId, boardId), eq(workItems.number, number)))
     .limit(1);
   if (!row) return null;
-  const [comments, events, assignees, sprints, epics, children] = await Promise.all([
+  const [comments, events, assignees, sprints, epics, children, watchers] = await Promise.all([
     db
-      .select({ id: workComments.id, body: workComments.body, authorId: user.id, authorName: user.name, createdAt: workComments.createdAt, editedAt: workComments.editedAt })
+      .select({ id: workComments.id, parentId: workComments.parentCommentId, body: workComments.body, authorId: user.id, authorName: user.name, createdAt: workComments.createdAt, editedAt: workComments.editedAt })
       .from(workComments)
       .leftJoin(user, eq(workComments.authorUserId, user.id))
       .where(eq(workComments.itemId, row.id))
@@ -445,6 +445,12 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
       .where(and(eq(workItems.boardId, boardId), eq(workItems.type, "epic"), ne(workItems.status, "canceled")))
       .orderBy(asc(workItems.number)),
     row.type === "epic" ? cards().where(eq(workItems.parentId, row.id)).orderBy(asc(workItems.status), ...rankOrder()) : Promise.resolve([]),
+    db
+      .select({ id: user.id, name: user.name })
+      .from(workWatchers)
+      .innerJoin(user, eq(workWatchers.userId, user.id))
+      .where(eq(workWatchers.itemId, row.id))
+      .orderBy(asc(user.name)),
   ]);
   return {
     ...toCardDto(row, viewer),
@@ -463,6 +469,7 @@ export async function getItem(boardId: string, number: number, viewer: WorkViewe
     sprints,
     epics: epics.map((e) => ({ id: e.id, key: formatKey(row.keyPrefix, e.number), title: e.title })),
     children: children.map((c) => toCardDto(c, viewer)),
+    watchers,
   };
 }
 
@@ -874,4 +881,16 @@ export async function listBoardEpics(boardId: string): Promise<WorkEpicRef[]> {
     .where(and(eq(workItems.boardId, boardId), eq(workItems.type, "epic"), notInArray(workItems.status, ["done", "canceled"])))
     .orderBy(asc(workItems.number));
   return rows.map((r) => ({ id: r.id, key: formatKey(r.keyPrefix, r.number), title: r.title }));
+}
+
+/** A work item's key, title and status by board slug + number (link hover cards). */
+export async function itemTitleByRef(slug: string, number: number): Promise<{ key: string; title: string; status: string } | null> {
+  const [row] = await db
+    .select({ number: workItems.number, title: workItems.title, status: workItems.status, keyPrefix: workBoards.keyPrefix })
+    .from(workItems)
+    .innerJoin(workBoards, eq(workItems.boardId, workBoards.id))
+    .innerJoin(products, eq(workBoards.productId, products.id))
+    .where(and(eq(products.slug, slug), eq(workItems.number, number)))
+    .limit(1);
+  return row ? { key: formatKey(row.keyPrefix, row.number), title: row.title, status: STATUS_LABELS[row.status] } : null;
 }

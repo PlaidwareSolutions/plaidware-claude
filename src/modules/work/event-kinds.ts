@@ -20,6 +20,7 @@ const KINDS: Record<string, { label: string; group: WorkEventGroup }> = {
   flag_removed: { label: "Flag removed", group: "flow" },
   parent_changed: { label: "Epic changed", group: "planning" },
   comment_added: { label: "Commented", group: "discussion" },
+  mentioned: { label: "Mentioned people", group: "discussion" },
   comment_edited: { label: "Comment edited", group: "discussion" },
   comment_deleted: { label: "Comment deleted", group: "discussion" },
 };
@@ -66,6 +67,10 @@ export function describeWorkEvent(kind: string, payload: Record<string, unknown>
       return `${ref(payload.before) ?? "no epic"} → ${ref(payload.after) ?? "no epic"}`;
     case "flag_added":
       return str(payload.reason);
+    case "mentioned": {
+      const n = Array.isArray(payload.userIds) ? payload.userIds.length : 0;
+      return `${n} ${n === 1 ? "person" : "people"} in ${str(payload.commentId) ? "a comment" : "the description"}`;
+    }
     case "priority_changed":
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
     case "assignee_changed":

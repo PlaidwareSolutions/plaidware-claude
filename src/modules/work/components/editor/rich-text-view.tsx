@@ -1,21 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { useLinkHover } from "./link-hover-card";
 
 /**
  * Stored rich text, shown. `html` is what queries.ts returns — already
  * sanitised server-side (renderRichText), so it's rendered as-is. Images show
  * as small thumbnails (Jira's media cards); clicking one opens a preview over
- * the page. Links open in a new tab (the sanitiser sets that).
+ * the page. Links open in a new tab (the sanitiser sets that) and show a
+ * preview card on hover.
  */
 export function RichTextView({ html, className }: { html: string; className?: string }) {
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const linkCard = useLinkHover(ref);
   return (
     <>
       <div
+        ref={ref}
         className={cn("work-rich-text work-rich-view", className)}
         onClick={(e) => {
           const el = e.target as HTMLElement;
@@ -29,6 +34,7 @@ export function RichTextView({ html, className }: { html: string; className?: st
         }}
         dangerouslySetInnerHTML={{ __html: html }}
       />
+      {linkCard}
       <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
         <DialogContent className="w-auto max-w-[min(92vw,1200px)] gap-3 p-3 sm:max-w-[min(92vw,1200px)]" onClick={(e) => e.stopPropagation()}>
           <DialogTitle className="sr-only">{preview?.alt ?? "Image"}</DialogTitle>

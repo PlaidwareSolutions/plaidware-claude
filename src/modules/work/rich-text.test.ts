@@ -47,6 +47,13 @@ describe("sanitizeRichHtml", () => {
   });
 });
 
+describe("mentions", () => {
+  it("keeps mention spans but nothing else on spans", () => {
+    const out = sanitizeRichHtml('<p><span data-type="mention" data-id="u1" data-label="Bob" onclick="x()" style="color:red">@Bob</span></p>');
+    expect(out).toBe('<p><span data-type="mention" data-id="u1" data-label="Bob">@Bob</span></p>');
+  });
+});
+
 describe("normalizeRichText", () => {
   it("turns an empty editor into an empty string", () => {
     expect(normalizeRichText("<p></p>")).toBe("");

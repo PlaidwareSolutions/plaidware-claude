@@ -9,7 +9,9 @@ import { defaultKeyPrefix, formatKey, uniqueKeyPrefix } from "./key-logic";
 import { RANK_REBALANCE_AT, rankBetween, rebalanceRanks } from "./rank-logic";
 import { attachmentProblem, sniffImageType } from "./attachment-logic";
 import { normalizeRichText } from "./rich-text-sanitize";
-import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints } from "./schema";
+import { richTextToPlain } from "./rich-text";
+import { extractMentionIds, newMentionIds } from "./mention-logic";
+import { workAttachments, workBoards, workComments, workItemEvents, workItems, workSprints, workWatchers } from "./schema";
 import { addDays, carryOverPatch, isClosedStatus, nextSprintWindow, sprintCommitment, sprintCompletion } from "./sprint-logic";
 import { applyTransition, blockedReason, canTransition, sprintForTransition, statusForSprintChange } from "./transitions";
 
@@ -45,6 +47,28 @@ async function recordEvent(
     kind: e.kind,
     payload: e.payload ?? {},
   });
+}
+
+/** Add people to an item's watchers (idempotent). */
+async function addWatchers(tx: Tx, itemId: string, userIds: (string | null | undefined)[]) {
+  const ids = [...new Set(userIds.filter((x): x is string => !!x))];
+  if (ids.length) await tx.insert(workWatchers).values(ids.map((userId) => ({ itemId, userId }))).onConflictDoNothing();
+}
+
+/** Of these user ids, the ones who can use the work area (mentions of anyone else are ignored). */
+async function workUsersAmong(tx: Tx, ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const rows = await tx.select({ id: user.id, role: user.platformRole, disabledAt: user.disabledAt }).from(user).where(inArray(user.id, ids));
+  return rows.filter((r) => !r.disabledAt && roleHasWorkAccess(r.role)).map((r) => r.id);
+}
+
+/** Record who was @mentioned (comment or description) and make them watchers. */
+async function recordMentions(tx: Tx, o: { itemId: string; actorUserId: string; userIds: string[]; commentId?: string; html: string }) {
+  const ids = (await workUsersAmong(tx, o.userIds)).filter((id) => id !== o.actorUserId);
+  if (!ids.length) return;
+  await addWatchers(tx, o.itemId, ids);
+  const excerpt = o.commentId ? undefined : richTextToPlain(o.html).slice(0, 500);
+  await recordEvent(tx, { itemId: o.itemId, actorUserId: o.actorUserId, kind: "mentioned", payload: { userIds: ids, ...(o.commentId ? { commentId: o.commentId } : { excerpt }) } });
 }
 
 async function boardContext(tx: Tx, boardId: string) {
@@ -213,6 +237,9 @@ export async function createItem(
     // The requester is its own (ops-only) event so item_created never names a client.
     if (requester) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "requester_changed", payload: { before: null, after: requester } });
     if (parent) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "parent_changed", payload: { before: null, after: epicRef(parent, board.keyPrefix) } });
+    await addWatchers(tx, item.id, [actor, assignee?.id]);
+    const description = normalizeRichText(o.description);
+    await recordMentions(tx, { itemId: item.id, actorUserId: actor, userIds: extractMentionIds(description), html: description });
 
     return { id: item.id, number, key: formatKey(board.keyPrefix, number), productSlug };
   });
@@ -232,6 +259,7 @@ export async function updateItem(o: { itemId: string; patch: ItemPatch; actorUse
     if (description !== undefined && description !== item.description) {
       set.description = description;
       fields.description = { changed: true };
+      await recordMentions(tx, { itemId: item.id, actorUserId: o.actorUserId, userIds: newMentionIds(item.description, description), html: description });
     }
     if (p.type !== undefined && p.type !== item.type) {
       set.type = p.type;
@@ -362,6 +390,7 @@ export async function assignItem(o: { itemId: string; assigneeUserId: string | n
       : null;
     await tx.update(workItems).set({ assigneeUserId: after?.id ?? null }).where(eq(workItems.id, item.id));
     await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "assignee_changed", payload: { before, after } });
+    await addWatchers(tx, item.id, [after?.id]);
     return { productSlug, number: item.number };
   });
 }
@@ -417,11 +446,26 @@ export async function deleteItem(o: { itemId: string; actorUserId: string }): Pr
 // Comments — the author or ops may edit/delete
 // ---------------------------------------------------------------------------
 
-export async function addComment(o: { itemId: string; body: string; authorUserId: string }): Promise<{ commentId: string; productSlug: string; number: number }> {
+export async function addComment(o: { itemId: string; body: string; authorUserId: string; parentId?: string | null }): Promise<{ commentId: string; productSlug: string; number: number }> {
   return db.transaction(async (tx) => {
     const { item, productSlug } = await itemContext(tx, o.itemId);
-    const [c] = await tx.insert(workComments).values({ itemId: item.id, authorUserId: o.authorUserId, body: commentBody(o.body) }).returning({ id: workComments.id });
-    await recordEvent(tx, { itemId: item.id, actorUserId: o.authorUserId, kind: "comment_added", payload: { commentId: c.id } });
+    const body = commentBody(o.body);
+    // A reply hangs off the thread's top-level comment (one level, like Jira).
+    let parent: { id: string; authorUserId: string | null } | null = null;
+    if (o.parentId) {
+      const p = await tx.query.workComments.findFirst({ where: eq(workComments.id, o.parentId), columns: { id: true, itemId: true, parentCommentId: true, authorUserId: true } });
+      if (!p || p.itemId !== item.id) throw new Error("That comment isn't on this item");
+      parent = p.parentCommentId
+        ? ((await tx.query.workComments.findFirst({ where: eq(workComments.id, p.parentCommentId), columns: { id: true, authorUserId: true } })) ?? { id: p.id, authorUserId: p.authorUserId })
+        : { id: p.id, authorUserId: p.authorUserId };
+      // The person being answered is the author of the comment clicked, even inside a thread.
+      parent = { id: parent.id, authorUserId: p.authorUserId };
+    }
+    const [c] = await tx.insert(workComments).values({ itemId: item.id, authorUserId: o.authorUserId, body, parentCommentId: parent?.id ?? null }).returning({ id: workComments.id });
+    const replyTo = parent?.authorUserId && parent.authorUserId !== o.authorUserId ? parent.authorUserId : null;
+    await recordEvent(tx, { itemId: item.id, actorUserId: o.authorUserId, kind: "comment_added", payload: { commentId: c.id, ...(replyTo ? { replyToUserId: replyTo } : {}) } });
+    await addWatchers(tx, item.id, [o.authorUserId]);
+    await recordMentions(tx, { itemId: item.id, actorUserId: o.authorUserId, userIds: extractMentionIds(body), commentId: c.id, html: body });
     return { commentId: c.id, productSlug, number: item.number };
   });
 }
@@ -437,7 +481,9 @@ export async function editComment(o: { commentId: string; body: string; actorUse
   return db.transaction(async (tx) => {
     const c = await ownedComment(tx, o.commentId, o.actorUserId, o.actorIsOps);
     const { item, productSlug } = await itemContext(tx, c.itemId);
-    await tx.update(workComments).set({ body: commentBody(o.body), editedAt: new Date() }).where(eq(workComments.id, c.id));
+    const body = commentBody(o.body);
+    await tx.update(workComments).set({ body, editedAt: new Date() }).where(eq(workComments.id, c.id));
+    await recordMentions(tx, { itemId: item.id, actorUserId: o.actorUserId, userIds: newMentionIds(c.body, body), commentId: c.id, html: body });
     await recordEvent(tx, { itemId: item.id, actorUserId: o.actorUserId, kind: "comment_edited", payload: { commentId: c.id } });
     return { productSlug, number: item.number };
   });
@@ -703,6 +749,16 @@ export async function setItemParent(o: { itemId: string; parentId: string | null
       kind: "parent_changed",
       payload: { before: before ? epicRef(before, board.keyPrefix) : null, after: after ? epicRef(after, board.keyPrefix) : null },
     });
+    return { productSlug, number: item.number };
+  });
+}
+
+/** The Watch button: start or stop getting this item's emails. */
+export async function setWatching(o: { itemId: string; userId: string; watching: boolean }): Promise<{ productSlug: string; number: number }> {
+  return db.transaction(async (tx) => {
+    const { item, productSlug } = await itemContext(tx, o.itemId);
+    if (o.watching) await addWatchers(tx, item.id, [o.userId]);
+    else await tx.delete(workWatchers).where(and(eq(workWatchers.itemId, item.id), eq(workWatchers.userId, o.userId)));
     return { productSlug, number: item.number };
   });
 }

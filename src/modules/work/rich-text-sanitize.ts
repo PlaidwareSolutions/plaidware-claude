@@ -25,6 +25,8 @@ const OPTIONS: sanitizeHtml.IOptions = {
     input: ["type", "checked", "disabled"],
     pre: ["class"],
     code: ["class"],
+    // @mentions: <span data-type="mention" data-id="<userId>" data-label="Name">@Name</span>
+    span: ["data-type", "data-id", "data-label"],
   },
   allowedClasses: { pre: [/^language-[\w-]+$/], code: [/^language-[\w-]+$/] },
   allowedSchemes: ["http", "https", "mailto"],

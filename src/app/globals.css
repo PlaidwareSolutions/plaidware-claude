@@ -147,6 +147,7 @@ html[data-work-fullscreen] [data-shell="topbar"] {
   .work-rich-text code { font-family: var(--font-mono); font-size: 0.85em; background: var(--muted); border-radius: 3px; padding: 0.1em 0.35em; }
   .work-rich-text pre { font-family: var(--font-mono); font-size: 0.8125rem; background: var(--muted); border-radius: 4px; padding: 0.75rem 1rem; overflow-x: auto; }
   .work-rich-text pre code { background: none; padding: 0; font-size: inherit; }
+  .work-rich-text span[data-type="mention"] { color: var(--info); background: color-mix(in oklab, var(--info) 12%, transparent); border-radius: 3px; padding: 0 3px; font-weight: 500; white-space: nowrap; }
   .work-rich-text hr { border: 0; border-top: 2px solid var(--border); margin: 1em 0; }
   .work-rich-text img { max-width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--border); cursor: zoom-in; }
   .work-rich-text img.ProseMirror-selectednode { outline: 2px solid var(--info); outline-offset: 2px; }

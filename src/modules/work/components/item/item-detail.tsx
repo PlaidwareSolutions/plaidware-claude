@@ -15,6 +15,7 @@ import type { WorkItemDetailDto, WorkUserRef } from "../../dto";
 import { TypeIcon } from "../item-bits";
 import { ChildIssues } from "./child-issues";
 import { ItemActivity } from "./item-activity";
+import { MentionPeopleProvider } from "../editor/mention-people";
 import { ItemSidebar } from "./item-sidebar";
 
 /** One work item: editable title and description, fields, comments and history. */
@@ -59,6 +60,7 @@ export function ItemDetail({
   }
 
   return (
+    <MentionPeopleProvider people={item.assignees}>
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)]">
       <div className="flex min-w-0 flex-col gap-6">
         <div className="flex flex-col gap-1">
@@ -88,6 +90,7 @@ export function ItemDetail({
         onDelete={canManage && !isPending("delete") ? () => void remove() : undefined}
       />
     </div>
+    </MentionPeopleProvider>
   );
 }
 

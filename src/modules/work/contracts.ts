@@ -109,12 +109,14 @@ export const assignItemSchema = z.object({ itemId: uuid, assigneeUserId: userId.
 export const setItemSprintSchema = z.object({ itemId: uuid, sprintId: uuid.nullable() });
 export const setItemRequesterSchema = z.object({ itemId: uuid, requesterTenantId: z.string().min(1).nullable() });
 export const setItemParentSchema = z.object({ itemId: uuid, parentId: uuid.nullable() });
+export const setWatchingSchema = z.object({ itemId: uuid, watching: z.boolean() });
 
 /** Jira's flag: an impediment marker with an optional reason. */
 export const setItemFlagSchema = z.object({ itemId: uuid, flagged: z.boolean(), reason: z.string().trim().max(500).optional() });
 
 const commentBody = z.string().trim().min(1).max(50_000);
-export const commentSchema = z.object({ itemId: uuid, body: commentBody });
+/** parentId: replying to a comment (a reply to a reply joins the same thread). */
+export const commentSchema = z.object({ itemId: uuid, body: commentBody, parentId: uuid.nullable().optional() });
 export const editCommentSchema = z.object({ commentId: uuid, body: commentBody });
 
 const sprintFields = {

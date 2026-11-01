@@ -17,6 +17,7 @@ import {
   quickCreateItemSchema,
   setItemFlagSchema,
   setItemParentSchema,
+  setWatchingSchema,
   setItemRequesterSchema,
   setItemSprintSchema,
   updateItemSchema,
@@ -32,6 +33,9 @@ import {
   type WorkItemStatus,
 } from "./contracts";
 import * as svc from "./service";
+import { env } from "@/env";
+import { fetchLinkPreview } from "./link-preview";
+import { itemTitleByRef } from "./queries";
 import { ATTACHMENT_MAX_BYTES } from "./attachment-logic";
 import { isRichTextEmpty } from "./rich-text";
 
@@ -187,6 +191,42 @@ export async function setItemParentAction(input: z.input<typeof setItemParentSch
   }
 }
 
+export async function setWatchingAction(input: z.input<typeof setWatchingSchema>): Promise<ActionResult> {
+  try {
+    const session = await requireWork();
+    const p = setWatchingSchema.parse(input);
+    const r = await svc.setWatching({ itemId: p.itemId, userId: session.user.id, watching: p.watching });
+    done(r.productSlug, r.number);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Hover card for a link in a description/comment. A link to one of our own
+ * work items shows its key and title (no fetch); anything else is fetched
+ * server-side with the SSRF guards in link-preview.ts.
+ */
+export async function previewLinkAction(
+  url: string,
+): Promise<{ ok: true; preview: { url: string; title: string | null; description: string | null; siteName: string | null; image: string | null; internal?: boolean } | null } | { ok: false; error: string }> {
+  try {
+    await requireWork();
+    const u = z.string().url().max(2000).parse(url);
+    const own = new URL(env.APP_BASE_URL);
+    const parsed = new URL(u);
+    const m = /^\/work\/([a-z0-9-]+)\/items\/(\d+)\/?$/.exec(parsed.pathname);
+    if (parsed.host === own.host && m) {
+      const item = await itemTitleByRef(m[1], Number(m[2]));
+      return { ok: true, preview: item ? { url: u, title: `${item.key} · ${item.title}`, description: item.status, siteName: "Plaidware Hub", image: null, internal: true } : null };
+    }
+    return { ok: true, preview: await fetchLinkPreview(u) };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 export async function setItemFlagAction(input: z.input<typeof setItemFlagSchema>): Promise<ActionResult> {
   try {
     const session = await requireWork();
@@ -233,7 +273,7 @@ export async function addCommentAction(
   try {
     const session = await requireWork();
     const p = commentSchema.parse(input);
-    const r = await svc.addComment({ ...p, authorUserId: session.user.id });
+    const r = await svc.addComment({ itemId: p.itemId, body: p.body, parentId: p.parentId ?? null, authorUserId: session.user.id });
     done(r.productSlug, r.number);
     return { ok: true, commentId: r.commentId };
   } catch (e) {

@@ -6,6 +6,8 @@ import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
+import Mention from "@tiptap/extension-mention";
+import type { SuggestionKeyDownProps, SuggestionProps } from "@tiptap/suggestion";
 import {
   Bold,
   ChevronDown,
@@ -40,6 +42,9 @@ import {
 import { uploadWorkImageAction } from "../../actions";
 import { ATTACHMENT_TYPES } from "../../attachment-logic";
 import { isRichTextEmpty } from "../../rich-text";
+import type { WorkUserRef } from "../../dto";
+import { UserAvatar } from "@/components/user-avatar";
+import { useMentionPeople } from "./mention-people";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
@@ -91,6 +96,17 @@ export function RichEditor({
     handlers.current = { onSave, onCancel, onChange };
   });
   const editorRef = useRef<Editor | null>(null);
+  // @mention picker: the suggestion plugin drives this state; refs let its callbacks read the latest.
+  const people = useMentionPeople();
+  const peopleRef = useRef(people);
+  useEffect(() => {
+    peopleRef.current = people;
+  });
+  const [picker, setPicker] = useState<Picker | null>(null);
+  const pickerRef = useRef<Picker | null>(null);
+  useEffect(() => {
+    pickerRef.current = picker;
+  });
 
   async function uploadAndInsert(files: File[], at?: number) {
     const images = files.filter((f) => (ATTACHMENT_TYPES as readonly string[]).includes(f.type));
@@ -135,6 +151,8 @@ export function RichEditor({
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder }),
+      // eslint-disable-next-line react-hooks/refs -- the getters run inside the suggestion plugin's callbacks, never during render
+      mentionExtension(() => peopleRef.current, () => pickerRef.current, setPicker),
     ],
     content: initialHtml,
     editorProps: {
@@ -145,6 +163,7 @@ export function RichEditor({
         role: "textbox",
       },
       handleKeyDown: (_view, e) => {
+        if (pickerRef.current && ["Escape", "Enter", "Tab", "ArrowUp", "ArrowDown"].includes(e.key) && !(e.metaKey || e.ctrlKey)) return false;
         const mod = e.metaKey || e.ctrlKey;
         if (mod && e.key === "Enter" && handlers.current.onSave) {
           e.preventDefault();
@@ -280,6 +299,34 @@ export function RichEditor({
       </div>
 
       {linkOpen && editor && <LinkBar editor={editor} onClose={() => setLinkOpen(false)} />}
+      {picker && picker.rect && (
+        <div
+          role="listbox"
+          aria-label="Mention someone"
+          className="fixed z-[100] w-64 overflow-hidden rounded-md border bg-popover p-1 text-sm shadow-lg"
+          style={{ left: picker.rect.left, top: picker.rect.bottom + 4 }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {picker.items.length === 0 ? (
+            <p className="px-2 py-2 text-xs text-muted-foreground">No one matches</p>
+          ) : (
+            picker.items.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={i === picker.index}
+                className={cn("flex w-full items-center gap-2 rounded-[3px] px-2 py-1.5 text-left", i === picker.index ? "bg-info/15 text-info" : "hover:bg-accent")}
+                onMouseEnter={() => setPicker({ ...picker, index: i })}
+                onClick={() => picker.command({ id: p.id, label: p.name })}
+              >
+                <UserAvatar name={p.name} size="sm" className="size-5" />
+                <span className="truncate">{p.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
 
       {/* The writing area: a click anywhere in the padding focuses the end. */}
       <div className="cursor-text" onClick={(e) => e.target === e.currentTarget && editor?.commands.focus("end")}>
@@ -397,4 +444,57 @@ function LinkBar({ editor, onClose }: { editor: Editor; onClose: () => void }) {
       )}
     </div>
   );
+}
+
+/** The @ picker's state (suggestion plugin → React). */
+type Picker = { items: WorkUserRef[]; index: number; rect: DOMRect | null; command: (p: { id: string; label: string }) => void };
+
+const fromSuggestion = (p: SuggestionProps<WorkUserRef>): Picker => ({
+  items: p.items,
+  index: 0,
+  rect: p.clientRect?.() ?? null,
+  command: (sel) => p.command(sel),
+});
+
+/**
+ * @mentions: the Mention node + a suggestion source over the work area's people.
+ * The getters read the component's latest people / picker state when the plugin calls them.
+ */
+function mentionExtension(
+  people: () => WorkUserRef[],
+  picker: () => Picker | null,
+  setPicker: React.Dispatch<React.SetStateAction<Picker | null>>,
+) {
+  return Mention.configure({
+    renderText: ({ node }) => `@${node.attrs.label ?? node.attrs.id}`,
+    suggestion: {
+      char: "@",
+      items: ({ query }) => people().filter((p) => p.name.toLowerCase().includes(query.toLowerCase())).slice(0, 8),
+      render: () => ({
+        onStart: (p: SuggestionProps<WorkUserRef>) => setPicker(fromSuggestion(p)),
+        onUpdate: (p: SuggestionProps<WorkUserRef>) =>
+          setPicker((prev) => ({ ...fromSuggestion(p), index: Math.min(prev?.index ?? 0, Math.max(0, p.items.length - 1)) })),
+        onExit: () => setPicker(null),
+        onKeyDown: ({ event }: SuggestionKeyDownProps) => {
+          const cur = picker();
+          if (!cur || !cur.items.length) return false;
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            const step = event.key === "ArrowDown" ? 1 : -1;
+            setPicker({ ...cur, index: (cur.index + step + cur.items.length) % cur.items.length });
+            return true;
+          }
+          if (event.key === "Enter" || event.key === "Tab") {
+            const pick = cur.items[cur.index];
+            if (pick) cur.command({ id: pick.id, label: pick.name });
+            return true;
+          }
+          if (event.key === "Escape") {
+            setPicker(null);
+            return true;
+          }
+          return false;
+        },
+      }),
+    },
+  });
 }
