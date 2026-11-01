@@ -280,6 +280,7 @@ export type WorkBoardDto = {
   mode: WorkBoardMode;
   sprintLengthDays: number;
   wipLimits: Partial<Record<WorkItemStatus, number>>;
+  reportAssigneeUserId: string | null;
   activeSprint: WorkSprintDto | null;
   counts: { backlog: number; open: number; plannedSprints: number };
 };

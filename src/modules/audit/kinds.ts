@@ -40,6 +40,7 @@ const KINDS: Record<string, { label: string; group: AuditGroup }> = {
   partner_tenant_created: { label: "Workspace created by partner app", group: "setup" },
   partner_tenant_updated: { label: "Workspace details updated by partner app", group: "workspace" },
   partner_checkout_started: { label: "Payment link created by partner app", group: "billing" },
+  partner_work_item_created: { label: "Report filed as a work ticket by partner app", group: "workspace" },
   partner_link_set: { label: "Linked to partner app", group: "provisioning" },
   partner_link_removed: { label: "Partner app link removed", group: "provisioning" },
   offline_payment_recorded: { label: "Offline payment recorded", group: "billing" },
@@ -166,6 +167,8 @@ export function describeAudit(
         .filter(Boolean)
         .join(" · ") || null;
     }
+    case "partner_work_item_created":
+      return [str(payload.key), str(payload.kind), str(payload.via)].filter(Boolean).join(" · ") || null;
     case "subscription_cancel_unscheduled":
     case "partner_checkout_started":
     case "partner_tenant_created":

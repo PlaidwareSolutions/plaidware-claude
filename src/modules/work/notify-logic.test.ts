@@ -1,9 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { extractMentionIds, newMentionIds } from "./mention-logic";
-import { describeEvent, digestBodyHtml, digestSubject, recipientsFor, strongestReason, type NotifyEvent } from "./notify-logic";
+import { describeEvent, digestBodyHtml, eventActorLabel, digestSubject, recipientsFor, strongestReason, type NotifyEvent } from "./notify-logic";
 
 const ev = (o: Partial<NotifyEvent> & { kind: string }): NotifyEvent => ({ id: "e1", itemId: "i1", actorUserId: "alice", actorName: "Alice", payload: {}, ...o });
 const ctx = { comments: new Map([["c1", "Looks good <b>ship</b>"]]), mentionedInComments: new Set<string>() };
+
+describe("actor label", () => {
+  it("names the user, else the app that filed it, else Someone", () => {
+    expect(eventActorLabel({ actorName: "Alice", payload: { via: "Fixorata" } })).toBe("Alice");
+    expect(eventActorLabel({ actorName: null, payload: { via: "Fixorata" } })).toBe("Fixorata");
+    expect(eventActorLabel({ actorName: null, payload: {} })).toBe("Someone");
+  });
+
+  it("an app-filed assignment reads as the app assigning you", () => {
+    const l = describeEvent(ev({ kind: "assignee_changed", actorUserId: null, actorName: null, payload: { before: null, after: { id: "bob", name: "Bob" }, via: "Fixorata" } }), "bob", ctx)!;
+    expect(l.text).toContain("Fixorata");
+    expect(l.text).not.toContain("Someone");
+  });
+});
 
 describe("mentions", () => {
   const html = '<p>Hi <span data-type="mention" data-id="bob" data-label="Bob">@Bob</span> and <span data-label="Cy" data-id="cy" data-type="mention">@Cy</span> and <span data-id="x">no</span></p>';

@@ -55,6 +55,8 @@ export const workBoards = pgTable("work_boards", {
   sprintLengthDays: integer("sprint_length_days").notNull().default(14),
   /** Soft limits per board column, e.g. { in_progress: 3 }. The UI warns; nothing blocks. */
   wipLimits: jsonb("wip_limits").$type<Partial<Record<WorkItemStatus, number>>>().notNull().default({}),
+  /** Who a partner app's user reports (POST /work-items) are assigned to; null = unassigned. */
+  reportAssigneeUserId: text("report_assignee_user_id").references(() => user.id, { onDelete: "set null" }),
   /** Monotonic counters, claimed with UPDATE … RETURNING inside the insert transaction. */
   nextItemNumber: integer("next_item_number").notNull().default(1),
   nextSprintNumber: integer("next_sprint_number").notNull().default(1),

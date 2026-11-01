@@ -9,20 +9,25 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { updateBoardSettingsAction } from "../actions";
 import { BOARD_COLUMNS, SPRINT_LENGTHS, type BoardColumn, type SprintLength, type WorkBoardMode, type WorkItemStatus } from "../contracts";
+import type { WorkUserRef } from "../dto";
 import { STATUS_LABELS } from "../transitions";
 
 const WIP_COLUMNS = BOARD_COLUMNS.filter((c) => c !== "done");
+const UNASSIGNED = "__none";
 
-/** Ops-admin settings for one board: key prefix, mode, cadence, WIP limits. */
+/** Ops-admin settings for one board: key prefix, mode, cadence, WIP limits, who partner reports go to. */
 export function BoardSettingsForm({
   board,
+  people,
 }: {
+  people: WorkUserRef[];
   board: {
     id: string;
     keyPrefix: string;
     mode: WorkBoardMode;
     sprintLengthDays: number;
     wipLimits: Partial<Record<WorkItemStatus, number>>;
+    reportAssigneeUserId: string | null;
     hasActiveSprint: boolean;
   };
 }) {
@@ -31,6 +36,7 @@ export function BoardSettingsForm({
   const [mode, setMode] = useState<WorkBoardMode>(board.mode);
   const [length, setLength] = useState<SprintLength>((SPRINT_LENGTHS as readonly number[]).includes(board.sprintLengthDays) ? (board.sprintLengthDays as SprintLength) : 14);
   const [wip, setWip] = useState<Record<string, string>>(Object.fromEntries(WIP_COLUMNS.map((c) => [c, board.wipLimits[c] == null ? "" : String(board.wipLimits[c])])));
+  const [reportAssignee, setReportAssignee] = useState(board.reportAssigneeUserId ?? UNASSIGNED);
   const busy = isPending("settings");
   const switchingOff = board.mode === "sprints" && mode === "kanban" && board.hasActiveSprint;
 
@@ -41,7 +47,8 @@ export function BoardSettingsForm({
       const n = Number(wip[c]);
       if (wip[c].trim() !== "" && Number.isInteger(n) && n >= 1) wipLimits[c] = n;
     }
-    await run(() => updateBoardSettingsAction({ boardId: board.id, keyPrefix, mode, sprintLengthDays: length, wipLimits }), {
+    const reportAssigneeUserId = reportAssignee === UNASSIGNED ? null : reportAssignee;
+    await run(() => updateBoardSettingsAction({ boardId: board.id, keyPrefix, mode, sprintLengthDays: length, wipLimits, reportAssigneeUserId }), {
       key: "settings",
       refresh: false,
       success: "Board settings saved",
@@ -94,6 +101,22 @@ export function BoardSettingsForm({
               <Input id={`wip-${c}`} type="number" min={1} max={99} value={wip[c]} placeholder="none" onChange={(e) => setWip({ ...wip, [c]: e.target.value })} />
             </div>
           ))}
+        </div>
+      </Section>
+
+      <Section title="Reports from partner apps" description="bug reports, feedback and ideas users file in the product" card>
+        <div className="grid max-w-sm gap-2">
+          <Label>Assign new reports to</Label>
+          <Select value={reportAssignee} onValueChange={setReportAssignee}>
+            <SelectTrigger className="w-full" aria-label="Assign new reports to"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
+              {people.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">They're emailed when a report lands on this board, like any assignment.</p>
         </div>
       </Section>
 

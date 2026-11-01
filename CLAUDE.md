@@ -130,6 +130,13 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   `billingUrl` for partner-only clients (`billingPageUrlFor`). Fixorata
   pricing = 30-day trial + $35/mo (seed; existing DBs:
   scripts/align-fixorata-pricing.ts).
+- User reports → work tickets (2026-11): `POST /api/partners/v1/work-items`
+  (+ `GET /work-items/:ref`) files an app user's bug/feedback/idea on the
+  app's product board (FIXO), deduped by `partner_work_items` (app,
+  external_ref). Body never names the client (pure rules in
+  `partners/work-intake-logic.ts`); a linked shop becomes the ops-only requester.
+  Board Settings → "Reports from partner apps" (`work_boards.report_assignee_user_id`)
+  assigns new report tickets to one person, who is emailed like any assignment.
 - Ops: `/ops/system/partners` (apps, secret rotation, keys — shown once).
   Smokes: scripts/smoke-partner-billing.ts, smoke-partner-webhooks.ts
   (+ smoke-webhooks.ts for MHub regressions).

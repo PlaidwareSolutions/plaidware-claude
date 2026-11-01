@@ -82,7 +82,8 @@ export function ItemActivity({
 
 function HistoryRow({ event }: { event: WorkEventDto }) {
   const detail = describeWorkEvent(event.kind, event.payload);
-  const name = event.actor?.name ?? "System";
+  // No actor: an app filed it (payload.via, e.g. "Fixorata"), else the system.
+  const name = event.actor?.name ?? (typeof event.payload.via === "string" && event.payload.via ? event.payload.via : "System");
   return (
     <li className="flex gap-3 text-sm">
       <UserAvatar name={name} />

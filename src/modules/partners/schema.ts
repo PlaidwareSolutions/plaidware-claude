@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization } from "../auth/schema";
 import { subscriptions } from "../billing/schema";
+import { workItems } from "../work/schema";
 
 export const partnerAppStatus = pgEnum("partner_app_status", ["active", "disabled"]);
 
@@ -156,4 +157,28 @@ export const partnerPayLinks = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("partner_pay_links_subscription_idx").on(t.subscriptionId)],
+);
+
+/**
+ * Tickets a partner app filed on its product's work board (POST
+ * /work-items — a shop's bug report becomes a FIXO ticket). One row per
+ * (app, the app's own report id): the durable dedupe, so a retry with a
+ * fresh Idempotency-Key still lands on the same ticket. `workItemId` is null
+ * only while the first request is creating it.
+ */
+export const partnerWorkItems = pgTable(
+  "partner_work_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    partnerAppId: uuid("partner_app_id")
+      .notNull()
+      .references(() => partnerApps.id, { onDelete: "cascade" }),
+    externalRef: text("external_ref").notNull(),
+    workItemId: uuid("work_item_id").references(() => workItems.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("partner_work_items_app_ref_uq").on(t.partnerAppId, t.externalRef),
+    index("partner_work_items_item_idx").on(t.workItemId),
+  ],
 );

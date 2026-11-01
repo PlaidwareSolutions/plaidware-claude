@@ -51,3 +51,26 @@ export const updateTenantSchema = z
   .refine((v) => v.name !== undefined || v.billing_email !== undefined || v.billing_name !== undefined, {
     message: "Send at least one of name, billing_email, billing_name",
   });
+
+/** POST /work-items — a report from the partner's users, filed as a ticket on the app's product board. */
+export const createWorkItemSchema = z.object({
+  /** The partner's own report id; the same ref always lands on the same ticket. */
+  external_ref: externalId,
+  kind: z.enum(["bug", "feedback", "idea"]),
+  title: z.string().trim().max(200).optional(),
+  message: z.string().trim().min(1).max(10000),
+  /** The shop it came from: the ticket's requester (ops-only) when that tenant is linked, else ignored. */
+  external_tenant_id: externalId.nullish(),
+  page: z
+    .object({ path: z.string().trim().max(500).nullish(), name: z.string().trim().max(200).nullish() })
+    .nullish(),
+  user_agent: z.string().trim().max(500).nullish(),
+  viewport: z.object({ width: z.number().int().positive().max(20000), height: z.number().int().positive().max(20000) }).nullish(),
+  /** Where staff can open the report in the partner app. */
+  report_url: url.nullish(),
+  /** PNG/JPEG/GIF/WebP, up to 5 MB once decoded. */
+  screenshot: z
+    .object({ data_base64: z.string().max(7_000_000), file_name: z.string().trim().max(200).nullish() })
+    .nullish(),
+});
+export type CreateWorkItemBody = z.output<typeof createWorkItemSchema>;

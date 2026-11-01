@@ -170,6 +170,46 @@ read live and cached for 60s per tenant. Mutations clear the cache.
 client has a tenant price override on the product's base charge (a
 negotiated price), and `standard` otherwise.
 
+### Work tickets from user reports (2026-11)
+
+A partner app's users file bug reports, feedback and ideas in the app. Each
+report becomes a ticket on the app's product board in Hub's `/work` area
+(Fixorata → board `FIXO`).
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/work-items` | mutation headers required; 201 = filed, 200 = this `external_ref` was already filed |
+| GET | `/work-items/:external_ref` | the ticket a report became; 404 `not_found` if none |
+
+```
+POST body: { external_ref, kind: bug|feedback|idea, message (≤10000), title?,
+             external_tenant_id?, page?: { path?, name? }, user_agent?,
+             viewport?: { width, height }, report_url?,
+             screenshot?: { data_base64, file_name? } }   (PNG/JPEG/GIF/WebP ≤ 5 MB decoded)
+WorkItemRef: { key, number, product_slug, status, resolution, url }
+```
+
+- **One ticket per report.** `(app, external_ref)` is stored durably
+  (`partner_work_items`), so a retry under a new `Idempotency-Key` returns
+  the same ticket with a 200. A 409 `idempotency_conflict` means the first
+  request is still running, so retry shortly.
+- **What the ticket carries.** The ticket lands in Backlog, source
+  `client_request`, priority medium. Labels are `<app>-report` plus
+  `bug-report`, `feedback` or `idea`. Types map bug → `bug`, idea →
+  `feature`, feedback → `enhancement`. The title is `title`, else the
+  message's first line. The body is the message, the screenshot, and a
+  details list: reporter role, page, browser, screen, and a link to
+  `report_url`. The reporter shows in the history as "System".
+- **Who gets it.** The board's Settings → "Reports from partner apps" names an
+  assignee (`work_boards.report_assignee_user_id`). They get the normal
+  "assigned to you" email. When that person can no longer take work, the
+  ticket is filed unassigned; it never fails.
+- **Client privacy.** The body never names the client. Developers read
+  tickets, and they see a client only through membership. The shop
+  becomes the ticket's ops-only *requester* when `external_tenant_id` is
+  linked; an unlinked id is ignored. A linked tenant also gets the audit
+  entry `partner_work_item_created`.
+
 ## Webhooks to the partner
 
 These are the same outbox, signing and retry rules as MHub (`webhooks_out`):

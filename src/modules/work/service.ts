@@ -63,7 +63,7 @@ async function workUsersAmong(tx: Tx, ids: string[]): Promise<string[]> {
 }
 
 /** Record who was @mentioned (comment or description) and make them watchers. */
-async function recordMentions(tx: Tx, o: { itemId: string; actorUserId: string; userIds: string[]; commentId?: string; html: string }) {
+async function recordMentions(tx: Tx, o: { itemId: string; actorUserId: string | null; userIds: string[]; commentId?: string; html: string }) {
   const ids = (await workUsersAmong(tx, o.userIds)).filter((id) => id !== o.actorUserId);
   if (!ids.length) return;
   await addWatchers(tx, o.itemId, ids);
@@ -146,7 +146,10 @@ export async function ensureBoardForProductSlug(slug: string): Promise<{ board: 
   return { board: await ensureBoard(product.id), productId: product.id };
 }
 
-export async function updateBoardSettings(o: BoardSettings & { actorUserId: string }): Promise<{ productSlug: string }> {
+/** `reportAssigneeUserId` left out keeps the current one; null clears it. */
+export async function updateBoardSettings(
+  o: Omit<BoardSettings, "reportAssigneeUserId"> & { reportAssigneeUserId?: string | null; actorUserId: string },
+): Promise<{ productSlug: string }> {
   return db.transaction(async (tx) => {
     const { board, productSlug, activeSprint } = await boardContext(tx, o.boardId);
     if (o.keyPrefix !== board.keyPrefix) {
@@ -156,9 +159,10 @@ export async function updateBoardSettings(o: BoardSettings & { actorUserId: stri
     if (o.mode === "kanban" && board.mode === "sprints" && activeSprint) {
       throw new Error("Complete the active sprint before switching this board to kanban");
     }
+    if (o.reportAssigneeUserId) await assertAssignable(tx, o.reportAssigneeUserId);
     await tx
       .update(workBoards)
-      .set({ keyPrefix: o.keyPrefix, mode: o.mode, sprintLengthDays: o.sprintLengthDays, wipLimits: o.wipLimits })
+      .set({ keyPrefix: o.keyPrefix, mode: o.mode, sprintLengthDays: o.sprintLengthDays, wipLimits: o.wipLimits, ...(o.reportAssigneeUserId !== undefined ? { reportAssigneeUserId: o.reportAssigneeUserId } : {}) })
       .where(eq(workBoards.id, o.boardId));
     console.log(`[work] board ${board.keyPrefix} settings updated by ${o.actorUserId}`);
     return { productSlug };
@@ -170,7 +174,12 @@ export async function updateBoardSettings(o: BoardSettings & { actorUserId: stri
 // ---------------------------------------------------------------------------
 
 export async function createItem(
-  o: CreateItem & { reporterUserId: string; requesterTenantId?: string | null },
+  o: CreateItem & {
+    reporterUserId: string | null;
+    requesterTenantId?: string | null;
+    /** Filed by a partner app with no Hub user behind it ("Fixorata"): named on the events in place of an actor. */
+    via?: string;
+  },
 ): Promise<{ id: string; number: number; key: string; productSlug: string }> {
   return db.transaction(async (tx) => {
     // Claim the number: the row lock serialises concurrent creates on one board.
@@ -231,12 +240,13 @@ export async function createItem(
       .returning({ id: workItems.id });
 
     const actor = o.reporterUserId;
-    await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "item_created", payload: { title: o.title, type: o.type, priority: o.priority, status } });
-    if (assignee) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "assignee_changed", payload: { before: null, after: assignee } });
-    if (sprint && sprintId) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "sprint_changed", payload: { before: null, after: sprintRef(sprint), reason: o.sprintId ? "sprint_assigned" : undefined } });
+    const via = o.via ? { via: o.via } : {};
+    await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "item_created", payload: { title: o.title, type: o.type, priority: o.priority, status, ...via } });
+    if (assignee) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "assignee_changed", payload: { before: null, after: assignee, ...via } });
+    if (sprint && sprintId) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "sprint_changed", payload: { before: null, after: sprintRef(sprint), reason: o.sprintId ? "sprint_assigned" : undefined, ...via } });
     // The requester is its own (ops-only) event so item_created never names a client.
-    if (requester) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "requester_changed", payload: { before: null, after: requester } });
-    if (parent) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "parent_changed", payload: { before: null, after: epicRef(parent, board.keyPrefix) } });
+    if (requester) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "requester_changed", payload: { before: null, after: requester, ...via } });
+    if (parent) await recordEvent(tx, { itemId: item.id, actorUserId: actor, kind: "parent_changed", payload: { before: null, after: epicRef(parent, board.keyPrefix), ...via } });
     await addWatchers(tx, item.id, [actor, assignee?.id]);
     const description = normalizeRichText(o.description);
     await recordMentions(tx, { itemId: item.id, actorUserId: actor, userIds: extractMentionIds(description), html: description });
@@ -686,7 +696,7 @@ function commentBody(body: string): string {
 }
 
 /** Store a pasted/uploaded image; the type comes from its bytes. Returns the new attachment id. */
-export async function addAttachment(o: { bytes: Uint8Array; fileName: string | null; uploadedByUserId: string }): Promise<{ id: string }> {
+export async function addAttachment(o: { bytes: Uint8Array; fileName: string | null; uploadedByUserId: string | null }): Promise<{ id: string }> {
   const type = sniffImageType(o.bytes);
   const problem = attachmentProblem(o.bytes.byteLength, type);
   if (problem || !type) throw new Error(problem ?? "Unsupported file");

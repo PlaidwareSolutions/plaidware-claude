@@ -3,7 +3,8 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../../db";
 import { env } from "../../env";
-import { AUTH } from "../../lib/routes";
+import { AUTH, WORK } from "../../lib/routes";
+import { roleHasWorkAccess } from "../../lib/roles";
 import { getStripe } from "../../lib/stripe";
 import { PLACEHOLDER_PHONE } from "../../lib/phone";
 import { tenantStatusAllows, tenantStatusMessage } from "../../policy/tenant-status";
@@ -20,6 +21,11 @@ import {
   setCancelAtPeriodEnd,
 } from "../billing/service";
 import { productComponents, products } from "../catalog/schema";
+import type { WorkItemStatus, WorkResolution } from "../work/contracts";
+import { attachmentProblem, sniffImageType } from "../work/attachment-logic";
+import { formatKey } from "../work/key-logic";
+import { workBoards, workItems } from "../work/schema";
+import { addAttachment, createItem, ensureBoardForProductSlug } from "../work/service";
 import { createTenantWithOwner, uniqueSlug } from "../tenancy/service";
 import { PartnerApiError, type PartnerApp } from "./api-http";
 import { forgetStripeFacts, partnerSubscriptionFor } from "./api-queries";
@@ -33,7 +39,9 @@ import {
   type PartnerActor,
   type PartnerBillingStatus,
 } from "./logic";
-import { partnerPayLinks, partnerTenantLinks } from "./schema";
+import type { CreateWorkItemBody } from "./contracts";
+import { partnerPayLinks, partnerTenantLinks, partnerWorkItems } from "./schema";
+import { decodeScreenshot, reportDescriptionHtml, reportLabels, reportTitle, workItemTypeFor } from "./work-intake-logic";
 import { hubTenantIdFor, linkPartnerTenant } from "./service";
 
 /**
@@ -548,4 +556,142 @@ export async function updatePartnerTenant(opts: {
     kind: "partner_tenant_updated",
     payload: { via: partnerActorLabel(opts.app.name, opts.actor), ...changes },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Work tickets from the partner's users (POST /work-items)
+// ---------------------------------------------------------------------------
+
+export type PartnerWorkItemRef = {
+  key: string;
+  number: number;
+  product_slug: string;
+  status: WorkItemStatus;
+  resolution: WorkResolution | null;
+  url: string;
+};
+
+/** The board's report assignee, if they can still be assigned work (a role change or disable leaves the ticket unassigned, never failed). */
+async function reportAssignee(userId: string | null): Promise<string | null> {
+  if (!userId) return null;
+  const u = await db.query.user.findFirst({ where: eq(user.id, userId), columns: { platformRole: true, disabledAt: true } });
+  return u && !u.disabledAt && roleHasWorkAccess(u.platformRole) ? userId : null;
+}
+
+/** The app's own product: the one whose slug IS a prefix, else the first that matches one. */
+async function partnerProductSlug(app: PartnerApp): Promise<string> {
+  const rows = await db.select({ slug: products.slug }).from(products).orderBy(asc(products.createdAt));
+  const owned = rows.map((r) => r.slug).filter((s) => slugMatchesPrefixes(app.productPrefixes, s));
+  const slug = owned.find((s) => app.productPrefixes.includes(s)) ?? owned[0];
+  if (!slug) throw new PartnerApiError("rejected", "This partner app has no product with a work board", 422);
+  return slug;
+}
+
+async function partnerWorkItemRef(workItemId: string): Promise<PartnerWorkItemRef | null> {
+  const [row] = await db
+    .select({ number: workItems.number, status: workItems.status, resolution: workItems.resolution, prefix: workBoards.keyPrefix, slug: products.slug })
+    .from(workItems)
+    .innerJoin(workBoards, eq(workBoards.id, workItems.boardId))
+    .innerJoin(products, eq(products.id, workBoards.productId))
+    .where(eq(workItems.id, workItemId));
+  if (!row) return null;
+  return {
+    key: formatKey(row.prefix, row.number),
+    number: row.number,
+    product_slug: row.slug,
+    status: row.status,
+    resolution: row.resolution,
+    url: `${env.APP_BASE_URL.replace(/\/+$/, "")}${WORK.item(row.slug, row.number)}`,
+  };
+}
+
+/** GET /work-items/:ref — the ticket a report became, so the app can show its progress. */
+export async function getPartnerWorkItem(app: PartnerApp, externalRef: string): Promise<PartnerWorkItemRef> {
+  const link = await db.query.partnerWorkItems.findFirst({
+    where: and(eq(partnerWorkItems.partnerAppId, app.id), eq(partnerWorkItems.externalRef, externalRef)),
+  });
+  const ref = link?.workItemId ? await partnerWorkItemRef(link.workItemId) : null;
+  if (!ref) throw new PartnerApiError("not_found", "No ticket for this report", 404);
+  return ref;
+}
+
+/**
+ * File a partner user's report as a ticket on the app's board (backlog,
+ * source client_request, the shop as requester when its tenant is linked).
+ * The (app, external_ref) row is claimed first, so two requests for one
+ * report — even under different Idempotency-Keys — make one ticket.
+ */
+export async function createPartnerWorkItem(opts: {
+  app: PartnerApp;
+  actor: PartnerActor;
+  body: CreateWorkItemBody;
+}): Promise<{ created: boolean; ticket: PartnerWorkItemRef }> {
+  const { app, actor, body } = opts;
+  const [claim] = await db
+    .insert(partnerWorkItems)
+    .values({ partnerAppId: app.id, externalRef: body.external_ref })
+    .onConflictDoNothing()
+    .returning({ id: partnerWorkItems.id });
+  if (!claim) {
+    const ticket = await getPartnerWorkItem(app, body.external_ref).catch(() => null);
+    if (!ticket) throw new PartnerApiError("idempotency_conflict", "This report is still being filed — retry shortly", 409);
+    return { created: false, ticket };
+  }
+
+  try {
+    const slug = await partnerProductSlug(app);
+    const target = await ensureBoardForProductSlug(slug);
+    if (!target) throw new PartnerApiError("rejected", "This partner app has no product with a work board", 422);
+    const tenantId = body.external_tenant_id ? await hubTenantIdFor(app.id, body.external_tenant_id) : null;
+
+    let screenshotSrc: string | null = null;
+    if (body.screenshot) {
+      const bytes = decodeScreenshot(body.screenshot.data_base64);
+      if (!bytes) throw new PartnerApiError("validation_failed", "screenshot.data_base64: not base64", 400);
+      const problem = attachmentProblem(bytes.byteLength, sniffImageType(bytes));
+      if (problem) throw new PartnerApiError("validation_failed", `screenshot: ${problem}`, 400);
+      const { id } = await addAttachment({ bytes, fileName: body.screenshot.file_name ?? "screenshot", uploadedByUserId: null });
+      screenshotSrc = WORK.attachment(id);
+    }
+
+    const item = await createItem({
+      boardId: target.board.id,
+      title: reportTitle(body),
+      description: reportDescriptionHtml({
+        kind: body.kind,
+        message: body.message,
+        appDisplayName: app.displayName,
+        reporterRole: actor.role,
+        page: body.page,
+        userAgent: body.user_agent,
+        viewport: body.viewport,
+        reportUrl: body.report_url,
+        screenshotSrc,
+      }),
+      type: workItemTypeFor(body.kind),
+      priority: "medium",
+      status: "backlog",
+      assigneeUserId: await reportAssignee(target.board.reportAssigneeUserId),
+      labels: reportLabels(app.name, body.kind),
+      source: "client_request",
+      reporterUserId: null,
+      requesterTenantId: tenantId,
+      via: app.displayName,
+    });
+    await db.update(partnerWorkItems).set({ workItemId: item.id }).where(eq(partnerWorkItems.id, claim.id));
+    if (tenantId) {
+      await writeAudit({
+        tenantId,
+        kind: "partner_work_item_created",
+        payload: { via: partnerActorLabel(app.name, actor), key: item.key, kind: body.kind },
+      });
+    }
+    const ticket = await partnerWorkItemRef(item.id);
+    if (!ticket) throw new Error("The ticket was created but could not be read back");
+    return { created: true, ticket };
+  } catch (e) {
+    // Release the claim so the partner's retry can file it.
+    await db.delete(partnerWorkItems).where(eq(partnerWorkItems.id, claim.id));
+    throw e;
+  }
 }

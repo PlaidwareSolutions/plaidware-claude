@@ -33,6 +33,11 @@ const refName = (v: unknown): string | null =>
   v && typeof v === "object" && "name" in v && typeof (v as { name: unknown }).name === "string" ? (v as { name: string }).name : null;
 const str = (v: unknown) => (typeof v === "string" && v ? v : null);
 
+/** Who did it, for an email line: the user, else the app that filed it (`payload.via`, e.g. "Fixorata"), else "Someone". */
+export function eventActorLabel(e: Pick<NotifyEvent, "actorName" | "payload">): string {
+  return e.actorName ?? str(e.payload.via) ?? "Someone";
+}
+
 /**
  * Who gets this event, and why. Watchers hear about WATCHER_KINDS; the
  * assignee hears about field edits (ASSIGNEE_KINDS); a new assignee and the
@@ -70,8 +75,8 @@ export function describeEvent(
   recipientId: string,
   ctx: { comments: Map<string, string>; mentionedInComments: Set<string> },
 ): DigestLine | null {
-  const who = escapeHtml(e.actorName ?? "Someone");
-  const whoText = e.actorName ?? "Someone";
+  const whoText = eventActorLabel(e);
+  const who = escapeHtml(whoText);
   const quote = (t: string | undefined) =>
     t ? `<blockquote style="margin:8px 0 0;padding:8px 12px;border-left:3px solid #3a4468;color:#c3c9de;white-space:pre-wrap">${escapeHtml(t)}</blockquote>` : "";
   switch (e.kind) {

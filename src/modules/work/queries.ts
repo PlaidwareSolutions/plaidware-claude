@@ -291,6 +291,7 @@ export async function getBoardBySlug(slug: string, now = new Date()): Promise<Wo
     mode: board.mode,
     sprintLengthDays: board.sprintLengthDays,
     wipLimits: board.wipLimits,
+    reportAssigneeUserId: board.reportAssigneeUserId,
     activeSprint: active ? toSprintDto(active, isoDay(now)) : null,
     counts: { backlog: counts?.backlog ?? 0, open: counts?.open ?? 0, plannedSprints: Number(planned?.n ?? 0) },
   };

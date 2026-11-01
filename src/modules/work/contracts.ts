@@ -153,6 +153,8 @@ export const boardSettingsSchema = z.object({
   mode: z.enum(WORK_BOARD_MODES),
   sprintLengthDays: z.union([z.literal(7), z.literal(14)]),
   wipLimits: z.partialRecord(z.enum(BOARD_COLUMNS), z.number().int().min(1).max(99)).default({}),
+  /** Assignee for tickets filed from partner apps' user reports; null = unassigned. */
+  reportAssigneeUserId: userId.nullable().default(null),
 });
 export type BoardSettingsInput = z.input<typeof boardSettingsSchema>;
 export type BoardSettings = z.output<typeof boardSettingsSchema>;
