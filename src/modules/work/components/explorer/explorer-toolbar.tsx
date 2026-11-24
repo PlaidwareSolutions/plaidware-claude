@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Code, Link2, MoreHorizontal, RefreshCw, Search, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { Check, Code, Link2, MoreHorizontal, RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 import { toast } from "sonner";
 import { WORK, withQuery } from "@/lib/routes";
 import { cn } from "@/lib/utils";
-import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -54,13 +53,10 @@ const GROUPS: { value: ExplorerGroup; label: string }[] = [
   { value: "client", label: "Client" },
 ];
 
-/** Avatars shown before the rest fold into "+N" (Jira's people filter). */
-const FACES = 5;
-
 /**
- * The board toolbar, laid out like Jira's: search, people, Epic · Type ·
+ * The board toolbar, laid out like Jira's: search, Assignee, Epic · Type ·
  * Label · Quick filters on the left; Group, View settings and ⋯ on the right
- * (plus `extra`, e.g. Complete sprint). The List view adds Assignee, Status and
+ * (plus `extra`, e.g. Complete sprint). The List view adds Status and
  * Priority. Every control writes the URL, so a view is a shareable link.
  * Shortcut: "/" focuses search.
  */
@@ -137,12 +133,8 @@ export function ExplorerToolbar({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // You first, then everyone else as the server ordered them.
   const people = [...assignees].sort((a, b) => (a.id === viewerId ? -1 : b.id === viewerId ? 1 : 0));
-  const faces = people.slice(0, FACES);
-  const rest = people.slice(FACES);
-  const toggleAssignee = (id: string) =>
-    push({ assignee: filters.assignee.includes(id) ? filters.assignee.filter((x) => x !== id) : [...filters.assignee, id] });
-  const restSelected = rest.some((p) => filters.assignee.includes(p.id)) || filters.assignee.includes("unassigned");
 
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2" data-pending={pending ? "" : undefined}>
@@ -162,53 +154,15 @@ export function ExplorerToolbar({
 
       {/* Phones: one swipeable row of filters instead of four wrapped rows; desktop keeps the wrapping toolbar. */}
       <div className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-1.5 overflow-x-auto px-1 py-0.5 [scrollbar-width:none] sm:contents [&::-webkit-scrollbar]:hidden">
-      {faces.length > 0 && (
-        <div className="mr-1.5 flex shrink-0 items-center -space-x-1" role="group" aria-label="Filter by assignee">
-          {faces.map((a) => {
-            const on = filters.assignee.includes(a.id);
-            return (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => toggleAssignee(a.id)}
-                title={a.id === viewerId ? `${a.name} (you)` : a.name}
-                aria-pressed={on}
-                className={cn("rounded-full border-2 border-background transition-transform hover:z-10 hover:-translate-y-0.5", on && "z-10 border-info ring-1 ring-info")}
-              >
-                <UserAvatar name={a.name} size="default" />
-              </button>
-            );
-          })}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className={cn(
-                  "z-0 inline-flex size-9 items-center justify-center rounded-full border-2 border-background bg-muted text-xs font-semibold text-muted-foreground hover:bg-accent",
-                  restSelected && "border-info text-info",
-                )}
-                aria-label="More people"
-                title="More people"
-              >
-                {rest.length ? `+${rest.length}` : <UserRound className="size-4" />}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuCheckboxItem checked={filters.assignee.includes("unassigned")} onSelect={(e) => e.preventDefault()} onCheckedChange={() => toggleAssignee("unassigned")}>
-                <span className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <UserRound className="size-3" />
-                </span>
-                Unassigned
-              </DropdownMenuCheckboxItem>
-              {rest.map((p) => (
-                <DropdownMenuCheckboxItem key={p.id} checked={filters.assignee.includes(p.id)} onSelect={(e) => e.preventDefault()} onCheckedChange={() => toggleAssignee(p.id)}>
-                  <UserAvatar name={p.name} size="sm" className="size-5" /> {p.name}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
+      <MultiFilter
+        label="Assignee"
+        options={[
+          { value: "unassigned", label: "Unassigned" },
+          ...people.map((a) => ({ value: a.id, label: a.name, person: true, hint: a.id === viewerId ? "you" : undefined })),
+        ]}
+        selected={filters.assignee}
+        onChange={(assignee) => push({ assignee })}
+      />
 
       {(
         <MultiFilter
@@ -237,12 +191,6 @@ export function ExplorerToolbar({
       )}
       {list && (
         <>
-          <MultiFilter
-            label="Assignee"
-            options={[{ value: "me", label: "Me" }, { value: "unassigned", label: "Unassigned" }, ...assignees.map((a) => ({ value: a.id, label: a.name, person: true }))]}
-            selected={filters.assignee}
-            onChange={(assignee) => push({ assignee })}
-          />
           <MultiFilter
             label="Status"
             options={WORK_ITEM_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] }))}
