@@ -87,7 +87,7 @@ export function BillingPolicyEditor({ policy }: { policy: BillingPolicyDto }) {
               <Label htmlFor="pol-rem">Reminder days past due (comma separated)</Label>
               <Input id="pol-rem" value={form.reminderDays} onChange={(e) => setForm({ ...form, reminderDays: e.target.value })} placeholder="3, 7, 14" />
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid items-start gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="pol-grace">Suspend after (days past due)</Label>
                 <Input id="pol-grace" type="number" min={1} max={90} value={form.graceDays} onChange={(e) => setForm({ ...form, graceDays: e.target.value })} />

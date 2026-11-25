@@ -28,7 +28,7 @@ export default async function WorkHomePage() {
     <div className="flex flex-col gap-6">
       <PageHeader title="Work" description="Every product board and what's in flight." />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile label="Open items" value={open} sub={`${sum("backlog")} waiting in backlogs`} />
         <StatTile label="In progress" value={sum("in_progress")} sub={`${sum("in_review")} in review`} />
         <StatTile

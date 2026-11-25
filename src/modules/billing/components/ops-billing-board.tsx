@@ -272,7 +272,7 @@ export function OpsBillingBoard(p: BillingBoardProps) {
       </div>
 
       {/* Summary */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
         <StatTile label="Clients" value={p.tenants.length} sub={`${tenantsWithProduct} with a live product`} href={OPS.clients} />
         <StatTile label="MRR" value={formatCents(p.stats.mrrCents)} sub={`${p.stats.liveSubscriptions} live · ${p.stats.trialing} trialing`} href={OPS.subscriptions} />
         <StatTile label="Collected to date" value={formatCents(collectedCents)} sub={`${p.invoices.filter((i) => i.status === "paid").length} paid invoices`} />
@@ -527,8 +527,8 @@ export function OpsBillingBoard(p: BillingBoardProps) {
         <InvoicesTable invoices={p.invoices} showClient />
       </Section>
 
-      <NewInvoiceDialog key={invoiceFor?.id ?? "none"} target={invoiceFor} onOpenChange={(o) => !o && setInvoiceFor(null)} />
-      <HostingFeeDialog key={hostingFor?.id ?? "none"} target={hostingFor} onOpenChange={(o) => !o && setHostingFor(null)} />
+      <NewInvoiceDialog key={`invoice:${invoiceFor?.id ?? "none"}`} target={invoiceFor} onOpenChange={(o) => !o && setInvoiceFor(null)} />
+      <HostingFeeDialog key={`hosting:${hostingFor?.id ?? "none"}`} target={hostingFor} onOpenChange={(o) => !o && setHostingFor(null)} />
     </div>
   );
 }

@@ -118,7 +118,7 @@ export default async function OpsHomePage() {
     <div className="flex flex-col gap-6">
       <PageHeader title="Command Center" description="What needs attention across every client." />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatTile label="MRR" value={formatCents(billing.mrrCents)} href={OPS.billing} sub={`${billing.liveSubscriptions} live · ${billing.trialing} trialing`} />
         <StatTile
           label="Past-due AR"

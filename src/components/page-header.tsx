@@ -9,6 +9,7 @@ export function PageHeader({
   title,
   description,
   back,
+  crumbs,
   badge,
   meta,
   actions,
@@ -18,6 +19,8 @@ export function PageHeader({
   description?: React.ReactNode;
   /** Detail pages only: "← Clients". */
   back?: { href: string; label: string };
+  /** Breadcrumb row above the title (replaces `back`): "Projects / Fixorata". */
+  crumbs?: React.ReactNode;
   /** A <StatusBadge/> next to the title. */
   badge?: React.ReactNode;
   /** Muted inline facts: "acme · 3 members". */
@@ -29,7 +32,8 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      {back && (
+      {crumbs}
+      {!crumbs && back && (
         <Link
           href={back.href}
           className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

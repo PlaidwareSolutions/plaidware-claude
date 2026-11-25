@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getBacklogView, listSprints } from "@/modules/work/queries";
 import { parseBoardFilters } from "@/modules/work/contracts";
 import { BacklogList } from "@/modules/work/components/backlog/backlog-list";
@@ -22,6 +22,8 @@ export default async function BacklogPage({
   const { slug } = await params;
   const { board, viewer } = await loadBoard(slug);
   if (!board) notFound();
+  // A kanban board shows its backlog as the first board column.
+  if (board.mode === "kanban") redirect(WORK.board(slug));
   const filters = parseBoardFilters(await searchParams);
   const [view, sprints] = await Promise.all([getBacklogView(board.id, viewer, filters), board.mode === "sprints" ? listSprints(board.id) : Promise.resolve([])]);
   if (!view) notFound();

@@ -18,10 +18,17 @@ const row: CardRow = {
   labels: ["auth"],
   dueOn: "2026-09-30",
   commentCount: 2,
+  flaggedAt: null,
+  flagReason: null,
+  resolution: null,
+  epicId: "e1",
+  epicNumber: 7,
+  epicTitle: "Auth revamp",
   createdAt: new Date("2026-09-01T10:00:00Z"),
   updatedAt: new Date("2026-09-02T10:00:00Z"),
   requesterTenantId: "org_acme",
   requesterTenantName: "ACME Corp",
+  coverId: null,
 };
 const dev = { userId: "u9", isOps: false, tenantIds: [] };
 /** A developer an ops admin added to the ACME workspace. */

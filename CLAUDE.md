@@ -21,7 +21,8 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
 - **No internal REST.** UI uses server actions + RSC queries. Only external
   contracts get route handlers: `/api/auth/[...all]`, `/api/system/health`,
   `/api/metrics/ingest`, `/api/webhooks/stripe`, `/api/partners/*` (MHub
-  feed + Partner API v1).
+  feed + Partner API v1), and `/api/work/attachments/[id]` (images in work
+  item rich text — `<img src>` needs a URL; uploads stay a server action).
 - **Authorization**: everything goes through `src/policy/` (requireUser,
   requireOps(min), requireMembership, getTenantContext/requireTenantPage for
   client pages). Never inline role checks. Pure decision logic lives in
@@ -129,6 +130,13 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   `billingUrl` for partner-only clients (`billingPageUrlFor`). Fixorata
   pricing = 30-day trial + $35/mo (seed; existing DBs:
   scripts/align-fixorata-pricing.ts).
+- User reports → work tickets (2026-11): `POST /api/partners/v1/work-items`
+  (+ `GET /work-items/:ref`) files an app user's bug/feedback/idea on the
+  app's product board (FIXO), deduped by `partner_work_items` (app,
+  external_ref). Body never names the client (pure rules in
+  `partners/work-intake-logic.ts`); a linked shop becomes the ops-only requester.
+  Board Settings → "Reports from partner apps" (`work_boards.report_assignee_user_id`)
+  assigns new report tickets to one person, who is emailed like any assignment.
 - Ops: `/ops/system/partners` (apps, secret rotation, keys — shown once).
   Smokes: scripts/smoke-partner-billing.ts, smoke-partner-webhooks.ts
   (+ smoke-webhooks.ts for MHub regressions).
@@ -201,6 +209,45 @@ is the build contract: https://claude.ai/code/artifact/ad8d5bea-3a28-4633-a74f-4
   kanban's optimistic move and the fresh tree land in one transition; client
   code in this module uses `useAction(…, { refresh: false })`. Drag and drop is
   `@dnd-kit` (explicit `DndContext id` to avoid hydration mismatches).
+- Ticket actions (2026-11, Jira's Link / Clone / Move / Attach): `work_item_links`
+  (stored outward: source blocks/duplicates/clones target; "relates" one row,
+  the mirror refused; phrases + picker in `link-logic.ts`); clone =
+  `service.cloneItem` (same board, "CLONE - …", optional attachments/links,
+  requester copied only for ops, linked "clones"); move = `moveItemToBoard`
+  (next key on the target board, sprint + epic cleared, epic with children
+  refused) with `work_item_aliases` so old keys redirect (item page + quick
+  view via `resolveMovedItem`); attachments = `work_attachments.item_id`
+  (null = inline rich-text image), files by extension allowlist up to 10 MB
+  (`attachment-logic.fileAttachmentType`), only verified images served inline
+  — everything else `Content-Disposition: attachment`. Server actions body
+  limit is 11mb for this. Delete: uploader or ops admin.
+- JQL search (2026-11): `/work/search?jql=…` (`WORK.search`, sidebar "Search
+  (JQL)"). `jql-logic.ts` (pure, tested): tokenizer, parser (AND/OR/NOT,
+  parens, IN, IS [NOT] EMPTY, ~, ORDER BY), field registry `JQL_FIELDS`
+  (aliases, operators, enum synonyms like Highest→urgent), relative dates
+  (-7d, startOfWeek()), autocomplete `jqlSuggest`, `filtersToJql` (the board
+  toolbar's "JQL" / "Switch to JQL"). `queries.searchWorkByJql` resolves names
+  in one batch (unknown → error with position), compiles to parameterised SQL,
+  caps at 500; `client` is ops-only (parser refuses it for developers).
+  Results reuse `ExplorerList` with `jql` (headers rewrite ORDER BY).
+- Card ⋯ menu (2026-11, `components/board/card-menu.tsx`): Move work item ›
+  (top/up/down/bottom = `service.rankInColumn`), Change status ›, Copy link /
+  key, flag, Add label, Link work item (reuses `LinkForm`), Change parent,
+  Select cover › (`work_items.cover_attachment_id`, one of the item's own
+  images, shown on the card), Remove from sprint. Epics/images/labels load
+  lazily via `cardMenuDataAction`. Dialogs spread `shield` so clicks/keys
+  don't reach the draggable card.
+- The bell (2026-11): `work_notifications` rows are written inside
+  `service.recordEvent` (`notifyInApp`) for the same people as the emails
+  (`notify-logic.recipientsFor`; wording `inAppSummary`), with a comment
+  excerpt. `NotificationBell` in the top bar (work users, not view-as) polls
+  `myNotificationsAction` every 30s/on focus; opening an item reads its
+  notifications (`useReadItemNotifications`); pruned hourly by work.notify
+  (read > 30 days, any > 90).
+- Mobile (2026-11): `DataTableShell` tables render as labelled cards under
+  640px (`TableCardLabels` copies header text to `data-label`; CSS at the end
+  of globals.css). Stat grids are `grid-cols-2` on phones. The ticket view puts
+  status + Details (collapsed on phones) right under the summary.
 
 ## Deployment (Railway project "plaidware-hub")
 

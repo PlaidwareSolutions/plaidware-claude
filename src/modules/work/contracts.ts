@@ -5,31 +5,39 @@ import { z } from "zod";
  * contracts below and every picker in the UI — nothing else lists a status.
  */
 export const WORK_BOARD_MODES = ["kanban", "sprints"] as const;
-export const WORK_ITEM_TYPES = ["feature", "enhancement", "bug", "task"] as const;
+/** "epic" groups other items (their parent); epics stay off the board, like Jira. */
+export const WORK_ITEM_TYPES = ["feature", "enhancement", "bug", "task", "epic"] as const;
 export const WORK_ITEM_STATUSES = ["backlog", "todo", "in_progress", "in_review", "done", "canceled"] as const;
 export const WORK_ITEM_PRIORITIES = ["urgent", "high", "medium", "low"] as const;
 export const WORK_ITEM_SOURCES = ["internal", "client_request", "incident"] as const;
+/** How a Done item was resolved (Jira's Resolution), asked for on the move to Done. */
+export const WORK_RESOLUTIONS = ["done", "fixed", "wont_do", "duplicate", "cannot_reproduce"] as const;
 export const WORK_SPRINT_STATUSES = ["planned", "active", "completed"] as const;
 /** The kanban columns; backlog is a list, canceled items only show on the item page. */
 export const BOARD_COLUMNS = ["todo", "in_progress", "in_review", "done"] as const;
 export const SPRINT_LENGTHS = [7, 14] as const;
 export const CARRY_OVER = ["next", "backlog"] as const;
+/** Jira's issue link types, stored from the outward side (A blocks B, A duplicates B, A clones B; relates is symmetric). */
+export const WORK_LINK_TYPES = ["blocks", "relates", "duplicates", "clones"] as const;
 
 export type WorkBoardMode = (typeof WORK_BOARD_MODES)[number];
 export type WorkItemType = (typeof WORK_ITEM_TYPES)[number];
 export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
 export type WorkItemPriority = (typeof WORK_ITEM_PRIORITIES)[number];
 export type WorkItemSource = (typeof WORK_ITEM_SOURCES)[number];
+export type WorkResolution = (typeof WORK_RESOLUTIONS)[number];
 export type WorkSprintStatus = (typeof WORK_SPRINT_STATUSES)[number];
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
 export type SprintLength = (typeof SPRINT_LENGTHS)[number];
 export type CarryOver = (typeof CARRY_OVER)[number];
+export type WorkLinkType = (typeof WORK_LINK_TYPES)[number];
 
 const uuid = z.uuid();
 const userId = z.string().min(1);
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 const title = z.string().trim().min(1).max(200);
-const description = z.string().max(20_000);
+/** Editor HTML (or plain text); sanitised and normalised by the service. */
+const description = z.string().max(100_000);
 const estimate = z.number().int().min(0).max(100);
 const label = z
   .string()
@@ -53,9 +61,23 @@ export const createItemSchema = z.object({
   labels: labels.default([]),
   dueOn: isoDay.nullable().optional(),
   source: z.enum(WORK_ITEM_SOURCES).default("internal"),
+  /** The epic this item belongs to (same board; not for epics). */
+  parentId: uuid.nullable().optional(),
 });
 export type CreateItemInput = z.input<typeof createItemSchema>;
 export type CreateItem = z.output<typeof createItemSchema>;
+
+/** Inline create on a board column: product by slug, straight into that column. */
+export const quickCreateItemSchema = z.object({
+  productSlug: z.string().regex(/^[a-z0-9-]{1,80}$/),
+  title,
+  status: z.enum(["backlog", "todo", "in_progress", "in_review", "done"]),
+  type: z.enum(WORK_ITEM_TYPES).default("task"),
+  priority: z.enum(WORK_ITEM_PRIORITIES).default("medium"),
+  assigneeUserId: userId.nullable().optional(),
+  parentId: uuid.nullable().optional(),
+});
+export type QuickCreateItemInput = z.input<typeof quickCreateItemSchema>;
 
 export const itemPatchSchema = z.object({
   title: title.optional(),
@@ -80,15 +102,39 @@ export const moveItemSchema = z.object({
   status: z.enum(WORK_ITEM_STATUSES),
   prevId: uuid.nullable().optional(),
   nextId: uuid.nullable().optional(),
+  /** Moving to Done: the resolution (defaults to "done") and an optional comment, from the transition screen. */
+  resolution: z.enum(WORK_RESOLUTIONS).optional(),
+  comment: z.string().max(50_000).optional(),
 });
 export type MoveItemInput = z.input<typeof moveItemSchema>;
 
 export const assignItemSchema = z.object({ itemId: uuid, assigneeUserId: userId.nullable() });
 export const setItemSprintSchema = z.object({ itemId: uuid, sprintId: uuid.nullable() });
 export const setItemRequesterSchema = z.object({ itemId: uuid, requesterTenantId: z.string().min(1).nullable() });
+export const setItemParentSchema = z.object({ itemId: uuid, parentId: uuid.nullable() });
+export const setWatchingSchema = z.object({ itemId: uuid, watching: z.boolean() });
 
-const commentBody = z.string().trim().min(1).max(5000);
-export const commentSchema = z.object({ itemId: uuid, body: commentBody });
+/** Link this item to another: `direction` says which side this item is on ("outward": this blocks that). */
+export const addItemLinkSchema = z.object({
+  itemId: uuid,
+  otherItemId: uuid,
+  type: z.enum(WORK_LINK_TYPES),
+  direction: z.enum(["outward", "inward"]).default("outward"),
+});
+export const cloneItemSchema = z.object({
+  itemId: uuid,
+  title: z.string().trim().min(1).max(300),
+  includeAttachments: z.boolean().default(true),
+  includeLinks: z.boolean().default(true),
+});
+export const moveItemToBoardSchema = z.object({ itemId: uuid, targetSlug: z.string().regex(/^[a-z0-9-]{1,80}$/) });
+
+/** Jira's flag: an impediment marker with an optional reason. */
+export const setItemFlagSchema = z.object({ itemId: uuid, flagged: z.boolean(), reason: z.string().trim().max(500).optional() });
+
+const commentBody = z.string().trim().min(1).max(50_000);
+/** parentId: replying to a comment (a reply to a reply joins the same thread). */
+export const commentSchema = z.object({ itemId: uuid, body: commentBody, parentId: uuid.nullable().optional() });
 export const editCommentSchema = z.object({ commentId: uuid, body: commentBody });
 
 const sprintFields = {
@@ -125,6 +171,8 @@ export const boardSettingsSchema = z.object({
   mode: z.enum(WORK_BOARD_MODES),
   sprintLengthDays: z.union([z.literal(7), z.literal(14)]),
   wipLimits: z.partialRecord(z.enum(BOARD_COLUMNS), z.number().int().min(1).max(99)).default({}),
+  /** Assignee for tickets filed from partner apps' user reports; null = unassigned. */
+  reportAssigneeUserId: userId.nullable().default(null),
 });
 export type BoardSettingsInput = z.input<typeof boardSettingsSchema>;
 export type BoardSettings = z.output<typeof boardSettingsSchema>;

@@ -1,5 +1,5 @@
-import { STATUS_LABELS } from "./transitions";
-import type { WorkItemStatus } from "./contracts";
+import { RESOLUTION_LABELS, STATUS_LABELS } from "./transitions";
+import type { WorkItemStatus, WorkResolution } from "./contracts";
 
 /**
  * Every work-item event `kind` the service writes, with the label and group
@@ -16,9 +16,18 @@ const KINDS: Record<string, { label: string; group: WorkEventGroup }> = {
   assignee_changed: { label: "Assignee changed", group: "people" },
   sprint_changed: { label: "Sprint changed", group: "planning" },
   requester_changed: { label: "Requesting client changed", group: "lifecycle" },
+  flag_added: { label: "Flag added", group: "flow" },
+  flag_removed: { label: "Flag removed", group: "flow" },
+  parent_changed: { label: "Epic changed", group: "planning" },
   comment_added: { label: "Commented", group: "discussion" },
+  mentioned: { label: "Mentioned people", group: "discussion" },
   comment_edited: { label: "Comment edited", group: "discussion" },
   comment_deleted: { label: "Comment deleted", group: "discussion" },
+  link_added: { label: "Linked", group: "planning" },
+  link_removed: { label: "Link removed", group: "planning" },
+  item_moved: { label: "Moved", group: "lifecycle" },
+  attachment_added: { label: "Attached a file", group: "discussion" },
+  attachment_removed: { label: "Removed a file", group: "discussion" },
 };
 
 /** Events that name a client; queries drop them for developers. item_created never carries the requester. */
@@ -58,7 +67,15 @@ export function describeWorkEvent(kind: string, payload: Record<string, unknown>
       return fields.length ? fields.join(", ") : null;
     }
     case "status_changed":
-      return `${statusLabel(payload.before)} → ${statusLabel(payload.after)}${reason}`;
+      return `${statusLabel(payload.before)} → ${statusLabel(payload.after)}${str(payload.resolution) ? ` (${RESOLUTION_LABELS[str(payload.resolution) as WorkResolution] ?? str(payload.resolution)})` : ""}${reason}`;
+    case "parent_changed":
+      return `${ref(payload.before) ?? "no epic"} → ${ref(payload.after) ?? "no epic"}`;
+    case "flag_added":
+      return str(payload.reason);
+    case "mentioned": {
+      const n = Array.isArray(payload.userIds) ? payload.userIds.length : 0;
+      return `${n} ${n === 1 ? "person" : "people"} in ${str(payload.commentId) ? "a comment" : "the description"}`;
+    }
     case "priority_changed":
       return `${str(payload.before) ?? "?"} → ${str(payload.after) ?? "?"}`;
     case "assignee_changed":
@@ -67,6 +84,16 @@ export function describeWorkEvent(kind: string, payload: Record<string, unknown>
       return `${ref(payload.before) ?? "no sprint"} → ${ref(payload.after) ?? "no sprint"}${reason}`;
     case "requester_changed":
       return `${ref(payload.before) ?? "none"} → ${ref(payload.after) ?? "none"}`;
+    case "link_added":
+    case "link_removed":
+      return [str(payload.phrase), ref(payload.other)].filter(Boolean).join(" ") || null;
+    case "item_moved": {
+      const cleared = [payload.clearedSprint ? "sprint" : null, payload.clearedEpic ? "epic" : null].filter(Boolean);
+      return `${str(payload.from) ?? "?"} → ${str(payload.to) ?? "?"}${cleared.length ? ` · ${cleared.join(" and ")} cleared` : ""}`;
+    }
+    case "attachment_added":
+    case "attachment_removed":
+      return str(payload.fileName);
     default:
       return null;
   }

@@ -5,6 +5,7 @@ import type {
   WorkItemSource,
   WorkItemStatus,
   WorkItemType,
+  WorkResolution,
   WorkSprintStatus,
 } from "./contracts";
 import { OPS_ONLY_EVENT_KINDS } from "./event-kinds";
@@ -31,6 +32,25 @@ export function canSeeTenant(viewer: WorkViewer, tenantId: string | null | undef
   return viewer.isOps || (!!tenantId && viewer.tenantIds.includes(tenantId));
 }
 export type WorkUserRef = { id: string; name: string };
+/** An epic as other items point at it. */
+export type WorkEpicRef = { id: string; key: string; title: string };
+
+/** Another item, as a link target or a linked item (titles only — never client data). */
+export type WorkLinkTargetDto = { id: string; key: string; number: number; title: string; status: WorkItemStatus; type: WorkItemType; slug: string };
+/** One link read from this item's side: "blocks", "is blocked by", "relates to"… */
+export type WorkItemLinkDto = { id: string; phrase: string; item: WorkLinkTargetDto };
+/** A file in the item's Attachments section. */
+export type WorkAttachmentDto = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  createdAt: string;
+  uploader: WorkUserRef | null;
+  url: string;
+  /** A verified image: shown as a thumbnail and previewed inline. */
+  isImage: boolean;
+};
 
 export type WorkCardDto = {
   id: string;
@@ -49,6 +69,14 @@ export type WorkCardDto = {
   labels: string[];
   dueOn: string | null;
   commentCount: number;
+  /** Jira's flag: set when the item is impeded (reason optional). */
+  flag: { at: string; reason: string | null } | null;
+  /** How a Done item was resolved; null while open. */
+  resolution: WorkResolution | null;
+  /** The card cover image (an attached image), or null. */
+  coverUrl: string | null;
+  /** The epic it belongs to (Jira's parent), same board. */
+  epic: WorkEpicRef | null;
   createdAt: string;
   updatedAt: string;
   /**
@@ -75,10 +103,17 @@ export type CardRow = {
   labels: string[];
   dueOn: string | null;
   commentCount: number;
+  flaggedAt: Date | null;
+  flagReason: string | null;
+  resolution: WorkResolution | null;
+  epicId: string | null;
+  epicNumber: number | null;
+  epicTitle: string | null;
   createdAt: Date;
   updatedAt: Date;
   requesterTenantId: string | null;
   requesterTenantName: string | null;
+  coverId: string | null;
 };
 
 export function toCardDto(row: CardRow, viewer: WorkViewer): WorkCardDto {
@@ -98,6 +133,10 @@ export function toCardDto(row: CardRow, viewer: WorkViewer): WorkCardDto {
     labels: row.labels,
     dueOn: row.dueOn,
     commentCount: row.commentCount,
+    flag: row.flaggedAt ? { at: row.flaggedAt.toISOString(), reason: row.flagReason } : null,
+    resolution: row.resolution,
+    coverUrl: row.coverId ? `/api/work/attachments/${row.coverId}` : null,
+    epic: row.epicId && row.epicNumber != null ? { id: row.epicId, key: formatKey(row.keyPrefix, row.epicNumber), title: row.epicTitle ?? "" } : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -164,6 +203,8 @@ function eventTenantIds(payload: unknown): string[] {
 
 export type WorkCommentDto = {
   id: string;
+  /** Set on a reply: its thread's top-level comment. */
+  parentId: string | null;
   body: string;
   author: WorkUserRef | null;
   createdAt: string;
@@ -174,6 +215,7 @@ export type WorkCommentDto = {
 
 export type CommentRow = {
   id: string;
+  parentId?: string | null;
   body: string;
   authorId: string | null;
   authorName: string | null;
@@ -184,6 +226,7 @@ export type CommentRow = {
 export function toCommentDto(row: CommentRow, viewer: WorkViewer): WorkCommentDto {
   return {
     id: row.id,
+    parentId: row.parentId ?? null,
     body: row.body,
     author: row.authorId ? { id: row.authorId, name: row.authorName ?? "" } : null,
     createdAt: row.createdAt.toISOString(),
@@ -258,6 +301,7 @@ export type WorkBoardDto = {
   mode: WorkBoardMode;
   sprintLengthDays: number;
   wipLimits: Partial<Record<WorkItemStatus, number>>;
+  reportAssigneeUserId: string | null;
   activeSprint: WorkSprintDto | null;
   counts: { backlog: number; open: number; plannedSprints: number };
 };
@@ -279,6 +323,23 @@ export type WorkBoardViewDto = {
   labels: string[];
 };
 
+/** A product on the cross-product board: filter option, lane, and where "Create" puts an item. */
+export type WorkExplorerProduct = WorkProductRef & { boardId: string; keyPrefix: string; mode: WorkBoardMode };
+
+export type WorkExplorerViewDto = {
+  /** Every card matching the filters, in product → rank order. */
+  cards: (WorkCardDto & { product: WorkProductRef })[];
+  products: WorkExplorerProduct[];
+  /** Epics of the companies in scope (the Epic filter and lanes). */
+  epics: (WorkEpicRef & { productSlug: string })[];
+  /** Ops: clients that have items; a developer: their own workspaces. */
+  clients: { id: string; name: string }[];
+  assignees: WorkUserRef[];
+  labels: string[];
+  /** Board view only: done older than this many days has dropped off. */
+  doneWindowDays: number;
+};
+
 export type WorkBacklogViewDto = {
   plannedSprints: { sprint: WorkSprintDto; cards: WorkCardDto[] }[];
   unscheduled: WorkCardDto[];
@@ -298,6 +359,16 @@ export type WorkItemDetailDto = WorkCardDto & {
   events: WorkEventDto[];
   assignees: WorkUserRef[];
   sprints: Pick<WorkSprintDto, "id" | "number" | "name" | "status">[];
+  /** The board's epics (the Parent picker). */
+  epics: WorkEpicRef[];
+  /** For an epic: its child items, in status order. */
+  children: WorkCardDto[];
+  /** Who gets this item's emails (Jira's watchers). */
+  watchers: WorkUserRef[];
+  links: WorkItemLinkDto[];
+  attachments: WorkAttachmentDto[];
+  /** Boards the item can move to (every product, this one included; the UI leaves it out). */
+  moveTargets: { slug: string; name: string; keyPrefix: string }[];
 };
 
 export type WorkOverviewRow = {

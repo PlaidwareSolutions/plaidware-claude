@@ -128,7 +128,7 @@ export function CostsView({
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:grid-cols-3">
         <StatTile label={`Hosting cost · ${formatMonth(month)}`} value={totals.costCents != null ? formatCents(totals.costCents) : "—"} sub={`${apps.length} hosted app${apps.length === 1 ? "" : "s"}`} />
         <StatTile label="Revenue (paid invoices)" value={formatCents(totals.revenueCents)} />
         <StatTile label="Gross margin" value={marginPct != null ? `${marginPct}%` : "—"} tone={marginPct == null ? "default" : marginPct >= 70 ? "success" : marginPct >= 40 ? "warning" : "danger"} sub={totals.costCents == null ? "no cost data yet" : undefined} />

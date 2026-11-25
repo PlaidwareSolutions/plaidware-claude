@@ -1,11 +1,14 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
+  customType,
   date,
   index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -17,8 +20,10 @@ import {
   WORK_BOARD_MODES,
   WORK_ITEM_PRIORITIES,
   WORK_ITEM_SOURCES,
+  WORK_RESOLUTIONS,
   WORK_ITEM_STATUSES,
   WORK_ITEM_TYPES,
+  WORK_LINK_TYPES,
   WORK_SPRINT_STATUSES,
   type WorkItemStatus,
 } from "./contracts";
@@ -35,7 +40,9 @@ export const workItemType = pgEnum("work_item_type", WORK_ITEM_TYPES);
 export const workItemStatus = pgEnum("work_item_status", WORK_ITEM_STATUSES);
 export const workItemPriority = pgEnum("work_item_priority", WORK_ITEM_PRIORITIES);
 export const workItemSource = pgEnum("work_item_source", WORK_ITEM_SOURCES);
+export const workResolution = pgEnum("work_resolution", WORK_RESOLUTIONS);
 export const workSprintStatus = pgEnum("work_sprint_status", WORK_SPRINT_STATUSES);
+export const workLinkType = pgEnum("work_link_type", WORK_LINK_TYPES);
 
 /** One board per product; created lazily on first visit (service.ensureBoard). */
 export const workBoards = pgTable("work_boards", {
@@ -50,6 +57,8 @@ export const workBoards = pgTable("work_boards", {
   sprintLengthDays: integer("sprint_length_days").notNull().default(14),
   /** Soft limits per board column, e.g. { in_progress: 3 }. The UI warns; nothing blocks. */
   wipLimits: jsonb("wip_limits").$type<Partial<Record<WorkItemStatus, number>>>().notNull().default({}),
+  /** Who a partner app's user reports (POST /work-items) are assigned to; null = unassigned. */
+  reportAssigneeUserId: text("report_assignee_user_id").references(() => user.id, { onDelete: "set null" }),
   /** Monotonic counters, claimed with UPDATE … RETURNING inside the insert transaction. */
   nextItemNumber: integer("next_item_number").notNull().default(1),
   nextSprintNumber: integer("next_sprint_number").notNull().default(1),
@@ -117,6 +126,16 @@ export const workItems = pgTable(
     reporterUserId: text("reporter_user_id").references(() => user.id, { onDelete: "set null" }),
     sprintId: uuid("sprint_id").references(() => workSprints.id, { onDelete: "set null" }),
     source: workItemSource("source").notNull().default("internal"),
+    /** The epic this item belongs to (an item of type "epic" on the same board). */
+    parentId: uuid("parent_id").references((): AnyPgColumn => workItems.id, { onDelete: "set null" }),
+    /** Set on the move to Done (transition screen), cleared when reopened. */
+    resolution: workResolution("resolution"),
+    /** Jira's card cover: one of the item's attached images, shown on top of the card. */
+    coverAttachmentId: uuid("cover_attachment_id").references((): AnyPgColumn => workAttachments.id, { onDelete: "set null" }),
+    /** Jira's flag (impediment); the reason is optional. */
+    flaggedAt: timestamp("flagged_at"),
+    flaggedByUserId: text("flagged_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    flagReason: text("flag_reason"),
     /** OPS-ONLY. Never leaves queries.ts for a developer viewer (dto.ts is the single gate). */
     requesterTenantId: text("requester_tenant_id").references(() => organization.id, { onDelete: "set null" }),
     labels: jsonb("labels").$type<string[]>().notNull().default([]),
@@ -135,6 +154,7 @@ export const workItems = pgTable(
     index("work_items_assignee_status_idx").on(t.assigneeUserId, t.status),
     index("work_items_sprint_idx").on(t.sprintId),
     index("work_items_requester_idx").on(t.requesterTenantId),
+    index("work_items_parent_idx").on(t.parentId),
   ],
 );
 
@@ -146,6 +166,8 @@ export const workComments = pgTable(
       .notNull()
       .references(() => workItems.id, { onDelete: "cascade" }),
     authorUserId: text("author_user_id").references(() => user.id, { onDelete: "set null" }),
+    /** A reply's top-level comment (one level, Jira-style); deleting it leaves the replies as comments. */
+    parentCommentId: uuid("parent_comment_id").references((): AnyPgColumn => workComments.id, { onDelete: "set null" }),
     body: text("body").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     editedAt: timestamp("edited_at"),
@@ -165,6 +187,133 @@ export const workItemEvents = pgTable(
     kind: text("kind").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    /** Set once the worker has handled the event's email notifications (notify-service.ts). */
+    notifiedAt: timestamp("notified_at"),
   },
-  (t) => [index("work_item_events_item_time_idx").on(t.itemId, t.createdAt)],
+  (t) => [
+    index("work_item_events_item_time_idx").on(t.itemId, t.createdAt),
+    index("work_item_events_unnotified_idx").on(t.createdAt).where(sql`${t.notifiedAt} is null`),
+  ],
+);
+
+/**
+ * Who hears about an item by email (Jira's watchers): added automatically
+ * when someone reports, is assigned, comments or is mentioned, and toggled
+ * by the Watch button.
+ */
+export const workWatchers = pgTable(
+  "work_watchers",
+  {
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.itemId, t.userId] }), index("work_watchers_user_idx").on(t.userId)],
+);
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+/**
+ * Images pasted or uploaded into descriptions and comments, served by
+ * /api/work/attachments/[id] to work-area users only. Bytes live in Postgres
+ * (small screenshots; the upload action caps size and checks the file
+ * signature). Not tied to an item: an image can be added before the item exists.
+ */
+export const workAttachments = pgTable(
+  "work_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    /** Set for files in an item's Attachments section; null for images inside rich text. */
+    itemId: uuid("item_id").references(() => workItems.id, { onDelete: "cascade" }),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    fileName: text("file_name"),
+    data: bytea("data").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("work_attachments_uploader_idx").on(t.uploadedByUserId), index("work_attachments_item_idx").on(t.itemId)],
+);
+
+/**
+ * Jira's issue links, stored from the outward side: source blocks /
+ * duplicates / clones target; "relates" is symmetric (one row either way,
+ * the service refuses the mirror). Both ends cascade.
+ */
+export const workItemLinks = pgTable(
+  "work_item_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceItemId: uuid("source_item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    targetItemId: uuid("target_item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    type: workLinkType("type").notNull(),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("work_item_links_uidx").on(t.sourceItemId, t.targetItemId, t.type),
+    index("work_item_links_target_idx").on(t.targetItemId),
+  ],
+);
+
+/**
+ * Keys an item had before it was moved to another board (FIXO-12 → PROP-3):
+ * the item page and quick view redirect an old key to where the item lives
+ * now. Board numbers only ever count up, so an old key is never reused.
+ */
+export const workItemAliases = pgTable(
+  "work_item_aliases",
+  {
+    boardId: uuid("board_id")
+      .notNull()
+      .references(() => workBoards.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.boardId, t.number] }), index("work_item_aliases_item_idx").on(t.itemId)],
+);
+
+/**
+ * In-app notifications (the bell): one row per person per event they should
+ * hear about — the same people the emails go to (notify-logic.recipientsFor),
+ * written as the event is recorded. Read when clicked, when the item is
+ * opened, or with "Mark all as read".
+ */
+export const workNotifications = pgTable(
+  "work_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").references(() => workItemEvents.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    /** assigned | mentioned | assignee | watching (notify-logic.NotifyReason). */
+    reason: text("reason").notNull(),
+    actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    /** A comment's or description's first words, plain text. */
+    excerpt: text("excerpt"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    readAt: timestamp("read_at"),
+  },
+  (t) => [
+    index("work_notifications_user_created_idx").on(t.userId, t.createdAt),
+    index("work_notifications_user_unread_idx").on(t.userId).where(sql`${t.readAt} is null`),
+    index("work_notifications_item_idx").on(t.itemId),
+  ],
 );

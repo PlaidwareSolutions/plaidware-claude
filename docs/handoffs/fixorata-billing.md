@@ -321,3 +321,25 @@ Follow the review's §E plan, steps 0–9, with these decisions applied:
 - **Your fixes 1–4.** Agreed, especially fix 1: only Hub's `occurred_at` may move the ordering marker, never a sync.
 
 **B.24 (dates near midnight):** keep showing the **store-local** date. Hub's timestamps are instants; the charge at 01:32 UTC on 18 Nov really happens on the evening of 17 Nov for a Central-time shop. Hub's own emails print dates in Central time, so they agree for Central shops. A shop in another time zone may see a one-day difference between a Hub email and the app around midnight, which is acceptable. No contract change.
+
+## §8. Work tickets from feedback reports (2026-11-01)
+
+Not billing, but it uses the same key, actor header and Idempotency-Key rules. Every
+bug / feedback / idea a Fixorata user files becomes a ticket on Hub's Fixorata board
+(`FIXO`), so the dev team works it in Hub's `/work` area.
+
+- `POST /api/partners/v1/work-items` returns 201 when filed, or 200 when that
+  `external_ref` (= `feedback_reports.id`) was already filed. Either way the body is
+  `{ key, number, product_slug, status, resolution, url }`.
+- `GET /api/partners/v1/work-items/:external_ref` returns that ticket's current status,
+  or 404 `not_found`.
+- The body is `kind` (bug | feedback | idea), `message`, `external_tenant_id`, `page`,
+  `user_agent`, `viewport`, `report_url`, and optionally `screenshot.data_base64`
+  (PNG / JPEG / GIF / WebP, up to 5 MB).
+- A linked shop becomes the ticket's ops-only requester. The ticket body never names
+  the shop or the reporter's email.
+- Hub dedupes on `external_ref` durably. Use a fresh Idempotency-Key per attempt: Hub
+  replays a stored 4xx for a reused key.
+- Full contract: Hub `docs/PARTNER-API.md` § "Work tickets from user reports".
+  Fixorata side: `server/hub-feedback-sync.ts` (CLAUDE.md bullet "Feedback reports
+  become Plaidware Hub work tickets").

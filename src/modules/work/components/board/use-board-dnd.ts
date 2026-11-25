@@ -58,3 +58,12 @@ function subscribeReducedMotion(cb: () => void) {
 export function useReducedMotion(): boolean {
   return useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia(REDUCED_MOTION).matches, () => false);
 }
+
+let lastDragEnd = 0;
+/** Called when a drag ends, so the click that finishes it doesn't also open the card. */
+export function markDragEnd() {
+  lastDragEnd = Date.now();
+}
+export function wasJustDragged(): boolean {
+  return Date.now() - lastDragEnd < 250;
+}

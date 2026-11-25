@@ -47,7 +47,7 @@ export function OpsMonitoringBoard({ board }: { board: MonitoringBoard }) {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatTile label="Monitored sites" value={board.stats.monitored} sub="live subscriptions with a domain" />
         <StatTile label="Open incidents" value={board.stats.incidents} tone={board.stats.incidents ? "danger" : "success"} />
         <StatTile label="Quiet reporters" value={board.stats.quiet} tone={board.stats.quiet ? "warning" : "default"} />

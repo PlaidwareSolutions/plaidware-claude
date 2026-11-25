@@ -53,7 +53,7 @@ export function ProductDefaultsForm({
         description="Seeded onto each new provisioning row (and filled in by Configure verification). Existing subscriptions keep what they have."
         card
       >
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid items-start gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
             <Label htmlFor="d-cname">Expected CNAME</Label>
             <Input id="d-cname" value={form.cname} onChange={(e) => setForm({ ...form, cname: e.target.value })} placeholder={platform.expectedCname ?? "edge.railway.app"} />

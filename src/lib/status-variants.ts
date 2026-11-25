@@ -4,7 +4,7 @@
  */
 import { PLATFORM_ROLES, PLATFORM_ROLE_META, TENANT_ROLES, TENANT_ROLE_META } from "./roles";
 
-export type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
+export type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info";
 
 export type StatusKind =
   | "tenant"
@@ -154,18 +154,19 @@ const MAP: Record<StatusKind, Record<string, Entry>> = {
     support: { variant: "warning", label: "ops view-as" },
   },
   workItem: {
-    backlog: { variant: "outline" },
+    backlog: { variant: "secondary" },
     todo: { variant: "secondary", label: "to do" },
-    in_progress: { variant: "default", label: "in progress" },
-    in_review: { variant: "warning", label: "in review" },
+    in_progress: { variant: "info", label: "in progress" },
+    in_review: { variant: "info", label: "in review" },
     done: { variant: "success" },
-    canceled: { variant: "outline" },
+    canceled: { variant: "secondary" },
   },
   workType: {
     feature: { variant: "default" },
     enhancement: { variant: "secondary" },
     bug: { variant: "destructive" },
     task: { variant: "outline" },
+    epic: { variant: "default" },
   },
   workPriority: {
     urgent: { variant: "destructive" },

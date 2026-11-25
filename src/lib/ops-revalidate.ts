@@ -33,6 +33,7 @@ export function revalidateUserViews(userId: string) {
 export function revalidateWorkViews(slug?: string, number?: number) {
   revalidatePath(WORK.home);
   revalidatePath(WORK.my);
+  revalidatePath(WORK.all);
   if (slug) revalidatePath(WORK.board(slug), "layout");
   if (slug && number != null) revalidatePath(WORK.item(slug, number));
 }

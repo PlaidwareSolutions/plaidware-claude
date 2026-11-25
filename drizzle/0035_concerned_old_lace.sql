@@ -1,0 +1,2 @@
+ALTER TABLE "work_comments" ADD COLUMN "parent_comment_id" uuid;--> statement-breakpoint
+ALTER TABLE "work_comments" ADD CONSTRAINT "work_comments_parent_comment_id_work_comments_id_fk" FOREIGN KEY ("parent_comment_id") REFERENCES "public"."work_comments"("id") ON DELETE set null ON UPDATE no action;

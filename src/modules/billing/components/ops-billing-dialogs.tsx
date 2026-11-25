@@ -133,7 +133,7 @@ export function NewInvoiceDialog({ target, onOpenChange }: DialogProps<TenantTar
           <Button variant="outline" size="sm" className="w-fit" onClick={() => setLines([...lines, { name: "", amount: "" }])}>
             Add line
           </Button>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             {collect !== "paid_offline" && (
               <div className="grid gap-2">
                 <Label>Days until due</Label>
@@ -241,7 +241,7 @@ export function RecordPaymentDialog({ target, onOpenChange }: DialogProps<Invoic
           <DialogTitle>Record payment — {target?.invoiceNumber}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label>Amount (USD)</Label>
               <Input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
@@ -262,7 +262,7 @@ export function RecordPaymentDialog({ target, onOpenChange }: DialogProps<Invoic
               </Select>
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label>Reference (check #, confirmation…)</Label>
               <Input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
@@ -353,7 +353,7 @@ export function HostingFeeDialog({ target, onOpenChange }: DialogProps<HostingTa
               </p>
             )
           )}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label>Monthly fee (USD)</Label>
               <Input placeholder="79.00" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
